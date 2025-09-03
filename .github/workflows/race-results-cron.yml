@@ -2,30 +2,100 @@ name: Race Results Cron Job
 
 on:
   schedule:
-    # Run every 5 minutes
-    - cron: '*/5 * * * *'
-  workflow_dispatch: # Allow manual runs
+    - cron: "*/5 * * * *"   # runs every 5 minutes (UTC)
+  workflow_dispatch:
+  push:
+    branches: [ main, feature/sanity-check ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: race-results-cron
+  cancel-in-progress: false   # let an active run finish; next one queues
 
 jobs:
-  race-results-cron:
+  trigger-race-results:
     runs-on: ubuntu-latest
-    
+    env:
+      SUPABASE_FUNCTION_URL: ${{ secrets.SUPABASE_FUNCTION_URL }} # e.g. https://<proj>.supabase.co/functions/v1/race-results-scheduler
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
     steps:
-    - name: Run Race Results Scheduler
-      run: |
-        echo "Starting race results cron job at $(date)"
-        
-        # Call the race results scheduler
-        RESPONSE=$(curl -s -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/race-results-scheduler \
-          -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-          -H "Content-Type: application/json")
-        
-        echo "Response: $RESPONSE"
-        
-        # Check if the response indicates success
-        if echo "$RESPONSE" | grep -q '"success":true'; then
-          echo "✅ Cron job completed successfully"
-        else
-          echo "❌ Cron job failed"
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trigger Race Results Processing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+          echo "Starting race results cron job at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          # 3 attempts with backoff (5s, 10s)
+          attempt=0
+          max_attempts=3
+          delay=5
+
+          while (( attempt < max_attempts )); do
+            attempt=$((attempt+1))
+            echo "Attempt ${attempt}/${max_attempts}..."
+
+            # Call the Edge Function
+            # --fail-with-body: non-2xx -> exit 22 but still print body
+            # --max-time: hard cap to avoid hanging runners
+            # -sS: silent but show errors
+            # -w: print HTTP status marker on last line for extraction
+            RESPONSE="$(curl -sS --fail-with-body --max-time 30 \
+              -X POST "${SUPABASE_FUNCTION_URL}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -d '{}' \
+              -w "\nHTTP_STATUS:%{http_code}")" && CURL_OK=1 || CURL_OK=0
+
+            HTTP_STATUS="$(printf '%s' "$RESPONSE" | awk -FHTTP_STATUS: 'NF>1{print $2}' | tr -d '\r\n')"
+            BODY="$(printf '%s' "$RESPONSE" | sed '/HTTP_STATUS:/d')"
+
+            echo "HTTP Status: ${HTTP_STATUS:-<none>}"
+            echo "Raw Response: ${BODY}"
+
+            # If curl failed outright, retry
+            if [[ $CURL_OK -ne 1 ]]; then
+              echo "curl failed; retrying in ${delay}s..."
+              sleep "${delay}"
+              delay=$((delay*2))
+              continue
+            fi
+
+            # Accept 200 OK only; adjust if your function returns 202, etc.
+            if [[ "${HTTP_STATUS}" != "200" ]]; then
+              echo "Function returned HTTP ${HTTP_STATUS}; retrying in ${delay}s..."
+              sleep "${delay}"
+              delay=$((delay*2))
+              continue
+            fi
+
+            # Parse JSON safely
+            PROCESSED_COUNT="$(printf '%s' "$BODY" | jq -r 'try .processed_count // 0')"
+            MESSAGE="$(printf '%s' "$BODY" | jq -r 'try .message // empty')"
+
+            echo "Message: ${MESSAGE:-<none>}"
+            echo "Processed count: ${PROCESSED_COUNT}"
+
+            if [[ "${PROCESSED_COUNT}" -gt 0 ]]; then
+              echo "🎉 Races were processed!"
+            else
+              echo "⏰ No races ready or already processed."
+            fi
+
+            # Success path
+            exit 0
+          done
+
+          echo "❌ All attempts failed."
           exit 1
-        fi
