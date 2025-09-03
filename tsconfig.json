@@ -13,6 +13,12 @@
     "paths": {
       "@/*": ["./src/*"]
     }
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".next",
+    "src/app/**",
+    "src/pages/api/**"
+  ]
 }
-
