@@ -53,6 +53,8 @@ Deno.serve(async (req) => {
 
         const raceData = await apiResponse.json();
         console.log('Received race data:', raceData);
+        console.log('Runners data:', raceData.runners);
+        console.log('Number of runners:', raceData.runners ? raceData.runners.length : 'No runners array');
 
         // Check if we already have results for this race
         const existingResultResponse = await fetch(
@@ -116,7 +118,7 @@ Deno.serve(async (req) => {
         };
 
         const insertRaceResultResponse = await fetch(
-            `${supabaseUrl}/rest/v1/race_results`,
+            `${supabaseUrl}/rest/v1/race_results`,  // Use race_results table (Supabase)
             {
                 method: 'POST',
                 headers: {
@@ -138,33 +140,37 @@ Deno.serve(async (req) => {
         const insertedRaceResult = await insertRaceResultResponse.json();
         const raceResultId = insertedRaceResult[0].id;
         console.log('Inserted race result with ID:', raceResultId);
-
+        console.log('Full inserted race result:', JSON.stringify(insertedRaceResult, null, 2));
+        
         // Insert runners
+        let runnersInserted = 0;
         if (raceData.runners && Array.isArray(raceData.runners)) {
-            for (const runner of raceData.runners) {
+            console.log(`Processing ${raceData.runners.length} runners for race ${race_id}`);
+            
+            for (const runner of raceData.runners || []) {
                 const runnerData = {
-                    race_result_id: raceResultId,
+                    race_id: raceData.race_id,   // <- foreign key to race_results.race_id
                     horse_id: runner.horse_id,
                     horse: runner.horse,
                     sp: runner.sp,
-                    sp_dec: runner.sp_dec ? parseFloat(runner.sp_dec) : null,
-                    number: runner.number ? parseInt(runner.number) : null,
-                    position: runner.position ? parseInt(runner.position) : null,
-                    draw: runner.draw ? parseInt(runner.draw) : null,
-                    btn: runner.btn ? parseFloat(runner.btn) : null,
-                    ovr_btn: runner.ovr_btn ? parseFloat(runner.ovr_btn) : null,
-                    age: runner.age ? parseInt(runner.age) : null,
+                    sp_dec: runner.sp_dec && runner.sp_dec !== '' ? parseFloat(runner.sp_dec) : null,
+                    number: runner.number && runner.number !== '' ? parseInt(runner.number) : null,
+                    position: runner.position && runner.position !== '' ? parseInt(runner.position) : null,
+                    draw: runner.draw && runner.draw !== '' ? parseInt(runner.draw) : null,
+                    btn: runner.btn && runner.btn !== '' ? parseFloat(runner.btn) : null,
+                    ovr_btn: runner.ovr_btn && runner.ovr_btn !== '' ? parseFloat(runner.ovr_btn) : null,
+                    age: runner.age,
                     sex: runner.sex,
                     weight: runner.weight,
-                    weight_lbs: runner.weight_lbs ? parseInt(runner.weight_lbs) : null,
+                    weight_lbs: runner.weight_lbs && runner.weight_lbs !== '' ? parseInt(runner.weight_lbs) : null,
                     headgear: runner.headgear,
                     time: runner.time,
-                    or: runner.or ? parseInt(runner.or) : null,
-                    rpr: runner.rpr ? parseInt(runner.rpr) : null,
-                    tsr: runner.tsr ? parseInt(runner.tsr) : null,
-                    prize: runner.prize ? parseFloat(runner.prize) : null,
+                    or_rating: runner.or && runner.or !== '' ? parseInt(runner.or) : null,
+                    rpr: runner.rpr && runner.rpr !== '' ? parseInt(runner.rpr) : null,
+                    tsr: runner.tsr && runner.tsr !== '' ? parseInt(runner.tsr) : null,
+                    prize: runner.prize && runner.prize !== '' ? parseFloat(runner.prize) : null,
                     jockey: runner.jockey,
-                    jockey_claim_lbs: runner.jockey_claim_lbs ? parseInt(runner.jockey_claim_lbs) : 0,
+                    jockey_claim_lbs: runner.jockey_claim_lbs && runner.jockey_claim_lbs !== '' ? parseInt(runner.jockey_claim_lbs) : 0,
                     jockey_id: runner.jockey_id,
                     trainer: runner.trainer,
                     trainer_id: runner.trainer_id,
@@ -187,7 +193,8 @@ Deno.serve(async (req) => {
                         headers: {
                             'Authorization': `Bearer ${serviceRoleKey}`,
                             'apikey': serviceRoleKey,
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=representation'
                         },
                         body: JSON.stringify(runnerData)
                     }
@@ -195,10 +202,18 @@ Deno.serve(async (req) => {
 
                 if (!insertRunnerResponse.ok) {
                     const errorText = await insertRunnerResponse.text();
-                    console.error('Failed to insert runner:', errorText);
-                    // Continue with other runners even if one fails
+                    console.error(`❌ Failed to insert runner ${runner.horse}:`, errorText);
+                } else {
+                    const inserted = await insertRunnerResponse.json();
+                    console.log(`✅ Inserted runner: ${runner.horse}`, inserted);
+                    runnersInserted++;
                 }
             }
+            
+            console.log(`Inserted ${runnersInserted} out of ${raceData.runners.length} runners`);
+        } else {
+            console.warn(`No runners data found for race ${race_id}`);
+            console.warn('Race data keys:', Object.keys(raceData));
         }
 
         // Update bet results using the database function
@@ -226,7 +241,8 @@ Deno.serve(async (req) => {
             success: true,
             message: 'Race results fetched and processed successfully',
             race_id: race_id,
-            runners_count: raceData.runners ? raceData.runners.length : 0
+            runners_count: raceData.runners ? raceData.runners.length : 0,
+            runners_inserted: runnersInserted
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -248,3 +264,4 @@ Deno.serve(async (req) => {
         });
     }
 });
+

@@ -4,54 +4,28 @@ on:
   schedule:
     # Run every 5 minutes
     - cron: '*/5 * * * *'
-  workflow_dispatch: # Allow manual triggering
-  push:
-    branches: [ main, feature/sanity-check ]
+  workflow_dispatch: # Allow manual runs
 
 jobs:
-  trigger-race-results:
+  race-results-cron:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Trigger Race Results Processing
-        run: |
-          echo "Starting race results cron job at $(date)"
-          
-          # Call the race results scheduler directly (bypassing cron system)
-          RESPONSE=$(curl -s -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/race-results-scheduler \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -H "Content-Type: application/json" \
-            -w "\nHTTP_STATUS:%{http_code}")
-          
-          # Extract HTTP status and response body
-          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
-          RESPONSE_BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS:/d')
-          
-          echo "HTTP Status: $HTTP_STATUS"
-          echo "Response: $RESPONSE_BODY"
-          
-          # Check if successful
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo "✅ Race results scheduler completed successfully"
-            
-            # Check if races were processed
-            if echo "$RESPONSE_BODY" | grep -q '"processed_count":[1-9]'; then
-              echo "🎉 Races were processed!"
-              
-              # Extract processed count if available
-              PROCESSED_COUNT=$(echo "$RESPONSE_BODY" | grep -o '"processed_count":[0-9]*' | cut -d: -f2)
-              if [ -n "$PROCESSED_COUNT" ]; then
-                echo "📊 Processed $PROCESSED_COUNT races"
-              fi
-            else
-              echo "⏰ No races ready for processing (or all already processed)"
-            fi
-          else
-            echo "❌ Race results scheduler failed (HTTP $HTTP_STATUS)"
-            echo "Error details: $RESPONSE_BODY"
-            exit 1
-          fi
-        env:
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    - name: Run Race Results Scheduler
+      run: |
+        echo "Starting race results cron job at $(date)"
+        
+        # Call the race results scheduler
+        RESPONSE=$(curl -s -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/race-results-scheduler \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+          -H "Content-Type: application/json")
+        
+        echo "Response: $RESPONSE"
+        
+        # Check if the response indicates success
+        if echo "$RESPONSE" | grep -q '"success":true'; then
+          echo "✅ Cron job completed successfully"
+        else
+          echo "❌ Cron job failed"
+          exit 1
+        fi
