@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { X, TrendingUp, TrendingDown, Minus, Star, Bot, Trophy, Clock, Target, Info, Heart, Check, Loader2 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RaceEntry, supabase } from '@/lib/supabase'
+import { RaceEntry, supabase, callSupabaseFunction } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { OverviewTab, FormTab } from './HorseDetailTabs'
 import { ConnectionsTab, PredictionsTab } from './HorseDetailTabsExtra'
@@ -111,28 +111,16 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
         trainer_name: trainerName
       })
 
-      const { data, error } = await supabase.functions.invoke('add-to-shortlist', {
-        body: {
-          horse_name: horseName,
-          race_time: raceTime,
-          course: course,
-          current_odds: odds || 'N/A',
-          source: source,
-          jockey_name: jockeyName || null,
-          trainer_name: trainerName || null,
-          ml_info: 'Selected from Today\'s Races'
-        }
+      const data = await callSupabaseFunction('add-to-shortlist', { 
+        horse_name: horseName, 
+        race_time: raceTime, 
+        course, 
+        current_odds: odds || 'N/A', 
+        source, 
+        jockey_name: jockeyName || null, 
+        trainer_name: trainerName || null, 
+        ml_info: "Selected from Today's Races" 
       })
-      
-      if (error) {
-        console.error('Supabase function error:', error)
-        throw new Error(error.message || 'Failed to add to shortlist')
-      }
-      
-      if (!data?.success) {
-        console.error('API response error:', data?.error)
-        throw new Error(data?.error?.message || 'Failed to add to shortlist')
-      }
       
       console.log('Successfully added to shortlist:', data)
       return data
