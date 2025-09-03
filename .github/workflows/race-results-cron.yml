@@ -19,8 +19,8 @@ jobs:
         run: |
           echo "Starting race results cron job at $(date)"
           
-          # Call the simple cron checker
-          RESPONSE=$(curl -s -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/simple-cron-checker \
+          # Call the race results scheduler directly (bypassing cron system)
+          RESPONSE=$(curl -s -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/race-results-scheduler \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
             -w "\nHTTP_STATUS:%{http_code}")
@@ -34,11 +34,11 @@ jobs:
           
           # Check if successful
           if [ "$HTTP_STATUS" = "200" ]; then
-            echo "✅ Cron job completed successfully"
+            echo "✅ Race results scheduler completed successfully"
             
-            # Check if race results were processed
-            if echo "$RESPONSE_BODY" | grep -q '"scheduler_result"'; then
-              echo "🎉 Race results were processed!"
+            # Check if races were processed
+            if echo "$RESPONSE_BODY" | grep -q '"processed_count":[1-9]'; then
+              echo "🎉 Races were processed!"
               
               # Extract processed count if available
               PROCESSED_COUNT=$(echo "$RESPONSE_BODY" | grep -o '"processed_count":[0-9]*' | cut -d: -f2)
@@ -46,10 +46,11 @@ jobs:
                 echo "📊 Processed $PROCESSED_COUNT races"
               fi
             else
-              echo "⏰ No races ready for processing"
+              echo "⏰ No races ready for processing (or all already processed)"
             fi
           else
-            echo "❌ Cron job failed (HTTP $HTTP_STATUS)"
+            echo "❌ Race results scheduler failed (HTTP $HTTP_STATUS)"
+            echo "Error details: $RESPONSE_BODY"
             exit 1
           fi
         env:
