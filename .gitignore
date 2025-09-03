@@ -1,0 +1,27 @@
+.DS_Store
+
+# Node / Vite
+node_modules/
+dist/
+coverage/
+
+# Editors
+.vscode/
+.idea/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Vercel
+.vercel/
+
+# Supabase local state
+supabase/.temp
+supabase/.branches
+supabase/.env
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
