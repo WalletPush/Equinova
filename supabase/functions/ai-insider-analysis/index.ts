@@ -29,6 +29,7 @@ Deno.serve(async (req) => {
         const specialistsQuery = `
             SELECT 
                 re.horse_id,
+                re.race_id,
                 h.name as horse_name,
                 r.course_name,
                 r.distance,
@@ -85,6 +86,7 @@ Deno.serve(async (req) => {
                     t.name as trainer_name,
                     COUNT(*) as runner_count,
                     ARRAY_AGG(re.horse_id) as horse_ids,
+                    ARRAY_AGG(re.race_id) as race_ids,
                     ARRAY_AGG(h.name) as horse_names
                 FROM races r
                 JOIN race_entries re ON r.race_id = re.race_id
@@ -98,6 +100,7 @@ Deno.serve(async (req) => {
                 trainer_id,
                 trainer_name,
                 horse_ids[1] as horse_id,
+                race_ids[1] as race_id,
                 horse_names[1] as horse_name,
                 'Single runner shows trainer intent' as analysis_note,
                 'High' as confidence
@@ -130,41 +133,77 @@ Deno.serve(async (req) => {
         console.log(`Found ${trainerIntents.length} single runner situations`);
 
         // 3. MARKET MOVEMENTS
-        // For now, create some realistic market movement examples based on the horses we have
+        // Get real market movement data from race_entries with horse_id and race_id
         console.log('Generating market movement alerts...');
         
-        const marketMovements = [
+        const marketMovementsQuery = `
+            SELECT 
+                re.horse_id,
+                re.race_id,
+                h.name as horse_name,
+                r.course_name,
+                re.current_odds,
+                re.opening_odds,
+                CASE 
+                    WHEN re.current_odds IS NOT NULL AND re.opening_odds IS NOT NULL 
+                    AND re.opening_odds > 0 THEN
+                        ROUND(((re.current_odds - re.opening_odds) / re.opening_odds) * 100, 1)
+                    ELSE 0
+                END as percentage_change,
+                CASE 
+                    WHEN re.current_odds IS NOT NULL AND re.opening_odds IS NOT NULL 
+                    AND re.opening_odds > 0 THEN
+                        CASE 
+                            WHEN re.current_odds < re.opening_odds THEN 'Odds Drift'
+                            WHEN re.current_odds > re.opening_odds THEN 'Market Support'
+                            ELSE 'Stable'
+                        END
+                    ELSE 'No Movement'
+                END as alert_type,
+                CASE 
+                    WHEN ABS(percentage_change) >= 20 THEN 'High'
+                    WHEN ABS(percentage_change) >= 10 THEN 'Medium'
+                    ELSE 'Low'
+                END as confidence
+            FROM race_entries re
+            JOIN races r ON re.race_id = r.race_id
+            LEFT JOIN horses h ON re.horse_id = h.horse_id
+            WHERE r.date >= CURRENT_DATE
+            AND re.current_odds IS NOT NULL 
+            AND re.opening_odds IS NOT NULL
+            AND re.opening_odds > 0
+            AND re.current_odds != re.opening_odds
+            ORDER BY ABS(percentage_change) DESC
+            LIMIT 10;
+        `;
+
+        const marketMovementsResponse = await fetch(
+            `${supabaseUrl}/rest/v1/rpc/execute_query`,
             {
-                horse_name: "Four Adaay",
-                course: "Ffos Las",
-                movement: "moved from 9/2 to 3/1",
-                confidence: "High",
-                percentage_change: "-25%",
-                alert_type: "Odds Drift"
-            },
-            {
-                horse_name: "Sundiata Keita", 
-                course: "Ffos Las",
-                movement: "moved from 12/1 to 8/1",
-                confidence: "Medium",
-                percentage_change: "+33%",
-                alert_type: "Market Support"
-            },
-            {
-                horse_name: "Desert Master",
-                course: "Newcastle", 
-                movement: "moved from 15/1 to 10/1",
-                confidence: "Medium",
-                percentage_change: "+50%",
-                alert_type: "Late Money"
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${serviceRoleKey}`,
+                    'apikey': serviceRoleKey,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ query: marketMovementsQuery })
             }
-        ];
+        );
+
+        let marketMovements = [];
+        if (marketMovementsResponse.ok) {
+            const marketData = await marketMovementsResponse.json();
+            marketMovements = Array.isArray(marketData) ? marketData : [];
+        }
+
+        console.log(`Found ${marketMovements.length} market movements`);
 
         // Compile results
         const result = {
             data: {
                 courseSpecialists: specialists.map(s => ({
                     horse_id: s.horse_id,
+                    race_id: s.race_id,
                     horse_name: s.horse_name || `Horse ${s.horse_id}`,
                     course_name: s.course_name,
                     distance: s.distance,
@@ -176,12 +215,24 @@ Deno.serve(async (req) => {
                     trainer_id: t.trainer_id,
                     trainer_name: t.trainer_name,
                     horse_id: t.horse_id,
+                    race_id: t.race_id,
                     horse_name: t.horse_name || `Horse ${t.horse_id}`,
                     course: t.course_name,
                     confidence: t.confidence,
                     analysis: t.analysis_note
                 })),
-                marketAlerts: marketMovements,
+                marketAlerts: marketMovements.map(m => ({
+                    horse_id: m.horse_id,
+                    race_id: m.race_id,
+                    horse_name: m.horse_name || `Horse ${m.horse_id}`,
+                    course: m.course_name,
+                    current_odds: m.current_odds,
+                    opening_odds: m.opening_odds,
+                    percentage_change: m.percentage_change,
+                    alert_type: m.alert_type,
+                    confidence: m.confidence,
+                    movement: `${m.percentage_change > 0 ? '+' : ''}${m.percentage_change}%`
+                })),
                 summary: {
                     totalSpecialists: specialists.length,
                     totalTrainerIntents: trainerIntents.length,
@@ -191,8 +242,10 @@ Deno.serve(async (req) => {
                 debug: {
                     specialists_query_success: specialistsResponse.ok,
                     trainer_query_success: trainerIntentResponse.ok,
+                    market_query_success: marketMovementsResponse.ok,
                     raw_specialists_count: specialists.length,
-                    raw_trainer_intents_count: trainerIntents.length
+                    raw_trainer_intents_count: trainerIntents.length,
+                    raw_market_movements_count: marketMovements.length
                 }
             }
         };

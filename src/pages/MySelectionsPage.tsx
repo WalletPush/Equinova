@@ -24,18 +24,16 @@ import {
 } from 'lucide-react'
 
 interface UserSelection {
-  id: number
-  race_entry_id: string
+  id: string
+  user_id: string
   horse_name: string
   horse_id?: string
-  race_id: string
+  race_id?: string
   race_time: string
   course_name: string
   jockey_name?: string
   trainer_name?: string
   current_odds?: string
-  selection_date: string
-  status: 'upcoming' | 'past'
   notes?: string
   created_at: string
   updated_at: string
@@ -49,9 +47,10 @@ interface SelectionCounts {
 
 export function MySelectionsPage() {
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming')
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [bettingSelection, setBettingSelection] = useState<UserSelection | null>(null)
   const [betAmount, setBetAmount] = useState('')
+  const [betsPlaced, setBetsPlaced] = useState<Set<string>>(new Set())
   const { user } = useAuth()
   const queryClient = useQueryClient()
 
@@ -69,19 +68,21 @@ export function MySelectionsPage() {
         sortOrder: activeTab === 'upcoming' ? 'asc' : 'desc'
       })
       
+      console.log(`MySelectionsPage - Tab: ${activeTab}, Data:`, data)
+      
       return {
         selections: data.data || [],
         counts: data.counts || { upcoming: 0, past: 0, total: 0 }
       }
     },
     enabled: !!user,
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    staleTime: 0, // Force refetch every time
     retry: 3
   })
 
   // Remove selection mutation
   const removeSelectionMutation = useMutation({
-    mutationFn: async (selectionId: number) => {
+    mutationFn: async (selectionId: string) => {
       if (!user) {
         throw new Error('User not authenticated')
       }
@@ -91,7 +92,9 @@ export function MySelectionsPage() {
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-selections'] })
+      // Invalidate both upcoming and past queries
+      queryClient.invalidateQueries({ queryKey: ['user-selections', 'upcoming'] })
+      queryClient.invalidateQueries({ queryKey: ['user-selections', 'past'] })
       setDeletingId(null)
     },
     onError: (error) => {
@@ -119,28 +122,36 @@ export function MySelectionsPage() {
         }
       }
 
-      // CORRECTED: Pass simplified parameters for database lookup
+      // CORRECTED: Pass all available data for database lookup
       const data = await callSupabaseFunction('place-bet', {
         horse_name: selection.horse_name,
+        horse_id: selection.horse_id,
+        race_id: selection.race_id,
         course: selection.course_name,
         off_time: selection.race_time,
+        trainer_name: selection.trainer_name,
+        jockey_name: selection.jockey_name,
+        current_odds: selection.current_odds,
         bet_amount: amount,
         odds: oddsValue
       })
       
       return data
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['user-bankroll'] })
       setBettingSelection(null)
       setBetAmount('')
+      // Add the selection to bets placed
+      const selectionKey = `${variables.selection.horse_name}-${variables.selection.course_name}-${variables.selection.race_time}`
+      setBetsPlaced(prev => new Set([...prev, selectionKey]))
     },
     onError: (error) => {
       console.error('Error placing bet:', error)
     }
   })
 
-  const handleRemoveSelection = async (selectionId: number) => {
+  const handleRemoveSelection = async (selectionId: string) => {
     setDeletingId(selectionId)
     try {
       await removeSelectionMutation.mutateAsync(selectionId)
@@ -204,8 +215,56 @@ export function MySelectionsPage() {
     return selectionDate === today
   }
 
+  // Client-side filtering function
+  const isRaceFinished = (selection: UserSelection): boolean => {
+    try {
+      // Check if it's from yesterday
+      const selectionDate = new Date(selection.created_at).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const currentDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const yesterdayDate = new Date(new Date().getTime() - 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      
+      if (selectionDate === yesterdayDate) {
+        return true; // Yesterday's races are definitely finished
+      }
+      
+      if (selectionDate !== currentDate) {
+        return false; // Future dates are not finished
+      }
+      
+      // For today's races, compare time
+      const currentTime = new Date().toLocaleTimeString('en-GB', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: 'Europe/London',
+        hour12: false
+      });
+      
+      const raceTimeFormatted = selection.race_time.substring(0, 5);
+      const [hours, minutes] = raceTimeFormatted.split(':').map(Number);
+      
+      // Convert 12-hour to 24-hour format
+      let adjustedHours = hours;
+      if (hours >= 1 && hours <= 11) {
+        adjustedHours = hours + 12;
+      }
+      
+      const adjustedRaceTime = `${adjustedHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+      
+      return adjustedRaceTime <= currentTime;
+    } catch (error) {
+      console.error('Error checking race finish time:', error);
+      return false; // Default to not finished if we can't parse
+    }
+  }
+
   const selections = selectionsData?.selections || []
   const counts = selectionsData?.counts || { upcoming: 0, past: 0, total: 0 }
+
+  // Filter selections based on active tab
+  const filteredSelections = selections.filter((selection: UserSelection) => {
+    const isFinished = isRaceFinished(selection);
+    return activeTab === 'upcoming' ? !isFinished : isFinished;
+  });
 
   if (!user) {
     return (
@@ -305,7 +364,7 @@ export function MySelectionsPage() {
         )}
 
         {/* Empty State */}
-        {!isLoading && selections.length === 0 && (
+        {!isLoading && filteredSelections.length === 0 && (
           <div className="text-center py-12">
             <Heart className="w-12 h-12 text-gray-600 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-300 mb-2">
@@ -322,7 +381,7 @@ export function MySelectionsPage() {
 
         {/* Selections List */}
         <div className="space-y-3">
-          {selections.map((selection: UserSelection) => (
+          {filteredSelections.map((selection: UserSelection) => (
             <div
               key={selection.id}
               className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-4 hover:border-yellow-400/30 transition-all duration-200"
@@ -393,7 +452,7 @@ export function MySelectionsPage() {
                         <Calendar className="w-3 h-3" />
                         <span>Selected {formatDate(selection.created_at)}</span>
                       </div>
-                      {isToday(selection.selection_date) && (
+                      {isToday(selection.created_at) && (
                         <span className="bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded text-xs font-medium">
                           Today
                         </span>
@@ -402,16 +461,16 @@ export function MySelectionsPage() {
 
                     {/* Status Badge */}
                     <div className={`flex items-center space-x-1 px-2 py-1 rounded text-xs font-medium ${
-                      selection.status === 'upcoming'
+                      !isRaceFinished(selection)
                         ? 'bg-yellow-500/20 text-yellow-400'
                         : 'bg-gray-500/20 text-gray-400'
                     }`}>
-                      {selection.status === 'upcoming' ? (
+                      {!isRaceFinished(selection) ? (
                         <TrendingUp className="w-3 h-3" />
                       ) : (
                         <CheckCircle className="w-3 h-3" />
                       )}
-                      <span className="capitalize">{selection.status}</span>
+                      <span className="capitalize">{!isRaceFinished(selection) ? 'upcoming' : 'finished'}</span>
                     </div>
                   </div>
 
@@ -423,16 +482,32 @@ export function MySelectionsPage() {
                   )}
 
                   {/* Place Bet Button - Moved to Bottom */}
-                  {selection.status === 'upcoming' && (
+                  {!isRaceFinished(selection) && (
                     <div className="mt-3 pt-3 border-t border-gray-700">
-                      <button
-                        onClick={() => handlePlaceBet(selection)}
-                        className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-green-500/20 text-green-300 border border-green-500/40 rounded-lg hover:bg-green-500/30 hover:border-green-500/60 transition-all duration-200 text-sm font-semibold"
-                        title="Place bet on this selection"
-                      >
-                        <PoundSterling className="w-4 h-4" />
-                        <span>Place Bet</span>
-                      </button>
+                      {(() => {
+                        const selectionKey = `${selection.horse_name}-${selection.course_name}-${selection.race_time}`
+                        const hasBetPlaced = betsPlaced.has(selectionKey)
+                        
+                        if (hasBetPlaced) {
+                          return (
+                            <div className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-red-500/20 text-red-300 border border-red-500/40 rounded-lg text-sm font-semibold">
+                              <CheckCircle className="w-4 h-4" />
+                              <span>Bet Placed</span>
+                            </div>
+                          )
+                        }
+                        
+                        return (
+                          <button
+                            onClick={() => handlePlaceBet(selection)}
+                            className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-green-500/20 text-green-300 border border-green-500/40 rounded-lg hover:bg-green-500/30 hover:border-green-500/60 transition-all duration-200 text-sm font-semibold"
+                            title="Place bet on this selection"
+                          >
+                            <PoundSterling className="w-4 h-4" />
+                            <span>Place Bet</span>
+                          </button>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

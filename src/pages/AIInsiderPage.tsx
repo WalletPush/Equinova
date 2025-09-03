@@ -34,6 +34,8 @@ import {
 interface AIInsiderData {
   course_distance_specialists: {
     id: number
+    horse_id: string
+    race_id: string
     horse_name: string
     course: string
     distance: string
@@ -51,6 +53,8 @@ interface AIInsiderData {
   }[]
   trainer_intents: {
     id: number
+    horse_id: string
+    race_id: string
     horse_name: string
     trainer_name: string
     jockey_name?: string
@@ -67,6 +71,8 @@ interface AIInsiderData {
   }[]
   market_movers: {
     id: number
+    horse_id: string
+    race_id: string
     horse_name: string
     course: string
     off_time: string
@@ -559,7 +565,7 @@ export function AIInsiderPage() {
 
   // Add to shortlist mutation
   const addToShortlistMutation = useMutation({
-    mutationFn: async ({ horseName, raceTime, course, odds, source, jockeyName, trainerName, mlInfo }: {
+    mutationFn: async ({ horseName, raceTime, course, odds, source, jockeyName, trainerName, mlInfo, horseId, raceId }: {
       horseName: string
       raceTime: string
       course: string
@@ -568,6 +574,8 @@ export function AIInsiderPage() {
       jockeyName?: string
       trainerName?: string
       mlInfo?: string
+      horseId?: string
+      raceId?: string
     }) => {
       return await callSupabaseFunction('add-to-shortlist', {
         horse_name: horseName,
@@ -577,7 +585,9 @@ export function AIInsiderPage() {
         source: source,
         jockey_name: jockeyName || null,
         trainer_name: trainerName || null,
-        ml_info: mlInfo || null
+        ml_info: mlInfo || null,
+        horse_id: horseId || null,
+        race_id: raceId || null
       })
     },
     onSuccess: (data, variables) => {
@@ -633,7 +643,9 @@ export function AIInsiderPage() {
     source: 'value_bet' | 'trainer_intent' | 'market_mover',
     jockeyName?: string,
     trainerName?: string,
-    mlInfo?: string
+    mlInfo?: string,
+    horseId?: string,
+    raceId?: string
   ) => {
     const operationKey = horseName
     setShortlistOperations(prev => ({ ...prev, [operationKey]: true }))
@@ -652,7 +664,9 @@ export function AIInsiderPage() {
           source, 
           jockeyName, 
           trainerName, 
-          mlInfo 
+          mlInfo,
+          horseId,
+          raceId
         })
       }
     } catch (error) {
@@ -691,7 +705,9 @@ export function AIInsiderPage() {
     source,
     jockeyName,
     trainerName,
-    mlInfo
+    mlInfo,
+    horseId,
+    raceId
   }: {
     horseName: string
     raceTime: string
@@ -701,13 +717,15 @@ export function AIInsiderPage() {
     jockeyName?: string
     trainerName?: string
     mlInfo?: string
+    horseId?: string
+    raceId?: string
   }) => {
     const isInShortlist = isHorseInShortlist(horseName, course)
     const isLoading = shortlistOperations[horseName] || false
     
     return (
       <button
-        onClick={() => handleShortlistToggle(horseName, raceTime, course, odds, source, jockeyName, trainerName, mlInfo)}
+        onClick={() => handleShortlistToggle(horseName, raceTime, course, odds, source, jockeyName, trainerName, mlInfo, horseId, raceId)}
         disabled={isLoading}
         className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
           isInShortlist 
@@ -1298,6 +1316,8 @@ export function AIInsiderPage() {
                                         jockeyName={mover.jockey_name}
                                         trainerName={mover.trainer_name}
                                         mlInfo={`Movement: ${mover.odds_movement} (${mover.odds_movement_pct > 0 ? '+' : ''}${mover.odds_movement_pct}%)`}
+                                        horseId={mover.horse_id}
+                                        raceId={mover.race_id}
                                       />
                                     </div>
                                   </div>
@@ -1422,6 +1442,8 @@ export function AIInsiderPage() {
                                       jockeyName={bet.jockey_name}
                                       trainerName={bet.trainer_name}
                                       mlInfo={`ML: ${(bet.ensemble_proba * 100).toFixed(1)}% | Models: ${bet.top_in_models.join(', ')}`}
+                                      horseId={bet.horse_id}
+                                      raceId={race.race_id}
                                     />
                                   </div>
                                 </div>
@@ -1644,6 +1666,8 @@ export function AIInsiderPage() {
                                         jockeyName={intent.jockey_name}
                                         trainerName={intent.trainer_name}
                                         mlInfo={intent.is_single_runner ? `Single Runner Intent | Strike Rate: ${intent.strike_rate?.toFixed(1) || 'N/A'}%` : `Trainer Intent | Strike Rate: ${intent.strike_rate?.toFixed(1) || 'N/A'}%`}
+                                        horseId={intent.horse_id}
+                                        raceId={intent.race_id}
                                       />
                                     </div>
                                   </div>

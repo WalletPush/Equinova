@@ -31,6 +31,7 @@ interface ShortlistItem {
   horse_name: string
   race_time: string
   course: string
+  race_id?: string // Add race_id field
   current_odds?: string
   source: 'value_bet' | 'trainer_intent' | 'market_mover' | 'today_races'
   jockey_name?: string
@@ -49,24 +50,51 @@ export function ShortListPage() {
   const isRaceFinished = (raceTime: string): boolean => {
     try {
       const now = new Date()
-      const today = now.toISOString().split('T')[0]
       const currentTime = now.toLocaleTimeString('en-GB', { 
         hour: '2-digit', 
         minute: '2-digit',
-        timeZone: 'Europe/London' 
+        timeZone: 'Europe/London',
+        hour12: false // Use 24-hour format
       })
       
-      // Compare race time with current London time
-      // Assuming race times are for today unless specified otherwise
+      // Convert race time from 12-hour to 24-hour format
+      // Race times like "01:35" are actually 1:35 PM (13:35), not 1:35 AM
       const raceTimeFormatted = raceTime.substring(0, 5) // Get HH:MM format
+      const [hours, minutes] = raceTimeFormatted.split(':').map(Number)
       
-      // If race time has passed today, it's finished
-      return raceTimeFormatted < currentTime
+      // If hours are 01-11, they are PM times (add 12 hours)
+      // If hours are 12, it's 12 PM (keep as 12)
+      // If hours are 00, it's 12 AM (keep as 00)
+      let adjustedHours = hours
+      if (hours >= 1 && hours <= 11) {
+        adjustedHours = hours + 12 // Convert to PM
+      }
+      
+      const adjustedRaceTime = `${adjustedHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+      
+      console.log(`Race time: ${raceTime} -> ${adjustedRaceTime}, Current time: ${currentTime}`)
+      
+      // If adjusted race time has passed, it's finished
+      return adjustedRaceTime < currentTime
     } catch (error) {
       console.error('Error checking race finish time:', error)
       return false
     }
   }
+
+  // Cleanup finished races mutation
+  const cleanupFinishedRacesMutation = useMutation({
+    mutationFn: async () => {
+      return await callSupabaseFunction('cleanup-finished-races', {})
+    },
+    onSuccess: (data) => {
+      console.log('Cleanup completed:', data)
+      queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
+    },
+    onError: (error) => {
+      console.error('Cleanup failed:', error)
+    }
+  })
 
   // Fetch user's shortlist
   const { data: shortlistData, isLoading, error, refetch } = useQuery({
@@ -74,11 +102,8 @@ export function ShortListPage() {
     queryFn: async () => {
       const data = await callSupabaseFunction('get-shortlist', {})
       
-      // Filter out finished races automatically
-      const allShortlist = data?.data || []
-      const activeShortlist = allShortlist.filter((item: ShortlistItem) => !isRaceFinished(item.race_time))
-      
-      return activeShortlist
+      // Return all shortlist items without filtering
+      return data?.data || []
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
     retry: 2
@@ -92,13 +117,22 @@ export function ShortListPage() {
       course: string
     }) => {
       return await callSupabaseFunction('remove-from-shortlist', {
+        id: id,
         horse_name: horseName,
         course: course
       })
     },
     onSuccess: (data, variables) => {
-      console.log(`Removed ${variables.horseName} from shortlist`)
-      queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
+      console.log(`Removed ${variables.horseName} from shortlist, ID: ${variables.id}`)
+      console.log('Removed data:', data)
+      
+      // Update the cache directly instead of invalidating
+      queryClient.setQueryData(['userShortlist'], (oldData: ShortlistItem[] | undefined) => {
+        if (!oldData) return oldData
+        console.log('Updating cache, removing item with ID:', variables.id)
+        return oldData.filter(item => item.id !== variables.id)
+      })
+      
       setRemovingItems(prev => ({ ...prev, [variables.id]: false }))
     },
     onError: (error, variables) => {
@@ -110,6 +144,7 @@ export function ShortListPage() {
 
 
   const handleRemove = async (item: ShortlistItem) => {
+    console.log('Removing item with ID:', item.id, 'Horse:', item.horse_name, 'Course:', item.course)
     setRemovingItems(prev => ({ ...prev, [item.id]: true }))
     try {
       await removeFromShortlistMutation.mutateAsync({
@@ -332,7 +367,7 @@ export function ShortListPage() {
                           {raceGroup.items
                             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                             .map((item, index) => (
-                            <div key={item.id} className="bg-gray-700/50 rounded-lg p-4 relative">
+                            <div key={item.id} className={`bg-gray-700/50 rounded-lg p-4 relative ${isRaceFinished(item.race_time) ? 'opacity-60 border border-red-500/30' : ''}`}>
                               {/* Delete Button - Top Right */}
                               <button
                                 onClick={() => handleRemove(item)}
@@ -346,6 +381,13 @@ export function ShortListPage() {
                                   <Trash2 className="w-4 h-4" />
                                 )}
                               </button>
+
+                              {/* Finished Race Indicator */}
+                              {isRaceFinished(item.race_time) && (
+                                <div className="absolute top-3 left-3 bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded-full text-xs font-medium">
+                                  Race Finished
+                                </div>
+                              )}
 
                               <div className="flex items-center justify-between mb-2 pr-12">
                                 <div className="flex items-center space-x-3">
@@ -383,26 +425,29 @@ export function ShortListPage() {
                                     Saved
                                   </span>
                                 </div>
-                                
-                                {/* Add to Selections Button */}
-                                <AddToSelectionsButton
-                                  horseName={item.horse_name}
-                                  raceContext={{
-                                    race_id: `race_${item.course.replace(/\s+/g, '_')}_${item.race_time.replace(':', '')}`,
-                                    course_name: item.course,
-                                    off_time: item.race_time,
-                                    race_time: item.race_time
-                                  }}
-                                  odds={item.current_odds}
-                                  jockeyName={item.jockey_name}
-                                  trainerName={item.trainer_name}
-                                  size="normal"
-                                  customRaceEntryId={`shortlist_${item.id}_${item.horse_name.replace(/\s+/g, '_')}_${item.course.replace(/\s+/g, '_')}`}
-                                  onSuccess={() => {
-                                    console.log(`Successfully added ${item.horse_name} to selections from shortlist`)
-                                  }}
-                                />
                               </div>
+                              
+                                                              {/* Add to Selections Button - Bottom Left */}
+                                <div className="mt-3">
+                                  <AddToSelectionsButton
+                                    horseName={item.horse_name}
+                                    raceContext={{
+                                      race_id: `race_${item.course.replace(/\s+/g, '_')}_${item.race_time.replace(':', '')}`,
+                                      course_name: item.course,
+                                      off_time: item.race_time,
+                                      race_time: item.race_time
+                                    }}
+                                    odds={item.current_odds}
+                                    jockeyName={item.jockey_name}
+                                    trainerName={item.trainer_name}
+                                    size="normal"
+                                    customRaceEntryId={`shortlist_${item.id}_${item.horse_name.replace(/\s+/g, '_')}_${item.course.replace(/\s+/g, '_')}`}
+                                    raceId={item.race_id} // Pass the race_id from shortlist
+                                    onSuccess={() => {
+                                      console.log(`Successfully added ${item.horse_name} to selections from shortlist`)
+                                    }}
+                                  />
+                                </div>
                             </div>
                           ))}
                         </div>

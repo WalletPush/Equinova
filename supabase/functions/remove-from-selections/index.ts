@@ -13,13 +13,13 @@ Deno.serve(async (req) => {
 
     try {
         // Get request data
-        const { horse_name, course, id } = await req.json();
+        const { id } = await req.json();
 
-        console.log('Remove from shortlist request:', { horse_name, course, id });
+        console.log('Remove from selections request:', { id });
 
         // Validate required parameters
-        if (!id && (!horse_name || !course)) {
-            throw new Error('Missing required parameters: either id OR both horse_name and course are required');
+        if (!id) {
+            throw new Error('Missing required parameter: id is required');
         }
 
         // Get Supabase credentials
@@ -55,50 +55,44 @@ Deno.serve(async (req) => {
 
         console.log('User authenticated:', userId);
 
-        // Remove from shortlist
-        let deleteUrl: string;
-        if (id) {
-            // If id is provided, delete by specific id
-            deleteUrl = `${supabaseUrl}/rest/v1/shortlist?id=eq.${id}&user_id=eq.${userId}`;
-        } else {
-            // Fallback to old behavior: delete by horse_name and course
-            deleteUrl = `${supabaseUrl}/rest/v1/shortlist?user_id=eq.${userId}&horse_name=eq.${encodeURIComponent(horse_name)}&course=eq.${encodeURIComponent(course)}`;
-        }
-
-        const deleteResponse = await fetch(deleteUrl, {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${serviceRoleKey}`,
-                'apikey': serviceRoleKey,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
+        // Remove selection
+        const deleteResponse = await fetch(
+            `${supabaseUrl}/rest/v1/selections?id=eq.${id}&user_id=eq.${userId}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${serviceRoleKey}`,
+                    'apikey': serviceRoleKey,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=representation'
+                }
             }
-        });
+        );
 
         if (!deleteResponse.ok) {
             const errorText = await deleteResponse.text();
-            console.error('Failed to remove from shortlist:', errorText);
-            throw new Error(`Failed to remove horse from shortlist: ${errorText}`);
+            console.error('Failed to remove selection:', errorText);
+            throw new Error(`Failed to remove selection: ${errorText}`);
         }
 
         const deletedEntries = await deleteResponse.json();
-        console.log(`Removed ${deletedEntries.length} entries from shortlist${id ? ` (by id: ${id})` : ` (by horse: ${horse_name} at ${course})`}`);
+        console.log(`Successfully removed selection with ID: ${id}`);
 
         return new Response(JSON.stringify({
             success: true,
-            message: 'Horse removed from shortlist successfully',
+            message: 'Selection removed successfully',
             removedCount: deletedEntries.length
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
     } catch (error) {
-        console.error('Remove from shortlist error:', error);
+        console.error('Remove from selections error:', error);
 
         const errorResponse = {
             success: false,
             error: {
-                code: 'REMOVE_FROM_SHORTLIST_ERROR',
+                code: 'REMOVE_FROM_SELECTIONS_ERROR',
                 message: error.message
             }
         };

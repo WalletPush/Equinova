@@ -5,7 +5,7 @@ import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ShortlistButton } from '@/components/ShortlistButton'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
-import { supabase, Race } from '@/lib/supabase'
+import { supabase, Race, callSupabaseFunction } from '@/lib/supabase'
 import { 
   Clock, 
   MapPin, 
@@ -96,14 +96,7 @@ export function TodaysRacesPage() {
         return []
       }
 
-      const { data, error } = await supabase.functions.invoke('get-shortlist', {
-        body: {}
-      })
-      
-      if (error) {
-        console.error('Error fetching shortlist:', error)
-        return []
-      }
+      const data = await callSupabaseFunction('get-shortlist', {});
       
       return data?.data || []
     },

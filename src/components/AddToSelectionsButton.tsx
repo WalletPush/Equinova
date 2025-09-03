@@ -19,6 +19,7 @@ interface AddToSelectionsButtonProps {
   size?: 'normal' | 'small'
   onSuccess?: () => void
   customRaceEntryId?: string // Allow custom ID for shortlist items
+  raceId?: string // Add race_id from shortlist
 }
 
 export function AddToSelectionsButton({ 
@@ -29,7 +30,8 @@ export function AddToSelectionsButton({
   trainerName,
   size = 'normal',
   onSuccess,
-  customRaceEntryId
+  customRaceEntryId,
+  raceId
 }: AddToSelectionsButtonProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isAdded, setIsAdded] = useState(false)
@@ -41,17 +43,13 @@ export function AddToSelectionsButton({
     mutationFn: async () => {
       console.log('Adding to selections:', { horseName, raceContext })
       
-      // Create a unique race entry ID
       const raceTime = raceContext.race_time || raceContext.off_time
-      const raceEntryId = customRaceEntryId || `selection_${horseName.replace(/\s+/g, '_')}_${raceContext.course_name.replace(/\s+/g, '_')}_${raceTime.replace(/:/g, '')}`
       
       const payload = {
-        race_entry_id: raceEntryId,
         horse_name: horseName,
-        horse_id: horseName.toLowerCase().replace(/\s+/g, '_'),
-        race_id: raceContext.race_id || `race_${raceContext.course_name.replace(/\s+/g, '_')}_${raceTime.replace(/:/g, '')}`,
         race_time: raceTime,
         course_name: raceContext.course_name,
+        race_id: raceId || null, // Pass the race_id from shortlist
         jockey_name: jockeyName || null,
         trainer_name: trainerName || null,
         current_odds: odds ? String(odds) : null,
@@ -65,14 +63,9 @@ export function AddToSelectionsButton({
       console.log(`Added ${horseName} to selections successfully`)
       queryClient.invalidateQueries({ queryKey: ['user-selections'] })
       setIsAdded(true)
+      setIsLoading(false)
       setError(null)
       onSuccess?.()
-      
-      // Reset after showing success feedback
-      setTimeout(() => {
-        setIsLoading(false)
-        setIsAdded(false)
-      }, 2000)
     },
     onError: (error: Error) => {
       console.error('Error adding to selections:', error)
@@ -124,7 +117,7 @@ export function AddToSelectionsButton({
         ) : isAdded ? (
           <>
             <Check className={`${size === 'small' ? 'w-3 h-3' : 'w-3 h-3'}`} />
-            {size === 'normal' && <span>Selection Added</span>}
+            {size === 'normal' && <span>Added to selections</span>}
           </>
         ) : (
           <>

@@ -70,14 +70,7 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
         return []
       }
 
-      const { data, error } = await supabase.functions.invoke('get-shortlist', {
-        body: {}
-      })
-      
-      if (error) {
-        console.error('Error fetching shortlist:', error)
-        return []
-      }
+      const data = await callSupabaseFunction('get-shortlist', {});
       
       return data?.data || []
     },
@@ -149,20 +142,10 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
         throw new Error('Please log in to manage your shortlist')
       }
 
-      const { data, error } = await supabase.functions.invoke('remove-from-shortlist', {
-        body: {
-          horse_name: horseName,
-          course: course
-        }
-      })
-      
-      if (error) {
-        throw new Error(error.message || 'Failed to remove from shortlist')
-      }
-      
-      if (!data?.success) {
-        throw new Error(data?.error?.message || 'Failed to remove from shortlist')
-      }
+      const data = await callSupabaseFunction('remove-from-shortlist', {
+        horse_name: horseName,
+        course: course,
+      });
       
       return data
     },

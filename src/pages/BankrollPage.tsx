@@ -21,7 +21,7 @@ import {
 
 interface UserBankroll {
   user_id: string
-  total_amount: number
+  current_amount: number
   created_at: string
   updated_at: string
   has_bankroll: boolean
@@ -134,6 +134,26 @@ export function BankrollPage() {
     }
   })
 
+  // Cancel bet mutation
+  const cancelBetMutation = useMutation({
+    mutationFn: async (betId: number) => {
+      if (!user) {
+        throw new Error('User not authenticated')
+      }
+
+      const data = await callSupabaseFunction('cancel-bet', { bet_id: betId })
+      
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['user-bankroll'] })
+      queryClient.invalidateQueries({ queryKey: ['user-bets'] })
+    },
+    onError: (error) => {
+      console.error('Error cancelling bet:', error)
+    }
+  })
+
   const handleAddFunds = async () => {
     const amount = parseFloat(addAmountInput)
     if (isNaN(amount) || amount <= 0) {
@@ -144,6 +164,18 @@ export function BankrollPage() {
       await addBankrollMutation.mutateAsync(amount)
     } catch (error) {
       console.error('Failed to add funds:', error)
+    }
+  }
+
+  const handleCancelBet = async (betId: number) => {
+    if (!confirm('Are you sure you want to cancel this bet? The bet amount will be refunded to your bankroll.')) {
+      return
+    }
+    
+    try {
+      await cancelBetMutation.mutateAsync(betId)
+    } catch (error) {
+      console.error('Failed to cancel bet:', error)
     }
   }
 
@@ -259,7 +291,7 @@ export function BankrollPage() {
                 <div className="space-y-4">
                   <div className="text-center">
                     <div className="text-4xl font-bold text-white mb-2">
-                      {formatCurrency(bankrollData?.total_amount || 0)}
+                      {formatCurrency(bankrollData?.current_amount || 0)}
                     </div>
                     {bankrollData?.updated_at && (
                       <p className="text-sm text-gray-400">
@@ -474,17 +506,28 @@ export function BankrollPage() {
                         
                         {/* Footer */}
                         <div className="pt-3 border-t border-gray-700/50">
-                          <div className="flex justify-between items-center text-xs text-gray-500">
-                            <span>
-                              Bet placed: {bet.created_at ? new Date(bet.created_at).toLocaleString('en-GB', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              }) : 'Unknown'}
-                            </span>
-                            <span>Race ID: {bet.race_id}</span>
+                          <div className="flex justify-between items-center">
+                            <div className="text-xs text-gray-500">
+                              <span>
+                                Bet placed: {bet.created_at ? new Date(bet.created_at).toLocaleString('en-GB', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                }) : 'Unknown'}
+                              </span>
+                              <span className="ml-4">Race ID: {bet.race_id}</span>
+                            </div>
+                            {bet.status === 'pending' && (
+                              <button
+                                onClick={() => handleCancelBet(bet.id)}
+                                disabled={cancelBetMutation.isPending}
+                                className="px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/40 rounded text-xs font-medium hover:bg-red-500/30 hover:border-red-500/60 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {cancelBetMutation.isPending ? 'Cancelling...' : 'Cancel Bet'}
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
