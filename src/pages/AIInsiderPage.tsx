@@ -299,7 +299,35 @@ export function AIInsiderPage() {
     s => s.confidence_score >= confidenceFilter
   ) || []
   const trainerIntents = trainerIntentResponse?.data?.trainer_intent_signals || []
-  const marketMovers = aiInsiderResponse?.data?.market_movers || []
+  // Fetch persistent market movers
+  const { data: persistentMarketMoversData, isLoading: persistentMarketMoversLoading } = useQuery({
+    queryKey: ['persistent-market-movers'],
+    queryFn: async () => {
+      console.log('Fetching persistent market movers...')
+      const { data, error } = await supabase.functions.invoke('get-persistent-market-movers', {
+        body: {}
+      })
+      
+      if (error) {
+        console.error('Error invoking persistent market movers API:', error)
+        throw error
+      }
+      
+      if (!data.success) {
+        console.error('Persistent market movers API returned error:', data.error)
+        throw new Error(data.error?.message || 'Persistent market movers API failed')
+      }
+      
+      console.log('Persistent market movers fetched successfully:', data.data)
+      return data.data
+    },
+    staleTime: 1000 * 30, // 30 seconds
+    retry: 3,
+    retryDelay: 1000,
+    refetchInterval: 1000 * 60 // Auto-refresh every minute
+  })
+
+  const persistentMarketMovers = persistentMarketMoversData?.race_groups || []
   const upcomingRaces = upcomingRacesResponse?.data?.upcoming_races || []
   const mlValueBets = mlValueBetsResponse?.data?.value_bet_races || []
 
@@ -830,7 +858,7 @@ export function AIInsiderPage() {
       id: 'market_movers' as const,
       label: 'Market Movers',
       icon: TrendingUp,
-      count: marketMovers?.length || 0
+      count: persistentMarketMovers?.length || 0
     }
   ]
 
@@ -1165,169 +1193,105 @@ export function AIInsiderPage() {
           {/* Market Movers - Updated to match Value Bets design */}
           {activeTab === 'market_movers' && (
             <div className="space-y-4">
-              {aiInsiderLoading ? (
+              {persistentMarketMoversLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <RefreshCw className="w-8 h-8 animate-spin text-yellow-400" />
                 </div>
-              ) : marketMovers && marketMovers.length > 0 ? (
+              ) : persistentMarketMovers && persistentMarketMovers.length > 0 ? (
                 <div className="space-y-4">
-                  {/* Group market movers by race and filter for upcoming races only */}
-                  {(() => {
-                    const now = new Date()
-                    
-                    // Filter market movers to only include upcoming races
-                    const upcomingMovers = marketMovers.filter(mover => {
-                      try {
-                        // Parse race time - convert afternoon racing times (02:00 -> 14:00)
-                        let raceTimeString = mover.off_time
-                        if (raceTimeString.includes(':') && raceTimeString.split(':').length === 3) {
-                          raceTimeString = raceTimeString.substring(0, 5)
-                        }
-                        
-                        const [hours, minutes] = raceTimeString.split(':')
-                        let hourNum = parseInt(hours, 10)
-                        
-                        // UK racing convention: times 01:XX - 08:XX are afternoon races
-                        if (hourNum >= 1 && hourNum <= 8) {
-                          hourNum += 12 // Convert to PM
-                          raceTimeString = `${hourNum.toString().padStart(2, '0')}:${minutes}`
-                        }
-                        
-                        // Create race datetime for today
-                        const today = new Date().toISOString().split('T')[0]
-                        const raceDateTimeString = `${today}T${raceTimeString}:00`
-                        const raceDateTime = new Date(raceDateTimeString)
-                        
-                        // Adjust for UK timezone (BST = UTC+1)
-                        const raceTimeUTC = new Date(raceDateTime.getTime() - (1 * 60 * 60 * 1000))
-                        
-                        // Only include races that haven't finished yet
-                        return raceTimeUTC.getTime() > now.getTime()
-                      } catch (error) {
-                        console.warn('Error filtering market mover race time:', error)
-                        return true // Include race if we can't parse the time
-                      }
-                    })
-                    
-                    const groups = upcomingMovers.reduce((acc, mover) => {
-                      const raceKey = `${mover.course}_${mover.off_time}`
-                      if (!acc[raceKey]) {
-                        acc[raceKey] = {
-                          race_id: `mover_${raceKey}`,
-                          course_name: mover.course,
-                          off_time: mover.off_time,
-                          movers: []
-                        }
-                      }
-                      acc[raceKey].movers.push(mover)
-                      return acc
-                    }, {} as Record<string, {
-                      race_id: string;
-                      course_name: string;
-                      off_time: string;
-                      movers: typeof marketMovers;
-                    }>)
-                    
-                    return (Object.values(groups) as {
-                      race_id: string;
-                      course_name: string;
-                      off_time: string;
-                      movers: typeof marketMovers;
-                    }[])
-                      .sort((a, b) => a.off_time.localeCompare(b.off_time))
-                      .map((raceGroup) => (
-                        <div
-                          key={raceGroup.race_id}
-                          className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-yellow-400/50 transition-colors"
-                        >
-                          {/* Race Header - Same as Value Bets */}
-                          <div className="mb-4">
-                            <div className="flex items-center space-x-3 mb-2">
-                              <h3 className="text-xl font-bold text-white">{raceGroup.course_name}</h3>
-                              <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
-                                Market Movers
-                              </span>
-                              <div className="flex items-center space-x-1 text-yellow-400">
-                                <Clock className="w-4 h-4" />
-                                <span className="font-bold">{formatTime(raceGroup.off_time)}</span>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Market Movers - Same card style as Value Bets */}
-                          <div className="mb-4">
-                            <h4 className="text-sm font-medium text-gray-400 mb-2">Market Movement Activity</h4>
-                            <div className="grid gap-3">
-                              {raceGroup.movers.map((mover, index) => {
-                                // Check if this market mover is also a top ML pick
-                                const isMLPick = upcomingRaces?.some(race => 
-                                  race.top_ml_picks?.some(pick => pick.horse_name === mover.horse_name)
-                                )
-                                
-                                return (
-                                  <div key={mover.id} className="bg-gray-700/50 rounded-lg p-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="flex items-center space-x-3">
-                                        <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
-                                          {index + 1}
-                                        </div>
-                                        <HorseNameWithSilk 
-                                          horseName={mover.horse_name} 
-                                          silkUrl={mover.silk_url}
-                                          className="text-yellow-400 font-bold text-lg"
-                                        />
-                                      </div>
-                                      <div className="text-right">
-                                        <div className="text-green-400 font-bold text-lg">{mover.current_odds}</div>
-                                        <div className="text-yellow-400 font-medium text-sm">
-                                          {mover.odds_movement_pct > 0 ? '+' : ''}{mover.odds_movement_pct}%
-                                        </div>
-                                      </div>
-                                    </div>
-                                    
-                                    <div className="text-xs text-gray-400 mb-2">
-                                      {mover.trainer_name || 'Unknown'} • {mover.jockey_name || 'Unknown'}
-                                    </div>
-                                    
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex flex-wrap gap-1">
-                                        <span className="bg-blue-600/20 text-blue-400 border border-blue-600/30 px-2 py-0.5 rounded text-xs font-medium">
-                                          {mover.bookmaker} #1
-                                        </span>
-                                        <span className={`border px-2 py-0.5 rounded text-xs font-medium ${
-                                          mover.odds_movement === 'steaming' ? 'bg-red-600/20 text-red-400 border-red-600/30' : 
-                                          mover.odds_movement === 'drifting' ? 'bg-blue-600/20 text-blue-400 border-blue-600/30' : 
-                                          'bg-gray-600/20 text-gray-400 border-gray-600/30'
-                                        }`}>
-                                          {mover.odds_movement.charAt(0).toUpperCase() + mover.odds_movement.slice(1)}
-                                        </span>
-                                        {isMLPick && (
-                                          <span className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
-                                            ML Pick #1
-                                          </span>
-                                        )}
-                                      </div>
-                                      <ShortlistButton
-                                        horseName={mover.horse_name}
-                                        raceTime={mover.off_time}
-                                        course={mover.course}
-                                        odds={mover.current_odds}
-                                        source="market_mover"
-                                        jockeyName={mover.jockey_name}
-                                        trainerName={mover.trainer_name}
-                                        mlInfo={`Movement: ${mover.odds_movement} (${mover.odds_movement_pct > 0 ? '+' : ''}${mover.odds_movement_pct}%)`}
-                                        horseId={mover.horse_id}
-                                        raceId={mover.race_id}
-                                      />
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
+                  {/* Display persistent market movers grouped by race */}
+                  {persistentMarketMovers.map((raceGroup: any) => (
+                    <div
+                      key={raceGroup.race_id}
+                      className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-yellow-400/50 transition-colors"
+                    >
+                      {/* Race Header - Same as Value Bets */}
+                      <div className="mb-4">
+                        <div className="flex items-center space-x-3 mb-2">
+                          <h3 className="text-xl font-bold text-white">{raceGroup.course_name}</h3>
+                          <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
+                            Market Movers
+                          </span>
+                          <div className="flex items-center space-x-1 text-yellow-400">
+                            <Clock className="w-4 h-4" />
+                            <span className="font-bold">{formatTime(raceGroup.off_time)}</span>
                           </div>
                         </div>
-                      ))
-                  })()}
+                      </div>
+                      
+                      {/* Market Movers - Same card style as Value Bets */}
+                      <div className="mb-4">
+                        <h4 className="text-sm font-medium text-gray-400 mb-2">Market Movement Activity</h4>
+                        <div className="grid gap-3">
+                          {raceGroup.movers.map((mover: any, index: number) => {
+                            // Check if this market mover is also a top ML pick
+                            const isMLPick = upcomingRaces?.some((race: any) => 
+                              race.top_ml_picks?.some((pick: any) => pick.horse_name === mover.horse_name)
+                            )
+                            
+                            return (
+                              <div key={mover.id} className="bg-gray-700/50 rounded-lg p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center space-x-3">
+                                    <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
+                                      {index + 1}
+                                    </div>
+                                    <HorseNameWithSilk 
+                                      horseName={mover.horse_name} 
+                                      silkUrl={mover.silk_url}
+                                      className="text-yellow-400 font-bold text-lg"
+                                    />
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-green-400 font-bold text-lg">{mover.current_odds}</div>
+                                    <div className="text-yellow-400 font-medium text-sm">
+                                      {mover.odds_movement_pct > 0 ? '+' : ''}{mover.odds_movement_pct}%
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="text-xs text-gray-400 mb-2">
+                                  {mover.trainer_name || 'Unknown'} • {mover.jockey_name || 'Unknown'}
+                                </div>
+                                
+                                <div className="flex items-center justify-between">
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="bg-blue-600/20 text-blue-400 border border-blue-600/30 px-2 py-0.5 rounded text-xs font-medium">
+                                      {mover.bookmaker} #1
+                                    </span>
+                                    <span className={`border px-2 py-0.5 rounded text-xs font-medium ${
+                                      mover.odds_movement === 'steaming' ? 'bg-red-600/20 text-red-400 border-red-600/30' : 
+                                      mover.odds_movement === 'drifting' ? 'bg-blue-600/20 text-blue-400 border-blue-600/30' : 
+                                      'bg-gray-600/20 text-gray-400 border-gray-600/30'
+                                    }`}>
+                                      {mover.odds_movement.charAt(0).toUpperCase() + mover.odds_movement.slice(1)}
+                                    </span>
+                                    {isMLPick && (
+                                      <span className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
+                                        ML Pick #1
+                                      </span>
+                                    )}
+                                  </div>
+                                  <ShortlistButton
+                                    horseName={mover.horse_name}
+                                    raceTime={mover.off_time}
+                                    course={mover.course}
+                                    odds={mover.current_odds}
+                                    source="market_mover"
+                                    jockeyName={mover.jockey_name}
+                                    trainerName={mover.trainer_name}
+                                    mlInfo={`Movement: ${mover.odds_movement} (${mover.odds_movement_pct > 0 ? '+' : ''}${mover.odds_movement_pct}%)`}
+                                    horseId={mover.horse_id}
+                                    raceId={mover.race_id}
+                                  />
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="text-center py-12">

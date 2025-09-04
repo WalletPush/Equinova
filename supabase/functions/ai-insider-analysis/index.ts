@@ -47,8 +47,7 @@ Deno.serve(async (req) => {
             LEFT JOIN horses h ON re.horse_id = h.horse_id
             WHERE re.horse_win_percentage_at_distance IS NOT NULL
             AND re.horse_win_percentage_at_distance > 0.05
-            ORDER BY re.horse_win_percentage_at_distance DESC
-            LIMIT 10;
+            ORDER BY re.horse_win_percentage_at_distance DESC;
         `;
 
         const specialistsResponse = await fetch(
@@ -107,8 +106,7 @@ Deno.serve(async (req) => {
             FROM trainer_runner_counts
             WHERE runner_count = 1
             AND trainer_name IS NOT NULL
-            ORDER BY trainer_name
-            LIMIT 15;
+            ORDER BY trainer_name;
         `;
 
         const trainerIntentResponse = await fetch(
@@ -173,8 +171,7 @@ Deno.serve(async (req) => {
             AND re.opening_odds IS NOT NULL
             AND re.opening_odds > 0
             AND re.current_odds != re.opening_odds
-            ORDER BY ABS(percentage_change) DESC
-            LIMIT 10;
+            ORDER BY ABS(percentage_change) DESC;
         `;
 
         const marketMovementsResponse = await fetch(

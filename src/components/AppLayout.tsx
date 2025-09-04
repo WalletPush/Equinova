@@ -14,7 +14,8 @@ import {
   X,
   List,
   Heart,
-  Wallet
+  Wallet,
+  BarChart3
 } from 'lucide-react'
 
 interface AppLayoutProps {
@@ -74,6 +75,14 @@ export function AppLayout({ children }: AppLayoutProps) {
             {/* Dropdown Menu */}
             {isMenuOpen && (
               <div className="absolute right-0 top-12 bg-gray-800 border border-gray-700 rounded-lg shadow-lg min-w-32 z-50">
+                <NavLink
+                  to="/ml-tracker"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>Tracker</span>
+                </NavLink>
                 <NavLink
                   to="/my-selections"
                   onClick={() => setIsMenuOpen(false)}

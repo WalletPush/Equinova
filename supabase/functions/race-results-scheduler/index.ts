@@ -127,6 +127,31 @@ Deno.serve(async (req)=>{
         if (saved) {
           processed_count++;
           ready_count++;
+          
+          // Call our new function to update race entries, ML models, and bets
+          try {
+            console.log(`🔄 Updating race entries, ML models, and bets for ${race.race_id}`);
+            const updateRes = await fetch(`${supabaseUrl}/functions/v1/update-race-results-and-bets`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${serviceRoleKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                race_id: race.race_id
+              })
+            });
+            
+            if (updateRes.ok) {
+              const updateData = await updateRes.json();
+              console.log(`✅ Updated race results and bets for ${race.race_id}:`, updateData.summary);
+            } else {
+              console.warn(`⚠️ Failed to update race results and bets for ${race.race_id}`);
+            }
+          } catch (updateError) {
+            console.error(`❌ Error updating race results and bets for ${race.race_id}:`, updateError);
+          }
+          
           results.push({
             race_id: race.race_id,
             success: true,
