@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { AppLayout } from '@/components/AppLayout'
 import { supabase } from '@/lib/supabase'
 import { useQuery } from '@tanstack/react-query'
-import { ShortlistButton } from '@/components/ShortlistButton'
+import { callSupabaseFunction } from '@/lib/supabase'
 import {
   Brain,
   TrendingUp,
@@ -98,6 +98,103 @@ const modelConfig = {
 export function MLTrackerPage() {
   const { profile } = useAuth()
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [shortlistOperations, setShortlistOperations] = useState<Record<string, boolean>>({})
+
+  // Check if horse is in shortlist
+  const isHorseInShortlist = (horseName: string, course: string) => {
+    // This would need to be implemented with actual shortlist data
+    return false
+  }
+
+  // Handle shortlist toggle
+  const handleShortlistToggle = async (
+    horseName: string, 
+    raceTime: string, 
+    course: string, 
+    odds: string, 
+    source: string,
+    jockeyName?: string,
+    trainerName?: string,
+    mlInfo?: string,
+    horseId?: string,
+    raceId?: string
+  ) => {
+    setShortlistOperations(prev => ({ ...prev, [horseName]: true }))
+    
+    try {
+      const payload = {
+        horse_name: horseName,
+        race_time: raceTime,
+        course: course,
+        current_odds: odds,
+        source: source,
+        jockey_name: jockeyName || null,
+        trainer_name: trainerName || null,
+        ml_info: mlInfo || null
+      }
+      
+      await callSupabaseFunction('add-to-shortlist', payload)
+    } catch (error) {
+      console.error('Error adding to shortlist:', error)
+    } finally {
+      setShortlistOperations(prev => ({ ...prev, [horseName]: false }))
+    }
+  }
+
+  // Local ShortlistButton Component
+  const ShortlistButton = ({ 
+    horseName, 
+    raceTime, 
+    course, 
+    odds, 
+    source,
+    jockeyName,
+    trainerName,
+    mlInfo,
+    horseId,
+    raceId
+  }: {
+    horseName: string
+    raceTime: string
+    course: string
+    odds?: string
+    source: string
+    jockeyName?: string
+    trainerName?: string
+    mlInfo?: string
+    horseId?: string
+    raceId?: string
+  }) => {
+    const isInShortlist = isHorseInShortlist(horseName, course)
+    const isLoading = shortlistOperations[horseName] || false
+    
+    return (
+      <button
+        onClick={() => handleShortlistToggle(horseName, raceTime, course, odds || '', source, jockeyName, trainerName, mlInfo, horseId, raceId)}
+        disabled={isLoading}
+        className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+          isInShortlist 
+            ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30' 
+            : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30'
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
+        title={isInShortlist ? 'Remove from shortlist' : 'Add to shortlist'}
+      >
+        {isLoading ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : isInShortlist ? (
+          <>
+            <Check className="w-3 h-3" />
+            <span>Shortlisted</span>
+          </>
+        ) : (
+          <>
+            <Heart className="w-3 h-3" />
+            <span>Shortlist</span>
+          </>
+        )}
+      </button>
+    )
+  }
 
   // Fetch ML tracker data
   const { data: mlTrackerData, isLoading, error, refetch } = useQuery({
@@ -348,16 +445,16 @@ export function MLTrackerPage() {
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm font-semibold text-gray-300">Next Runner</h4>
                       <ShortlistButton
-                        horseId={model.next_runner.horse_id}
                         horseName={model.next_runner.horse_name}
-                        raceId={model.next_runner.race_id}
                         raceTime={model.next_runner.race_time}
                         course={model.next_runner.course}
+                        odds={model.next_runner.odds}
+                        source="ml_tracker"
                         jockeyName={model.next_runner.jockey}
                         trainerName={model.next_runner.trainer}
-                        currentOdds={model.next_runner.odds}
                         mlInfo={`${config.full_name} - ${model.next_runner.confidence.toFixed(1)}% confidence`}
-                        source="ml_tracker"
+                        horseId={model.next_runner.horse_id}
+                        raceId={model.next_runner.race_id}
                       />
                     </div>
                     <div className="space-y-2">
