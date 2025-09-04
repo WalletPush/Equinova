@@ -45,3 +45,4 @@ CREATE TRIGGER trigger_set_shortlist_race_ids
   FOR EACH ROW
   EXECUTE FUNCTION set_shortlist_race_ids();
 
+

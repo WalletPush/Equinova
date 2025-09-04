@@ -38,3 +38,4 @@ LIMIT 5;
 -- Uncomment the line below if you want to remove the race_entry_id column
 -- ALTER TABLE selections DROP COLUMN IF EXISTS race_entry_id;
 
+
