@@ -26,7 +26,10 @@ import {
   ArrowUp,
   ArrowDown,
   Minus,
-  Crown
+  Crown,
+  Loader2,
+  Check,
+  Heart
 } from 'lucide-react'
 
 interface MLModelPerformance {
