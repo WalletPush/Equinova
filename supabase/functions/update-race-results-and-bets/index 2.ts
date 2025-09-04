@@ -145,26 +145,6 @@ Deno.serve(async (req) => {
 
             for (const model of mlModels) {
               if (model.proba && model.proba > 0) {
-                // Check if ML performance record already exists
-                const existingResponse = await fetch(
-                  `${supabaseUrl}/rest/v1/ml_model_race_results?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}&model_name=eq.${model.name}&limit=1`,
-                  {
-                    method: 'GET',
-                    headers: {
-                      'Authorization': `Bearer ${supabaseKey}`,
-                      'apikey': supabaseKey
-                    }
-                  }
-                );
-
-                if (existingResponse.ok) {
-                  const existingData = await existingResponse.json();
-                  if (existingData && existingData.length > 0) {
-                    console.log(`ML performance record already exists for ${model.name} - horse ${runner.horse_id} in race ${race_id}`);
-                    continue; // Skip this model for this horse
-                  }
-                }
-
                 // Insert ML model performance record
                 const mlPerformanceData = {
                   race_id: race_id,
@@ -194,7 +174,6 @@ Deno.serve(async (req) => {
 
                 if (mlPerformanceResponse.ok) {
                   mlModelUpdates++;
-                  console.log(`Inserted ML performance for ${model.name} - horse ${runner.horse_id} in race ${race_id}`);
                 } else {
                   console.warn(`Failed to insert ML performance for ${model.name}: ${mlPerformanceResponse.status}`);
                 }
