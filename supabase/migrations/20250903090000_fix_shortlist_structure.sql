@@ -46,3 +46,4 @@ CREATE TRIGGER trigger_set_shortlist_race_ids
   EXECUTE FUNCTION set_shortlist_race_ids();
 
 
+

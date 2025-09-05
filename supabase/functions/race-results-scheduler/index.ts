@@ -26,7 +26,7 @@ Deno.serve(async (req)=>{
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     if (!serviceRoleKey || !supabaseUrl) throw new Error("Supabase configuration missing");
     // Optional runtime parameters
-    let limit = 8; // small batch per run
+    let limit = 10; // small batch per run
     let rateMs = 600; // ~1.6 calls/sec (stays under your 2/sec budget)
     try {
       const isJson = req.headers.get("content-type")?.includes("application/json");
@@ -127,7 +127,6 @@ Deno.serve(async (req)=>{
         if (saved) {
           processed_count++;
           ready_count++;
-          
           // Call our new function to update race entries, ML models, and bets
           try {
             console.log(`🔄 Updating race entries, ML models, and bets for ${race.race_id}`);
@@ -141,7 +140,6 @@ Deno.serve(async (req)=>{
                 race_id: race.race_id
               })
             });
-            
             if (updateRes.ok) {
               const updateData = await updateRes.json();
               console.log(`✅ Updated race results and bets for ${race.race_id}:`, updateData.summary);
@@ -151,7 +149,6 @@ Deno.serve(async (req)=>{
           } catch (updateError) {
             console.error(`❌ Error updating race results and bets for ${race.race_id}:`, updateError);
           }
-          
           results.push({
             race_id: race.race_id,
             success: true,

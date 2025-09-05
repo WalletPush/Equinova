@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
-import { AddToSelectionsButton } from '@/components/AddToSelectionsButton'
+import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { callSupabaseFunction } from '@/lib/supabase'
 import { formatTime } from '@/lib/dateUtils'
 import { 
@@ -22,18 +22,23 @@ import {
   Filter,
   Plus,
   Check,
-  Loader2
+  Loader2,
+  PoundSterling,
+  Award,
+  Users,
+  Trophy
 } from 'lucide-react'
 
 interface ShortlistItem {
   id: number
   user_id: string
   horse_name: string
+  horse_id?: string
   race_time: string
   course: string
-  race_id?: string // Add race_id field
+  race_id?: string
   current_odds?: string
-  source: 'value_bet' | 'trainer_intent' | 'market_mover' | 'today_races'
+  source: 'value_bet' | 'trainer_intent' | 'market_mover' | 'today_races' | 'ai_top_picks'
   jockey_name?: string
   trainer_name?: string
   ml_info?: string
@@ -42,7 +47,7 @@ interface ShortlistItem {
 }
 
 export function ShortListPage() {
-  const [activeTab, setActiveTab] = useState<'value_bet' | 'trainer_intent' | 'market_mover' | 'today_races'>('value_bet')
+  const [activeTab, setActiveTab] = useState<'value_bet' | 'trainer_intent' | 'market_mover' | 'today_races' | 'ai_top_picks'>('value_bet')
   const [removingItems, setRemovingItems] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
 
@@ -108,6 +113,7 @@ export function ShortListPage() {
     staleTime: 1000 * 60 * 2, // 2 minutes
     retry: 2
   })
+
 
   // Remove from shortlist mutation
   const removeFromShortlistMutation = useMutation({
@@ -175,6 +181,7 @@ export function ShortListPage() {
       case 'trainer_intent': return 'Trainer Intent'
       case 'market_mover': return 'Market Mover'
       case 'today_races': return 'Today\'s Races'
+      case 'ai_top_picks': return 'AI Top Picks'
       default: return 'Unknown'
     }
   }
@@ -204,10 +211,16 @@ export function ShortListPage() {
       label: 'Today\'s Races',
       icon: Calendar,
       count: shortlistData ? shortlistData.filter(item => item.source === 'today_races').length : 0
+    },
+    {
+      id: 'ai_top_picks' as const,
+      label: 'AI Top Picks',
+      icon: Award,
+      count: shortlistData ? shortlistData.filter(item => item.source === 'ai_top_picks').length : 0
     }
   ]
 
-  // Filter shortlist based on selected tab
+  // Filter shortlist based on selected tab (now includes ai_top_picks as regular shortlist items)
   const filteredShortlist = shortlistData?.filter(item => item.source === activeTab) || []
 
   return (
@@ -281,7 +294,7 @@ export function ShortListPage() {
                 <span className="font-medium">Error Loading Shortlist</span>
               </div>
               <p className="text-red-300 text-sm mb-4">
-                {error.message || 'Failed to load your shortlist'}
+                {error?.message || 'Failed to load your shortlist'}
               </p>
               <button
                 onClick={() => refetch()}
@@ -293,20 +306,23 @@ export function ShortListPage() {
           )}
 
           {/* Empty State */}
-          {!isLoading && !error && (!filteredShortlist || filteredShortlist.length === 0) && (
-            <div className="text-center py-12">
-              <Heart className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-gray-400 mb-2">
-                No {getSourceLabel(activeTab)} Horses
-              </h3>
-              <p className="text-gray-500 mb-4">
-                No horses added from {getSourceLabel(activeTab)} section
-              </p>
-              <p className="text-sm text-gray-400">
-                Visit the AI Insider tab and click "Shortlist" buttons to save horses here
-              </p>
-            </div>
+          {!isLoading && !error && (
+            (!filteredShortlist || filteredShortlist.length === 0) && (
+              <div className="text-center py-12">
+                <Heart className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-gray-400 mb-2">
+                  No {getSourceLabel(activeTab)} Horses
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  No horses added from {getSourceLabel(activeTab)} section
+                </p>
+                <p className="text-sm text-gray-400">
+                  Visit the AI Insider tab and click "Shortlist" buttons to save horses here
+                </p>
+              </div>
+            )
           )}
+
 
           {/* Shortlist Items - Value Bets Design */}
           {!isLoading && !error && filteredShortlist && filteredShortlist.length > 0 && (
@@ -427,9 +443,10 @@ export function ShortListPage() {
                                 </div>
                               </div>
                               
-                                                              {/* Add to Selections Button - Bottom Left */}
-                                <div className="mt-3">
-                                  <AddToSelectionsButton
+                              {/* Place Bet Button - Full Width at Bottom */}
+                              {!isRaceFinished(item.race_time) && (
+                                <div className="mt-3 pt-3 border-t border-gray-700">
+                                  <PlaceBetButton
                                     horseName={item.horse_name}
                                     raceContext={{
                                       race_id: `race_${item.course.replace(/\s+/g, '_')}_${item.race_time.replace(':', '')}`,
@@ -442,12 +459,14 @@ export function ShortListPage() {
                                     trainerName={item.trainer_name}
                                     size="normal"
                                     customRaceEntryId={`shortlist_${item.id}_${item.horse_name.replace(/\s+/g, '_')}_${item.course.replace(/\s+/g, '_')}`}
-                                    raceId={item.race_id} // Pass the race_id from shortlist
+                                    raceId={item.race_id}
+                                    horseId={item.horse_id}
                                     onSuccess={() => {
-                                      console.log(`Successfully added ${item.horse_name} to selections from shortlist`)
+                                      console.log(`Successfully placed bet on ${item.horse_name} from shortlist`)
                                     }}
                                   />
                                 </div>
+                              )}
                             </div>
                           ))}
                         </div>

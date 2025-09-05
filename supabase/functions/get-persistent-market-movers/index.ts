@@ -1,4 +1,4 @@
-Deno.serve(async (req) => {
+Deno.serve(async (req)=>{
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -6,96 +6,79 @@ Deno.serve(async (req) => {
     'Access-Control-Max-Age': '86400',
     'Access-Control-Allow-Credentials': 'false'
   };
-
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders
+    });
   }
-
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     console.log('Fetching persistent market movers...');
-
     // Get today's date in UK timezone
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-
+    const today = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'Europe/London'
+    });
     // Get market movements from horse_market_movement_changes for today
     // This gives us the most detailed movement data
-    const marketMoversResponse = await fetch(
-      `${supabaseUrl}/rest/v1/horse_market_movement_changes?source_updated_at=gte.${today}T00:00:00.000Z&source_updated_at=lt.${today}T23:59:59.999Z&select=*&order=source_updated_at.desc`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
+    const marketMoversResponse = await fetch(`${supabaseUrl}/rest/v1/horse_market_movement_changes?source_updated_at=gte.${today}T00:00:00.000Z&source_updated_at=lt.${today}T23:59:59.999Z&select=*&order=source_updated_at.desc`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey
       }
-    );
-
+    });
     if (!marketMoversResponse.ok) {
       throw new Error(`Failed to fetch market movement changes: ${marketMoversResponse.status}`);
     }
-
     const allChanges = await marketMoversResponse.json();
     console.log(`Found ${allChanges.length} market movement changes`);
-
     // Get current market movement data to get latest odds and horse names
-    const currentMarketResponse = await fetch(
-      `${supabaseUrl}/rest/v1/horse_market_movement?select=*`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
+    const currentMarketResponse = await fetch(`${supabaseUrl}/rest/v1/horse_market_movement?select=*`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey
       }
-    );
-
+    });
     if (!currentMarketResponse.ok) {
       throw new Error(`Failed to fetch current market data: ${currentMarketResponse.status}`);
     }
-
     const currentMarketData = await currentMarketResponse.json();
-    const currentMarketMap = new Map(currentMarketData.map((m: any) => [m.horse_id, m]));
-
+    const currentMarketMap = new Map(currentMarketData.map((m)=>[
+        m.horse_id,
+        m
+      ]));
     // Get race entries to get horse names, trainer, jockey
-    const raceEntriesResponse = await fetch(
-      `${supabaseUrl}/rest/v1/race_entries?select=horse_id,horse_name,trainer_name,jockey_name`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
+    const raceEntriesResponse = await fetch(`${supabaseUrl}/rest/v1/race_entries?select=horse_id,horse_name,trainer_name,jockey_name`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey
       }
-    );
-
+    });
     if (!raceEntriesResponse.ok) {
       throw new Error(`Failed to fetch race entries: ${raceEntriesResponse.status}`);
     }
-
     const raceEntries = await raceEntriesResponse.json();
-    const raceEntriesMap = new Map(raceEntries.map((e: any) => [e.horse_id, e]));
-
+    const raceEntriesMap = new Map(raceEntries.map((e)=>[
+        e.horse_id,
+        e
+      ]));
     // Process changes to find horses with significant INWARD movement (20%+)
     const significantMovers = new Map();
-
-    for (const change of allChanges) {
+    for (const change of allChanges){
       // Only process INWARD movements (direction = 'in' means odds shortened/steaming)
       if (change.direction !== 'in') continue;
-
       const currentData = currentMarketMap.get(change.horse_id);
       const raceEntry = raceEntriesMap.get(change.horse_id);
       if (!currentData || !raceEntry) continue;
-
       // Calculate total movement percentage for this horse
       const movementPct = Math.abs(change.change_pct || 0);
-      
       if (movementPct >= 10) {
         // This horse has significant INWARD movement
         const key = `${change.horse_id}_${change.race_id}`;
-        
         if (!significantMovers.has(key)) {
           significantMovers.set(key, {
             horse_id: change.horse_id,
@@ -108,7 +91,7 @@ Deno.serve(async (req) => {
             bookmaker: change.bookmaker,
             initial_odds: currentData.initial_odds,
             current_odds: currentData.current_odds,
-            odds_movement: 'steaming', // Always steaming since we filtered for 'in'
+            odds_movement: 'steaming',
             odds_movement_pct: movementPct,
             last_updated: change.source_updated_at,
             first_detected_at: change.source_updated_at,
@@ -126,14 +109,11 @@ Deno.serve(async (req) => {
         }
       }
     }
-
     const marketMovers = Array.from(significantMovers.values());
     console.log(`Found ${marketMovers.length} horses with significant movement (10%+)`);
-
     // Group by race (course + time) to match the frontend structure
-    const raceGroups = marketMovers.reduce((acc: any, mover: any) => {
+    const raceGroups = marketMovers.reduce((acc, mover)=>{
       const raceKey = `${mover.course}_${mover.off_time}`;
-      
       if (!acc[raceKey]) {
         acc[raceKey] = {
           race_id: `mover_${raceKey}`,
@@ -142,9 +122,8 @@ Deno.serve(async (req) => {
           movers: []
         };
       }
-      
       acc[raceKey].movers.push({
-        id: mover.horse_id, // Use horse_id as unique identifier
+        id: mover.horse_id,
         horse_id: mover.horse_id,
         race_id: mover.race_id,
         horse_name: mover.horse_name,
@@ -163,17 +142,11 @@ Deno.serve(async (req) => {
         total_movements: mover.total_movements,
         latest_change: mover.latest_change
       });
-      
       return acc;
     }, {});
-
     // Convert to array and sort by race time
-    const sortedRaces = Object.values(raceGroups).sort((a: any, b: any) => 
-      a.off_time.localeCompare(b.off_time)
-    );
-
+    const sortedRaces = Object.values(raceGroups).sort((a, b)=>a.off_time.localeCompare(b.off_time));
     console.log(`Grouped into ${sortedRaces.length} races`);
-
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -184,9 +157,11 @@ Deno.serve(async (req) => {
       },
       timestamp: new Date().toISOString()
     }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
     });
-
   } catch (error) {
     console.error('Error fetching persistent market movers:', error);
     return new Response(JSON.stringify({
@@ -195,7 +170,10 @@ Deno.serve(async (req) => {
       timestamp: new Date().toISOString()
     }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
     });
   }
 });

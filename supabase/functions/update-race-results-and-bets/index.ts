@@ -1,4 +1,4 @@
-Deno.serve(async (req) => {
+Deno.serve(async (req)=>{
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -6,47 +6,42 @@ Deno.serve(async (req) => {
     'Access-Control-Max-Age': '86400',
     'Access-Control-Allow-Credentials': 'false'
   };
-
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders
+    });
   }
-
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     // Get request body
     const body = await req.json();
     const race_id = body?.race_id;
-    
     if (!race_id) {
       return new Response(JSON.stringify({
         success: false,
         error: 'Missing race_id parameter'
       }), {
         status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
     console.log(`Processing race results for race_id: ${race_id}`);
-
     // Step 1: Get race results and runners
-    const raceResultsResponse = await fetch(
-      `${supabaseUrl}/rest/v1/race_results?race_id=eq.${race_id}&select=*`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
+    const raceResultsResponse = await fetch(`${supabaseUrl}/rest/v1/race_results?race_id=eq.${race_id}&select=*`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey
       }
-    );
-
+    });
     if (!raceResultsResponse.ok) {
       throw new Error(`Failed to fetch race results: ${raceResultsResponse.status}`);
     }
-
     const raceResults = await raceResultsResponse.json();
     if (!raceResults || raceResults.length === 0) {
       return new Response(JSON.stringify({
@@ -54,56 +49,45 @@ Deno.serve(async (req) => {
         error: 'No race results found for this race_id'
       }), {
         status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       });
     }
-
     const raceResult = raceResults[0];
-
     // Step 2: Get race runners (horse results)
-    const runnersResponse = await fetch(
-      `${supabaseUrl}/rest/v1/race_runners?race_result_id=eq.${raceResult.id}&select=*&order=position.asc`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
+    const runnersResponse = await fetch(`${supabaseUrl}/rest/v1/race_runners?race_result_id=eq.${raceResult.id}&select=*&order=position.asc`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey
       }
-    );
-
+    });
     if (!runnersResponse.ok) {
       throw new Error(`Failed to fetch race runners: ${runnersResponse.status}`);
     }
-
     const runners = await runnersResponse.json();
     console.log(`Found ${runners.length} runners for race ${race_id}`);
-
     // Step 3: Update race_entries with results from race_runners
     let updatedEntries = 0;
     let mlModelUpdates = 0;
-
-    for (const runner of runners) {
+    for (const runner of runners){
       if (!runner.position || !runner.horse_id) continue;
-
       // Update race_entries with finishing position from race_runners
       try {
-        const updateEntryResponse = await fetch(
-          `${supabaseUrl}/rest/v1/race_entries?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'apikey': supabaseKey,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              finishing_position: runner.position,
-              result_updated_at: new Date().toISOString()
-            })
-          }
-        );
-
+        const updateEntryResponse = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'apikey': supabaseKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            finishing_position: runner.position,
+            result_updated_at: new Date().toISOString()
+          })
+        });
         if (updateEntryResponse.ok) {
           updatedEntries++;
           console.log(`Updated race entry for horse ${runner.horse_id} with position ${runner.position}`);
@@ -113,58 +97,46 @@ Deno.serve(async (req) => {
       } catch (entryError) {
         console.warn(`Error updating race entry for horse ${runner.horse_id}:`, entryError.message);
       }
-
       // Step 4: Track ML model performance using data from race_entries
       try {
-        const entryResponse = await fetch(
-          `${supabaseUrl}/rest/v1/race_entries?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}&select=mlp_proba,rf_proba,xgboost_proba,benter_proba,ensemble_proba,predicted_winner`,
-          {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'apikey': supabaseKey
-            }
+        const entryResponse = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}&select=mlp_proba,rf_proba,xgboost_proba,benter_proba,ensemble_proba,predicted_winner`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'apikey': supabaseKey
           }
-        );
-
+        });
         if (entryResponse.ok) {
           const entryData = await entryResponse.json();
           if (entryData && entryData.length > 0) {
             const entry = entryData[0];
             const isWinner = runner.position === 1;
             const isTop3 = runner.position <= 3;
-
             // Track ML model performance
             const mlModels = [
-              { name: 'mlp', proba: entry.mlp_proba },
-              { name: 'rf', proba: entry.rf_proba },
-              { name: 'xgboost', proba: entry.xgboost_proba },
-              { name: 'benter', proba: entry.benter_proba },
-              { name: 'ensemble', proba: entry.ensemble_proba }
+              {
+                name: 'mlp',
+                proba: entry.mlp_proba
+              },
+              {
+                name: 'rf',
+                proba: entry.rf_proba
+              },
+              {
+                name: 'xgboost',
+                proba: entry.xgboost_proba
+              },
+              {
+                name: 'benter',
+                proba: entry.benter_proba
+              },
+              {
+                name: 'ensemble',
+                proba: entry.ensemble_proba
+              }
             ];
-
-            for (const model of mlModels) {
+            for (const model of mlModels){
               if (model.proba && model.proba > 0) {
-                // Check if ML performance record already exists
-                const existingResponse = await fetch(
-                  `${supabaseUrl}/rest/v1/ml_model_race_results?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}&model_name=eq.${model.name}&limit=1`,
-                  {
-                    method: 'GET',
-                    headers: {
-                      'Authorization': `Bearer ${supabaseKey}`,
-                      'apikey': supabaseKey
-                    }
-                  }
-                );
-
-                if (existingResponse.ok) {
-                  const existingData = await existingResponse.json();
-                  if (existingData && existingData.length > 0) {
-                    console.log(`ML performance record already exists for ${model.name} - horse ${runner.horse_id} in race ${race_id}`);
-                    continue; // Skip this model for this horse
-                  }
-                }
-
                 // Insert ML model performance record
                 const mlPerformanceData = {
                   race_id: race_id,
@@ -175,26 +147,20 @@ Deno.serve(async (req) => {
                   actual_position: runner.position,
                   is_winner: isWinner,
                   is_top3: isTop3,
-                  prediction_correct: model.name === 'ensemble' ? (entry.predicted_winner === 1) === isWinner : null,
+                  prediction_correct: model.name === 'ensemble' ? entry.predicted_winner === 1 === isWinner : null,
                   created_at: new Date().toISOString()
                 };
-
-                const mlPerformanceResponse = await fetch(
-                  `${supabaseUrl}/rest/v1/ml_model_race_results`,
-                  {
-                    method: 'POST',
-                    headers: {
-                      'Authorization': `Bearer ${supabaseKey}`,
-                      'apikey': supabaseKey,
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(mlPerformanceData)
-                  }
-                );
-
+                const mlPerformanceResponse = await fetch(`${supabaseUrl}/rest/v1/ml_model_race_results`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'apikey': supabaseKey,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify(mlPerformanceData)
+                });
                 if (mlPerformanceResponse.ok) {
                   mlModelUpdates++;
-                  console.log(`Inserted ML performance for ${model.name} - horse ${runner.horse_id} in race ${race_id}`);
                 } else {
                   console.warn(`Failed to insert ML performance for ${model.name}: ${mlPerformanceResponse.status}`);
                 }
@@ -208,73 +174,56 @@ Deno.serve(async (req) => {
         console.warn(`Error tracking ML performance for horse ${runner.horse_id}:`, mlError.message);
       }
     }
-
     // Step 5: Update bets status
-    const winnerHorse = runners.find(r => r.position === 1);
+    const winnerHorse = runners.find((r)=>r.position === 1);
     let updatedBets = 0;
     let bankrollUpdates = 0;
-
     if (winnerHorse) {
       // Get all pending bets for this race
-      const betsResponse = await fetch(
-        `${supabaseUrl}/rest/v1/bets?race_id=eq.${race_id}&status=eq.pending&select=*`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${supabaseKey}`,
-            'apikey': supabaseKey
-          }
+      const betsResponse = await fetch(`${supabaseUrl}/rest/v1/bets?race_id=eq.${race_id}&status=eq.pending&select=*`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${supabaseKey}`,
+          'apikey': supabaseKey
         }
-      );
-
+      });
       if (betsResponse.ok) {
         const bets = await betsResponse.json();
         console.log(`Found ${bets.length} pending bets for race ${race_id}`);
-
-        for (const bet of bets) {
+        for (const bet of bets){
           const isWinner = bet.horse_name === winnerHorse.horse;
           const newStatus = isWinner ? 'won' : 'lost';
-
           // Update bet status
-          const updateBetResponse = await fetch(
-            `${supabaseUrl}/rest/v1/bets?id=eq.${bet.id}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Authorization': `Bearer ${supabaseKey}`,
-                'apikey': supabaseKey,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                status: newStatus,
-                updated_at: new Date().toISOString()
-              })
-            }
-          );
-
+          const updateBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet.id}`, {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${supabaseKey}`,
+              'apikey': supabaseKey,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              status: newStatus,
+              updated_at: new Date().toISOString()
+            })
+          });
           if (updateBetResponse.ok) {
             updatedBets++;
             console.log(`Updated bet ${bet.id} to ${newStatus}`);
-
             // If bet won, add winnings to bankroll
             if (isWinner) {
               try {
-                const bankrollUpdateResponse = await fetch(
-                  `${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}`,
-                  {
-                    method: 'PATCH',
-                    headers: {
-                      'Authorization': `Bearer ${supabaseKey}`,
-                      'apikey': supabaseKey,
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                      current_amount: bet.potential_return,
-                      updated_at: new Date().toISOString()
-                    })
-                  }
-                );
-
+                const bankrollUpdateResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'apikey': supabaseKey,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    current_amount: bet.potential_return,
+                    updated_at: new Date().toISOString()
+                  })
+                });
                 if (bankrollUpdateResponse.ok) {
                   bankrollUpdates++;
                   console.log(`Updated bankroll for user ${bet.user_id} with winnings ${bet.potential_return}`);
@@ -289,30 +238,23 @@ Deno.serve(async (req) => {
         }
       }
     }
-
     // Step 6: Update selections with results
     let updatedSelections = 0;
-    
-    for (const runner of runners) {
+    for (const runner of runners){
       if (!runner.position || !runner.horse_id) continue;
-
       try {
-        const updateSelectionResponse = await fetch(
-          `${supabaseUrl}/rest/v1/selections?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'apikey': supabaseKey,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              finishing_position: runner.position,
-              result_updated_at: new Date().toISOString()
-            })
-          }
-        );
-
+        const updateSelectionResponse = await fetch(`${supabaseUrl}/rest/v1/selections?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'apikey': supabaseKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            finishing_position: runner.position,
+            result_updated_at: new Date().toISOString()
+          })
+        });
         if (updateSelectionResponse.ok) {
           updatedSelections++;
         } else {
@@ -322,30 +264,23 @@ Deno.serve(async (req) => {
         console.warn(`Error updating selection for horse ${runner.horse_id}:`, selectionError.message);
       }
     }
-
     // Step 7: Update shortlist with results
     let updatedShortlist = 0;
-    
-    for (const runner of runners) {
+    for (const runner of runners){
       if (!runner.position || !runner.horse_id) continue;
-
       try {
-        const updateShortlistResponse = await fetch(
-          `${supabaseUrl}/rest/v1/shortlist?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'apikey': supabaseKey,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              finishing_position: runner.position,
-              result_updated_at: new Date().toISOString()
-            })
-          }
-        );
-
+        const updateShortlistResponse = await fetch(`${supabaseUrl}/rest/v1/shortlist?race_id=eq.${race_id}&horse_id=eq.${runner.horse_id}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'apikey': supabaseKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            finishing_position: runner.position,
+            result_updated_at: new Date().toISOString()
+          })
+        });
         if (updateShortlistResponse.ok) {
           updatedShortlist++;
         } else {
@@ -355,7 +290,6 @@ Deno.serve(async (req) => {
         console.warn(`Error updating shortlist for horse ${runner.horse_id}:`, shortlistError.message);
       }
     }
-
     return new Response(JSON.stringify({
       success: true,
       message: 'Race results processed successfully',
@@ -372,9 +306,11 @@ Deno.serve(async (req) => {
       },
       timestamp: new Date().toISOString()
     }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
     });
-
   } catch (error) {
     console.error('Error processing race results:', error);
     return new Response(JSON.stringify({
@@ -383,7 +319,10 @@ Deno.serve(async (req) => {
       timestamp: new Date().toISOString()
     }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
     });
   }
 });

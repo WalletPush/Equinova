@@ -15,7 +15,6 @@ import { PreviousRacesPage } from '@/pages/PreviousRacesPage'
 import { RaceDetailPage } from '@/pages/RaceDetailPage'
 import { AIInsiderPage } from '@/pages/AIInsiderPage'
 import { ShortListPage } from '@/pages/ShortListPage'
-import { MySelectionsPage } from '@/pages/MySelectionsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { AdminPage } from '@/pages/AdminPage'
 import { MLPerformancePage } from '@/pages/MLPerformancePage'
@@ -67,11 +66,6 @@ function App() {
                   <Route path="/short-list" element={
                     <ProtectedRoute>
                       <ShortListPage />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/my-selections" element={
-                    <ProtectedRoute>
-                      <MySelectionsPage />
                     </ProtectedRoute>
                   } />
                   <Route path="/bankroll" element={

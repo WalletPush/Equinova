@@ -174,7 +174,7 @@ interface AIMarketInsight {
 }
 
 export function AIInsiderPage() {
-  const [activeTab, setActiveTab] = useState<'upcoming_races' | 'ml_value_bets' | 'trainer_intent' | 'market_movers'>('upcoming_races')
+  const [activeTab, setActiveTab] = useState<'upcoming_races' | 'ai_top_picks' | 'ml_value_bets' | 'trainer_intent' | 'market_movers'>('upcoming_races')
   const [confidenceFilter, setConfidenceFilter] = useState<number>(60)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [raceInsights, setRaceInsights] = useState<Record<string, AIMarketInsight>>({})
@@ -327,9 +327,38 @@ export function AIInsiderPage() {
     refetchInterval: 1000 * 60 // Auto-refresh every minute
   })
 
+  // Fetch AI Top Picks
+  const { data: aiTopPicksData, isLoading: aiTopPicksLoading } = useQuery({
+    queryKey: ['ai-top-picks'],
+    queryFn: async () => {
+      console.log('Fetching AI Top Picks...')
+      const { data, error } = await supabase.functions.invoke('get-ai-top-picks', {
+        body: {}
+      })
+      
+      if (error) {
+        console.error('Error invoking AI Top Picks API:', error)
+        throw error
+      }
+      
+      if (!data.success) {
+        console.error('AI Top Picks API returned error:', data.error)
+        throw new Error(data.error?.message || 'AI Top Picks API failed')
+      }
+      
+      console.log('AI Top Picks fetched successfully:', data.data)
+      return data.data
+    },
+    staleTime: 1000 * 30, // 30 seconds
+    retry: 3,
+    retryDelay: 1000,
+    refetchInterval: 1000 * 60 // Auto-refresh every minute
+  })
+
   const persistentMarketMovers = persistentMarketMoversData?.race_groups || []
   const upcomingRaces = upcomingRacesResponse?.data?.upcoming_races || []
   const mlValueBets = mlValueBetsResponse?.data?.value_bet_races || []
+  const aiTopPicks = aiTopPicksData || []
 
   const londonTime = getDateStatusLabel() // Use consistent UK timezone
 
@@ -338,9 +367,10 @@ export function AIInsiderPage() {
     try {
       if (activeTab === 'upcoming_races') {
         await refetchUpcomingRaces()
+      } else if (activeTab === 'ai_top_picks') {
+        await refetchAIInsider() // Will refetch AI Top Picks
       } else if (activeTab === 'ml_value_bets') {
         await refetchMLValueBets()
-
       } else if (activeTab === 'trainer_intent') {
         await refetchTrainerIntent()
       } else {
@@ -598,7 +628,7 @@ export function AIInsiderPage() {
       raceTime: string
       course: string
       odds?: string
-      source: 'value_bet' | 'trainer_intent' | 'market_mover'
+      source: 'value_bet' | 'trainer_intent' | 'market_mover' | 'ai_top_picks'
       jockeyName?: string
       trainerName?: string
       mlInfo?: string
@@ -668,7 +698,7 @@ export function AIInsiderPage() {
     raceTime: string, 
     course: string, 
     odds: string | undefined, 
-    source: 'value_bet' | 'trainer_intent' | 'market_mover',
+    source: 'value_bet' | 'trainer_intent' | 'market_mover' | 'ai_top_picks',
     jockeyName?: string,
     trainerName?: string,
     mlInfo?: string,
@@ -700,6 +730,8 @@ export function AIInsiderPage() {
     } catch (error) {
       console.error('Shortlist operation failed:', error)
       // Show error feedback if needed
+    } finally {
+      setShortlistOperations(prev => ({ ...prev, [operationKey]: false }))
     }
   }
 
@@ -741,7 +773,7 @@ export function AIInsiderPage() {
     raceTime: string
     course: string
     odds?: string
-    source: 'value_bet' | 'trainer_intent' | 'market_mover'
+    source: 'value_bet' | 'trainer_intent' | 'market_mover' | 'ai_top_picks'
     jockeyName?: string
     trainerName?: string
     mlInfo?: string
@@ -841,7 +873,12 @@ export function AIInsiderPage() {
       icon: Clock,
       count: upcomingRaces?.length || 0
     },
-
+    {
+      id: 'ai_top_picks' as const,
+      label: 'AI Top Picks',
+      icon: Award,
+      count: aiTopPicks?.length || 0
+    },
     {
       id: 'ml_value_bets' as const,
       label: 'ML Value Bets',
@@ -1298,6 +1335,144 @@ export function AIInsiderPage() {
                   <TrendingUp className="w-16 h-16 text-gray-600 mx-auto mb-4" />
                   <h3 className="text-xl font-bold text-gray-400 mb-2">No Market Movers</h3>
                   <p className="text-gray-500">No significant market movements detected</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI Top Picks - EXACT COPY OF ML VALUE BETS STRUCTURE */}
+          {activeTab === 'ai_top_picks' && (
+            <div className="space-y-4">
+              {aiTopPicksLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="flex items-center space-x-2">
+                    <RefreshCw className="w-8 h-8 animate-spin text-yellow-400" />
+                    <span className="text-gray-400">Analyzing AI top picks...</span>
+                  </div>
+                </div>
+              ) : aiTopPicks && aiTopPicks.length > 0 ? (
+                <div className="space-y-4">
+                  {(() => {
+                    // Group AI Top Picks by race EXACTLY like ML Value Bets
+                    const groupedRaces = aiTopPicks.reduce((acc: any, pick: any) => {
+                      const raceKey = pick.race_id
+                      if (!acc[raceKey]) {
+                        acc[raceKey] = {
+                          race_id: pick.race_id,
+                          course_name: pick.course_name,
+                          off_time: pick.off_time,
+                          race_class: pick.race_class || 'Class 4',
+                          distance: pick.dist || '1m', 
+                          field_size: pick.field_size || 10,
+                          prize: pick.prize || '8140',
+                          surface: pick.surface || 'Turf',
+                          ai_top_picks: []
+                        }
+                      }
+                      acc[raceKey].ai_top_picks.push(pick)
+                      return acc
+                    }, {})
+
+                    return Object.values(groupedRaces).map((race: any) => (
+                      <div
+                        key={race.race_id}
+                        className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-yellow-400/50 transition-colors"
+                      >
+                        {/* Race Header - EXACT COPY */}
+                        <div className="mb-4">
+                          <div className="flex items-center space-x-3 mb-2">
+                            <h3 className="text-xl font-bold text-white">{race.course_name}</h3>
+                            <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
+                              {race.race_class}
+                            </span>
+                            <div className="flex items-center space-x-1 text-yellow-400">
+                              <Clock className="w-4 h-4" />
+                              <span className="font-bold">{formatTime(race.off_time)}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center space-x-4 text-sm text-gray-400 mb-3">
+                            <div className="flex items-center space-x-1">
+                              <MapPin className="w-4 h-4" />
+                              <span>{race.distance}</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <Users className="w-4 h-4" />
+                              <span>{race.field_size}</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <Trophy className="w-4 h-4" />
+                              <span className="text-green-400 font-medium">£{race.prize}</span>
+                            </div>
+                            <div className="text-gray-300 text-xs bg-gray-700 px-2 py-0.5 rounded">
+                              {race.surface}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* AI Top Picks - EXACT COPY OF TOP VALUE BETS STRUCTURE */}
+                        {race.ai_top_picks.length > 0 && (
+                          <div className="mb-4">
+                            <h4 className="text-sm font-medium text-gray-400 mb-2">AI Top Picks (3+ Models Agree)</h4>
+                            <div className="grid gap-3">
+                              {race.ai_top_picks.map((pick: any, index: number) => (
+                                <div key={pick.horse_id} className="bg-gray-700/50 rounded-lg p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center space-x-3">
+                                      <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
+                                        {pick.number || index + 1}
+                                      </div>
+                                      <HorseNameWithSilk 
+                                        horseName={pick.horse_name}
+                                        silkUrl={pick.silk_url}
+                                        className="text-yellow-400 font-bold text-lg"
+                                      />
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-green-400 font-bold text-lg">{pick.current_odds || 'TBC'}</div>
+                                      <div className="text-yellow-400 font-medium text-sm">
+                                        {pick.max_probability ? `${(pick.max_probability * 100).toFixed(1)}% ML` : 'N/A'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="text-xs text-gray-400 mb-2">
+                                    {pick.trainer_name || 'Unknown'} • {pick.jockey_name || 'Unknown'}
+                                  </div>
+                                  
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex flex-wrap gap-1">
+                                      <span className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-medium">
+                                        {pick.ai_reason}
+                                      </span>
+                                    </div>
+                                    <ShortlistButton
+                                      horseName={pick.horse_name}
+                                      raceTime={pick.off_time}
+                                      course={pick.course_name}
+                                      odds={pick.current_odds ? `${pick.current_odds}/1` : undefined}
+                                      source="ai_top_picks"
+                                      jockeyName={pick.jockey_name}
+                                      trainerName={pick.trainer_name}
+                                      mlInfo={`AI Top Pick: ${pick.ai_reason}`}
+                                      horseId={pick.horse_id}
+                                      raceId={pick.race_id}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  })()}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Award className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-400 mb-2">No AI Top Picks</h3>
+                  <p className="text-gray-500">No horses meet the AI Top Picks criteria</p>
                 </div>
               )}
             </div>

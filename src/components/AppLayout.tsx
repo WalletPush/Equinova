@@ -36,7 +36,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     { to: '/races', icon: Home, label: 'Today', active: 'races' },
     { to: '/previous', icon: Trophy, label: 'Results', active: 'previous' },
     { to: '/ai-insider', icon: Brain, label: 'AI Insider', active: 'ai-insider' },
-    { to: '/short-list', icon: List, label: 'Short list', active: 'short-list' },
+    { to: '/short-list', icon: List, label: 'Shortlist', active: 'short-list' },
   ]
 
   // Add admin-specific navigation items
@@ -82,14 +82,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                 >
                   <BarChart3 className="w-4 h-4" />
                   <span>Tracker</span>
-                </NavLink>
-                <NavLink
-                  to="/my-selections"
-                  onClick={() => setIsMenuOpen(false)}
-                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                >
-                  <Heart className="w-4 h-4" />
-                  <span>Selections</span>
                 </NavLink>
                 <NavLink
                   to="/bankroll"
