@@ -19,21 +19,51 @@ Deno.serve(async (req) => {
       throw new Error('Missing Supabase credentials');
     }
 
-    console.log('Starting ML Model Performance Update...');
+    // Check if triggered by another function
+    let triggeredBy = 'manual';
+    let sourceRaceId = null;
+    let targetDate = null;
+    let forceRecalculate = false;
+    try {
+      const requestBody = await req.json();
+      triggeredBy = requestBody?.triggered_by || 'manual';
+      sourceRaceId = requestBody?.source_race_id;
+      targetDate = requestBody?.target_date;
+      forceRecalculate = requestBody?.force_recalculate || false;
+    } catch {
+      // No JSON body provided, continue with manual processing
+    }
 
-    // Step 1: Get the latest race results from ml_model_race_results
-    // We'll process races that were added recently (last 10 minutes to catch new entries)
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    console.log(`Starting ML Model Performance Update... (triggered by: ${triggeredBy}${sourceRaceId ? `, race: ${sourceRaceId}` : ''}${targetDate ? `, date: ${targetDate}` : ''})`);
+
+    // Step 1: Get ML results to process
+    let mlResultsUrl;
+    let timeLabel;
     
-    const recentResultsResponse = await fetch(
-      `${supabaseUrl}/rest/v1/ml_model_race_results?select=*&created_at=gte.${tenMinutesAgo}&order=created_at.desc`,
-      {
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        }
+    if (targetDate) {
+      // Process all ML results for a specific date
+      mlResultsUrl = `${supabaseUrl}/rest/v1/ml_model_race_results?select=*&created_at=gte.${targetDate}&created_at=lt.${targetDate}T23:59:59Z&order=created_at.desc`;
+      timeLabel = `for date ${targetDate}`;
+    } else if (forceRecalculate) {
+      // Process all ML results from the last 7 days for recalculation
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      mlResultsUrl = `${supabaseUrl}/rest/v1/ml_model_race_results?select=*&created_at=gte.${sevenDaysAgo}&order=created_at.desc`;
+      timeLabel = 'from last 7 days (force recalculate)';
+    } else {
+      // Default: process recent results (last 10 minutes)
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      mlResultsUrl = `${supabaseUrl}/rest/v1/ml_model_race_results?select=*&created_at=gte.${tenMinutesAgo}&order=created_at.desc`;
+      timeLabel = 'from last 10 minutes';
+    }
+    
+    console.log(`Fetching ML results ${timeLabel}...`);
+    
+    const recentResultsResponse = await fetch(mlResultsUrl, {
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'apikey': supabaseKey
       }
-    );
+    });
 
     if (!recentResultsResponse.ok) {
       throw new Error(`Failed to fetch recent ML results: ${recentResultsResponse.status}`);
@@ -147,10 +177,15 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'ML Model Performance update completed successfully',
+      message: `ML Model Performance update completed successfully (${triggeredBy})`,
+      triggered_by: triggeredBy,
+      source_race_id: sourceRaceId,
+      target_date: targetDate,
+      force_recalculate: forceRecalculate,
+      time_range: timeLabel,
       analysis_dates_processed: resultsByDate.size,
-      model_updates: totalProcessed,
-      recent_results_processed: recentResults.length
+      models_processed: totalProcessed,
+      ml_results_processed: recentResults.length
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

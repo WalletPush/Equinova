@@ -290,6 +290,36 @@ Deno.serve(async (req)=>{
         console.warn(`Error updating shortlist for horse ${runner.horse_id}:`, shortlistError.message);
       }
     }
+    
+    // Step 8: Trigger ML performance data population
+    let mlPerformancePopulated = false;
+    try {
+      console.log(`🔄 Triggering ML performance data population for race ${race_id}`);
+      const mlPerformanceResponse = await fetch(`${supabaseUrl}/functions/v1/populate-ml-performance-data`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseKey}`,
+          'apikey': supabaseKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          race_id: race_id,
+          triggered_by: 'update-race-results-and-bets'
+        })
+      });
+      
+      if (mlPerformanceResponse.ok) {
+        const mlPerformanceData = await mlPerformanceResponse.json();
+        mlPerformancePopulated = true;
+        console.log(`✅ ML performance data populated for race ${race_id}:`, mlPerformanceData.records_inserted || 0, 'records');
+      } else {
+        const errorText = await mlPerformanceResponse.text();
+        console.warn(`⚠️ Failed to populate ML performance data for race ${race_id}:`, errorText);
+      }
+    } catch (mlPerformanceError) {
+      console.error(`❌ Error triggering ML performance population for race ${race_id}:`, mlPerformanceError);
+    }
+
     return new Response(JSON.stringify({
       success: true,
       message: 'Race results processed successfully',
@@ -301,6 +331,7 @@ Deno.serve(async (req)=>{
         bankroll_updates: bankrollUpdates,
         selections_updated: updatedSelections,
         shortlist_updated: updatedShortlist,
+        ml_performance_populated: mlPerformancePopulated,
         total_runners: runners.length,
         winner: winnerHorse ? winnerHorse.horse : null
       },
