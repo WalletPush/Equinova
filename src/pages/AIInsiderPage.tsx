@@ -644,47 +644,36 @@ export function AIInsiderPage() {
       }
       
       const insightKey = `${raceId}::${horseData.id}`
-      // Call the new enhanced value bet analysis function (Monte Carlo + OpenAI)
-      const { data, error } = await supabase.functions.invoke('enhanced-value-bet-analysis', {
-        body: {
-          raceId: raceId,
-          horseId: horseData.id.toString()
-        }
+      // Call the new enhanced value bet analysis function (Monte Carlo + OpenAI) using authenticated helper
+      const res = await callSupabaseFunction('enhanced-value-bet-analysis', {
+        raceId: raceId,
+        horseId: horseData.id.toString()
       })
-      
-      if (error) {
-        console.error('Error getting OpenAI value bet analysis:', error)
-        throw error
+
+      // Enhanced analysis with Monte Carlo data
+      const mcData = res.data.monte_carlo_data;
+      const analysisData: AIMarketInsight = {
+        race_id: raceId,
+        course: course,
+        off_time: offTime,
+        analysis: res.data.analysis,
+        key_insights: [
+          `Monte Carlo Win Probability: ${(mcData.win_probability * 100).toFixed(1)}%`,
+          `Expected Return: ${(mcData.expected_return * 100).toFixed(1)}%`,
+          `Kelly Fraction: ${(mcData.kelly_fraction * 100).toFixed(1)}%`,
+          `Risk Level: ${res.data.risk_level}`,
+          `Recommendation: ${res.data.bet_recommendation}`,
+          `Statistical Confidence: ${mcData.confidence_level}%`
+        ],
+        risk_assessment: `${res.data.risk_level} - Based on ${mcData.simulation_runs.toLocaleString()} Monte Carlo simulations`,
+        confidence_score: mcData.confidence_level,
+        total_ml_horses_analyzed: targetRace.field_size || 0,
+        horses_with_movement: 1,
+        market_confidence_horses: [],
+        timestamp: new Date().toISOString()
       }
-      
-      if (data.data && data.data.success) {
-        // Enhanced analysis with Monte Carlo data
-        const mcData = data.data.monte_carlo_data;
-        const analysisData: AIMarketInsight = {
-          race_id: raceId,
-          course: course,
-          off_time: offTime,
-          analysis: data.data.analysis,
-          key_insights: [
-            `Monte Carlo Win Probability: ${(mcData.win_probability * 100).toFixed(1)}%`,
-            `Expected Return: ${(mcData.expected_return * 100).toFixed(1)}%`,
-            `Kelly Fraction: ${(mcData.kelly_fraction * 100).toFixed(1)}%`,
-            `Risk Level: ${data.data.risk_level}`,
-            `Recommendation: ${data.data.bet_recommendation}`,
-            `Statistical Confidence: ${mcData.confidence_level}%`
-          ],
-          risk_assessment: `${data.data.risk_level} - Based on ${mcData.simulation_runs.toLocaleString()} Monte Carlo simulations`,
-          confidence_score: mcData.confidence_level,
-          total_ml_horses_analyzed: targetRace.field_size || 0,
-          horses_with_movement: 1,
-          market_confidence_horses: [],
-          timestamp: new Date().toISOString()
-        }
-        setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
-        console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
-      } else {
-        throw new Error(data.data?.error || 'OpenAI value bet analysis failed')
-      }
+      setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+      console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
     } catch (error) {
       console.error(`Failed to get OpenAI value bet analysis for race ${raceId}:`, error)
       // Show error in UI
@@ -749,29 +738,22 @@ export function AIInsiderPage() {
       // No longer need Google Maps API check since we implemented Haversine formula
       // Proceed directly with OpenAI-powered trainer intent analysis
       
-      // Call the new OpenAI-powered trainer intent analysis function
-      const { data, error } = await supabase.functions.invoke('openai-trainer-intent-analysis', {
-        body: {
-          raceId: raceId,
-          horseId: horseData.id.toString()
-        }
+      // Call the new OpenAI-powered trainer intent analysis function (authenticated)
+      const res = await callSupabaseFunction('openai-trainer-intent-analysis', {
+        raceId: raceId,
+        horseId: horseData.id.toString()
       })
-      
-      if (error) {
-        console.error('Error getting OpenAI trainer intent analysis:', error)
-        throw error
-      }
-      
-      if (data.data && data.data.success) {
+
+      if (res && res.data && res.data.success) {
         // Reformat for compatibility with existing UI
         const analysisData: AIMarketInsight = {
           race_id: raceId,
           course: course,
           off_time: offTime,
-          analysis: data.data.analysis,
+          analysis: res.data.analysis,
           key_insights: [
             `Analyzing ${targetIntent?.horse_name || horseIdentifier} trainer intent`,
-            `Travel distance: ${data.data.travelDistance || 'Unknown'}`,
+            `Travel distance: ${res.data.travelDistance || 'Unknown'}`,
             `Trainer: ${targetIntent?.trainer_name || 'Unknown'}`,
             'AI-powered travel and intent analysis completed'
           ],
@@ -785,7 +767,7 @@ export function AIInsiderPage() {
         setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
         console.log(`OpenAI trainer intent analysis completed for ${targetIntent?.horse_name || horseIdentifier}`)
       } else {
-        throw new Error(data.data?.error || 'OpenAI trainer intent analysis failed')
+        throw new Error(res?.data?.error || 'OpenAI trainer intent analysis failed')
       }
     } catch (error) {
       console.error(`Failed to get OpenAI trainer intent analysis for race ${raceId}:`, error)
@@ -856,35 +838,28 @@ export function AIInsiderPage() {
       }
 
       const insightKey = `${raceId}::${horseData.id}`
-      // Call the enhanced analysis function (Monte Carlo + OpenAI)
-      const { data, error } = await supabase.functions.invoke('enhanced-value-bet-analysis', {
-        body: {
-          raceId: raceId,
-          horseId: horseData.id.toString()
-        }
+      // Call the enhanced analysis function (Monte Carlo + OpenAI) authenticated
+      const res = await callSupabaseFunction('enhanced-value-bet-analysis', {
+        raceId: raceId,
+        horseId: horseData.id.toString()
       })
 
-      if (error) {
-        console.error('Error getting OpenAI top pick analysis:', error)
-        throw error
-      }
-
-      if (data.data && data.data.success) {
-        const mcData = data.data.monte_carlo_data;
+      if (res && res.data && res.data.success) {
+        const mcData = res.data.monte_carlo_data;
         const analysisData: AIMarketInsight = {
           race_id: raceId,
           course: course,
           off_time: offTime,
-          analysis: data.data.analysis,
+          analysis: res.data.analysis,
           key_insights: [
             `Monte Carlo Win Probability: ${(mcData.win_probability * 100).toFixed(1)}%`,
             `Expected Return: ${(mcData.expected_return * 100).toFixed(1)}%`,
             `Kelly Fraction: ${(mcData.kelly_fraction * 100).toFixed(1)}%`,
-            `Risk Level: ${data.data.risk_level}`,
-            `Recommendation: ${data.data.bet_recommendation}`,
+            `Risk Level: ${res.data.risk_level}`,
+            `Recommendation: ${res.data.bet_recommendation}`,
             `Statistical Confidence: ${mcData.confidence_level}%`
           ],
-          risk_assessment: `${data.data.risk_level} - Based on ${mcData.simulation_runs.toLocaleString()} Monte Carlo simulations`,
+          risk_assessment: `${res.data.risk_level} - Based on ${mcData.simulation_runs.toLocaleString()} Monte Carlo simulations`,
           confidence_score: mcData.confidence_level,
           total_ml_horses_analyzed: topPick.field_size || 0,
           horses_with_movement: 1,
@@ -894,7 +869,7 @@ export function AIInsiderPage() {
         setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
         console.log(`OpenAI top pick analysis completed for ${topPick.horse_name}`)
       } else {
-        throw new Error(data.data?.error || 'OpenAI top pick analysis failed')
+        throw new Error(res?.data?.error || 'OpenAI top pick analysis failed')
       }
     } catch (error) {
       console.error(`Failed to get OpenAI top pick analysis for race ${raceId}:`, error)
