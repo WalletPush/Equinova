@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
@@ -419,9 +419,18 @@ export function AIInsiderPage() {
 
   // Enhanced Value Bet Analysis using OpenAI-powered analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
-    if (loadingInsights[raceId]) return
-    
-    setLoadingInsights(prev => ({ ...prev, [raceId]: true }))
+    // We'll key insights by raceId::horseId so they don't collide with race-level insights
+    // Find the race and get the top value bet horse
+    const targetRace = mlValueBets.find(race => race.race_id === raceId)
+    if (!targetRace || !targetRace.top_value_bets || targetRace.top_value_bets.length === 0) {
+      console.error('No value bet horses found for analysis')
+      return
+    }
+    const topValueBet = targetRace.top_value_bets[0]
+    const insightKeyPlaceholder = `${raceId}::${topValueBet.horse_id || topValueBet.horse_name}`
+    if (loadingInsights[insightKeyPlaceholder]) return
+
+    setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: true }))
     
     try {
       // Find the race and get the top value bet horse
@@ -445,6 +454,7 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topValueBet.horse_name}`)
       }
       
+      const insightKey = `${raceId}::${horseData.id}`
       // Call the new enhanced value bet analysis function (Monte Carlo + OpenAI)
       const { data, error } = await supabase.functions.invoke('enhanced-value-bet-analysis', {
         body: {
@@ -481,7 +491,7 @@ export function AIInsiderPage() {
           market_confidence_horses: [],
           timestamp: new Date().toISOString()
         }
-        setRaceInsights(prev => ({ ...prev, [raceId]: analysisData }))
+        setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
         console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
       } else {
         throw new Error(data.data?.error || 'OpenAI value bet analysis failed')
@@ -502,35 +512,44 @@ export function AIInsiderPage() {
         market_confidence_horses: [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [raceId]: errorData }))
+      setRaceInsights(prev => ({ ...prev, [insightKeyPlaceholder]: errorData }))
     } finally {
-      setLoadingInsights(prev => ({ ...prev, [raceId]: false }))
+      setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: false }))
     }
   }
 
   // Enhanced Trainer Intent Analysis using OpenAI-powered analysis
-  const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string) => {
-    if (loadingInsights[raceId]) return
-    
-    setLoadingInsights(prev => ({ ...prev, [raceId]: true }))
+  const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
+    // Trainer intent analysis should be keyed by raceId::horseId to avoid collisions
+    // Determine target intent (or use provided horseIdOverride)
+    const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
+    const horseIdentifier = horseIdOverride || targetIntent?.horse_id || targetIntent?.horse_name
+    const insightKey = `${raceId}::${horseIdentifier}`
+    if (loadingInsights[insightKey]) return
+
+    setLoadingInsights(prev => ({ ...prev, [insightKey]: true }))
     
     try {
       // Find the trainer intent and get the horse
-      const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
-      if (!targetIntent) {
+      if (!horseIdentifier) {
         throw new Error('No trainer intent found for analysis')
       }
-      
-      // Get the horse ID from race_entries table
-      const { data: horseData, error: horseError } = await supabase
-        .from('race_entries')
-        .select('id')
-        .eq('race_id', raceId)
-        .eq('horse_name', targetIntent.horse_name)
-        .single()
+
+      // If horseIdOverride provided and is numeric use it, otherwise find by name
+      let horseData: any = null
+      let horseError: any = null
+      if (/^\d+$/.test(String(horseIdentifier))) {
+        const res = await supabase.from('race_entries').select('id').eq('id', horseIdentifier).single()
+        horseData = res.data
+        horseError = res.error
+      } else {
+        const res = await supabase.from('race_entries').select('id').eq('race_id', raceId).eq('horse_name', String(horseIdentifier)).single()
+        horseData = res.data
+        horseError = res.error
+      }
       
       if (horseError || !horseData) {
-        throw new Error(`Failed to find horse ID for ${targetIntent.horse_name}`)
+        throw new Error(`Failed to find horse ID for ${horseIdentifier}`)
       }
       
       // No longer need Google Maps API check since we implemented Haversine formula
@@ -557,9 +576,9 @@ export function AIInsiderPage() {
           off_time: offTime,
           analysis: data.data.analysis,
           key_insights: [
-            `Analyzing ${targetIntent.horse_name} trainer intent`,
+            `Analyzing ${targetIntent?.horse_name || horseIdentifier} trainer intent`,
             `Travel distance: ${data.data.travelDistance || 'Unknown'}`,
-            `Trainer: ${targetIntent.trainer_name}`,
+            `Trainer: ${targetIntent?.trainer_name || 'Unknown'}`,
             'AI-powered travel and intent analysis completed'
           ],
           risk_assessment: 'Based on OpenAI analysis of trainer commitment and travel distance',
@@ -569,8 +588,8 @@ export function AIInsiderPage() {
           market_confidence_horses: [],
           timestamp: new Date().toISOString()
         }
-        setRaceInsights(prev => ({ ...prev, [raceId]: analysisData }))
-        console.log(`OpenAI trainer intent analysis completed for ${targetIntent.horse_name}`)
+        setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+        console.log(`OpenAI trainer intent analysis completed for ${targetIntent?.horse_name || horseIdentifier}`)
       } else {
         throw new Error(data.data?.error || 'OpenAI trainer intent analysis failed')
       }
@@ -590,9 +609,112 @@ export function AIInsiderPage() {
         market_confidence_horses: [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [raceId]: errorData }))
+      setRaceInsights(prev => ({ ...prev, [insightKey]: errorData }))
     } finally {
-      setLoadingInsights(prev => ({ ...prev, [raceId]: false }))
+      setLoadingInsights(prev => ({ ...prev, [insightKey]: false }))
+    }
+  }
+
+  // AI Top Pick Analysis (mirrors value bet analysis but targets AI Top Picks)
+  const getAiTopPickAnalysis = async (raceId: string, course: string, offTime: string) => {
+    // Determine top pick and key by raceId::horseId
+    const targetRace = aiTopPicks.find((pick: any) => pick.race_id === raceId)
+    if (!targetRace) {
+      throw new Error('No AI Top Picks found for analysis')
+    }
+    const topPick = aiTopPicks.filter((p: any) => p.race_id === raceId)[0]
+    if (!topPick) {
+      throw new Error('No top pick horse found for analysis')
+    }
+    const insightKeyPlaceholder = `${raceId}::${topPick.horse_id || topPick.horse_name}`
+    if (loadingInsights[insightKeyPlaceholder]) return
+
+    setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: true }))
+
+    try {
+      // Find the AI top pick race
+      const targetRace = aiTopPicks.find((pick: any) => pick.race_id === raceId)
+      if (!targetRace) {
+        throw new Error('No AI Top Picks found for analysis')
+      }
+
+      // Prefer the first top pick horse
+      const topPick = aiTopPicks.filter((p: any) => p.race_id === raceId)[0]
+      if (!topPick) {
+        throw new Error('No top pick horse found for analysis')
+      }
+
+      // Get the horse ID from race_entries table
+      const { data: horseData, error: horseError } = await supabase
+        .from('race_entries')
+        .select('id')
+        .eq('race_id', raceId)
+        .eq('horse_name', topPick.horse_name)
+        .single()
+
+      if (horseError || !horseData) {
+        throw new Error(`Failed to find horse ID for ${topPick.horse_name}`)
+      }
+
+      const insightKey = `${raceId}::${horseData.id}`
+      // Call the enhanced analysis function (Monte Carlo + OpenAI)
+      const { data, error } = await supabase.functions.invoke('enhanced-value-bet-analysis', {
+        body: {
+          raceId: raceId,
+          horseId: horseData.id.toString()
+        }
+      })
+
+      if (error) {
+        console.error('Error getting OpenAI top pick analysis:', error)
+        throw error
+      }
+
+      if (data.data && data.data.success) {
+        const mcData = data.data.monte_carlo_data;
+        const analysisData: AIMarketInsight = {
+          race_id: raceId,
+          course: course,
+          off_time: offTime,
+          analysis: data.data.analysis,
+          key_insights: [
+            `Monte Carlo Win Probability: ${(mcData.win_probability * 100).toFixed(1)}%`,
+            `Expected Return: ${(mcData.expected_return * 100).toFixed(1)}%`,
+            `Kelly Fraction: ${(mcData.kelly_fraction * 100).toFixed(1)}%`,
+            `Risk Level: ${data.data.risk_level}`,
+            `Recommendation: ${data.data.bet_recommendation}`,
+            `Statistical Confidence: ${mcData.confidence_level}%`
+          ],
+          risk_assessment: `${data.data.risk_level} - Based on ${mcData.simulation_runs.toLocaleString()} Monte Carlo simulations`,
+          confidence_score: mcData.confidence_level,
+          total_ml_horses_analyzed: topPick.field_size || 0,
+          horses_with_movement: 1,
+          market_confidence_horses: [],
+          timestamp: new Date().toISOString()
+        }
+        setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+        console.log(`OpenAI top pick analysis completed for ${topPick.horse_name}`)
+      } else {
+        throw new Error(data.data?.error || 'OpenAI top pick analysis failed')
+      }
+    } catch (error) {
+      console.error(`Failed to get OpenAI top pick analysis for race ${raceId}:`, error)
+      const errorData: AIMarketInsight = {
+        race_id: raceId,
+        course: course,
+        off_time: offTime,
+        analysis: `Analysis failed: ${error.message}`,
+        key_insights: ['Please try again later'],
+        risk_assessment: 'Unable to complete analysis',
+        confidence_score: 0,
+        total_ml_horses_analyzed: 0,
+        horses_with_movement: 0,
+        market_confidence_horses: [],
+        timestamp: new Date().toISOString()
+      }
+      setRaceInsights(prev => ({ ...prev, [insightKeyPlaceholder]: errorData }))
+    } finally {
+      setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: false }))
     }
   }
 
@@ -635,7 +757,13 @@ export function AIInsiderPage() {
       horseId?: string
       raceId?: string
     }) => {
-      return await callSupabaseFunction('add-to-shortlist', {
+      // Client-side validation to avoid calling function with missing required fields
+      if (!horseName || !raceTime || !course) {
+        console.error('addToShortlistMutation: missing required fields', { horseName, raceTime, course })
+        throw new Error('Missing required fields for shortlist: horseName, raceTime, course')
+      }
+
+      const payload = {
         horse_name: horseName,
         race_time: raceTime,
         course: course,
@@ -646,7 +774,16 @@ export function AIInsiderPage() {
         ml_info: mlInfo || null,
         horse_id: horseId || null,
         race_id: raceId || null
-      })
+      }
+      console.log('addToShortlistMutation: payload', payload)
+      try {
+        const res = await callSupabaseFunction('add-to-shortlist', payload)
+        console.log('addToShortlistMutation: response', res)
+        return res
+      } catch (err) {
+        console.error('addToShortlistMutation: error', err)
+        throw err
+      }
     },
     onSuccess: (data, variables) => {
       console.log(`Added ${variables.horseName} to shortlist`)
@@ -668,10 +805,16 @@ export function AIInsiderPage() {
       horseName: string
       course: string
     }) => {
-      return await callSupabaseFunction('remove-from-shortlist', {
-        horse_name: horseName,
-        course: course
-      })
+      const payload = { horse_name: horseName, course }
+      console.log('removeFromShortlistMutation: payload', payload)
+      try {
+        const res = await callSupabaseFunction('remove-from-shortlist', payload)
+        console.log('removeFromShortlistMutation: response', res)
+        return res
+      } catch (err) {
+        console.error('removeFromShortlistMutation: error', err)
+        throw err
+      }
     },
     onSuccess: (data, variables) => {
       console.log(`Removed ${variables.horseName} from shortlist`)
@@ -707,7 +850,7 @@ export function AIInsiderPage() {
   ) => {
     const operationKey = horseName
     setShortlistOperations(prev => ({ ...prev, [operationKey]: true }))
-    
+    console.log('handleShortlistToggle start', { horseName, course, source })
     try {
       const isInShortlist = isHorseInShortlist(horseName, course)
       
@@ -782,32 +925,51 @@ export function AIInsiderPage() {
   }) => {
     const isInShortlist = isHorseInShortlist(horseName, course)
     const isLoading = shortlistOperations[horseName] || false
-    
+    const lastToggleRef = useRef<number>(0)
+
+    const handleButtonToggle = (e?: React.SyntheticEvent) => {
+      e?.preventDefault?.()
+      e?.stopPropagation?.()
+      console.log('Shortlist button event', { horseName, course, source })
+      if (isLoading) return
+      const now = Date.now()
+      if (now - lastToggleRef.current < 500) return
+      lastToggleRef.current = now
+      void handleShortlistToggle(horseName, raceTime, course, odds, source, jockeyName, trainerName, mlInfo, horseId, raceId)
+    }
+
     return (
-      <button
-        onClick={() => handleShortlistToggle(horseName, raceTime, course, odds, source, jockeyName, trainerName, mlInfo, horseId, raceId)}
-        disabled={isLoading}
-        className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-          isInShortlist 
-            ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30' 
-            : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30'
-        } disabled:opacity-50 disabled:cursor-not-allowed`}
-        title={isInShortlist ? 'Remove from shortlist' : 'Add to shortlist'}
-      >
-        {isLoading ? (
-          <Loader2 className="w-3 h-3 animate-spin" />
-        ) : isInShortlist ? (
-          <>
-            <Check className="w-3 h-3" />
-            <span>Shortlisted</span>
-          </>
-        ) : (
-          <>
-            <Heart className="w-3 h-3" />
-            <span>Shortlist</span>
-          </>
-        )}
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={handleButtonToggle}
+          onTouchEnd={handleButtonToggle}
+          onPointerDown={handleButtonToggle}
+          disabled={isLoading}
+          className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+            isInShortlist 
+              ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30' 
+              : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          title={isInShortlist ? 'Remove from shortlist' : 'Add to shortlist'}
+        >
+          {isLoading ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : isInShortlist ? (
+            <>
+              <Check className="w-3 h-3" />
+              <span>Shortlisted</span>
+            </>
+          ) : (
+            <>
+              <Heart className="w-3 h-3" />
+              <span>Shortlist</span>
+            </>
+          )}
+        </button>
+
+        {/* no additional tooltip */}
+      </div>
     )
   }
 
@@ -1353,7 +1515,7 @@ export function AIInsiderPage() {
               ) : aiTopPicks && aiTopPicks.length > 0 ? (
                 <div className="space-y-4">
                   {(() => {
-                    // Group AI Top Picks by race EXACTLY like ML Value Bets
+                    // Group AI Top Picks by race (same as ML Value Bets)
                     const groupedRaces = aiTopPicks.reduce((acc: any, pick: any) => {
                       const raceKey = pick.race_id
                       if (!acc[raceKey]) {
@@ -1362,7 +1524,7 @@ export function AIInsiderPage() {
                           course_name: pick.course_name,
                           off_time: pick.off_time,
                           race_class: pick.race_class || 'Class 4',
-                          distance: pick.dist || '1m', 
+                          distance: pick.dist || '1m',
                           field_size: pick.field_size || 10,
                           prize: pick.prize || '8140',
                           surface: pick.surface || 'Turf',
@@ -1373,99 +1535,203 @@ export function AIInsiderPage() {
                       return acc
                     }, {})
 
-                    return Object.values(groupedRaces).map((race: any) => (
-                      <div
-                        key={race.race_id}
-                        className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-yellow-400/50 transition-colors"
-                      >
-                        {/* Race Header - EXACT COPY */}
-                        <div className="mb-4">
-                          <div className="flex items-center space-x-3 mb-2">
-                            <h3 className="text-xl font-bold text-white">{race.course_name}</h3>
-                            <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
-                              {race.race_class}
-                            </span>
-                            <div className="flex items-center space-x-1 text-yellow-400">
-                              <Clock className="w-4 h-4" />
-                              <span className="font-bold">{formatTime(race.off_time)}</span>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center space-x-4 text-sm text-gray-400 mb-3">
-                            <div className="flex items-center space-x-1">
-                              <MapPin className="w-4 h-4" />
-                              <span>{race.distance}</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <Users className="w-4 h-4" />
-                              <span>{race.field_size}</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <Trophy className="w-4 h-4" />
-                              <span className="text-green-400 font-medium">£{race.prize}</span>
-                            </div>
-                            <div className="text-gray-300 text-xs bg-gray-700 px-2 py-0.5 rounded">
-                              {race.surface}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* AI Top Picks - EXACT COPY OF TOP VALUE BETS STRUCTURE */}
-                        {race.ai_top_picks.length > 0 && (
+                    return Object.values(groupedRaces).map((race: any) => {
+                      // Use horse-specific insight key so analyses don't collide with race-level insights
+                      const topHorseId = race.ai_top_picks?.[0]?.horse_id
+                      const insightKey = topHorseId ? `${race.race_id}::${topHorseId}` : race.race_id
+                      const raceInsight = raceInsights[insightKey]
+                      const isLoadingInsight = loadingInsights[insightKey] || false
+
+                      return (
+                        <div
+                          key={race.race_id}
+                          className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-yellow-400/50 transition-colors"
+                        >
+                          {/* Race Header */}
                           <div className="mb-4">
-                            <h4 className="text-sm font-medium text-gray-400 mb-2">AI Top Picks (3+ Models Agree)</h4>
-                            <div className="grid gap-3">
-                              {race.ai_top_picks.map((pick: any, index: number) => (
-                                <div key={pick.horse_id} className="bg-gray-700/50 rounded-lg p-4">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center space-x-3">
-                                      <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
-                                        {pick.number || index + 1}
+                            <div className="flex items-center space-x-3 mb-2">
+                              <h3 className="text-xl font-bold text-white">{race.course_name}</h3>
+                              <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
+                                {race.race_class}
+                              </span>
+                              <div className="flex items-center space-x-1 text-yellow-400">
+                                <Clock className="w-4 h-4" />
+                                <span className="font-bold">{formatTime(race.off_time)}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-4 text-sm text-gray-400 mb-3">
+                              <div className="flex items-center space-x-1">
+                                <MapPin className="w-4 h-4" />
+                                <span>{race.distance}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <Users className="w-4 h-4" />
+                                <span>{race.field_size}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <Trophy className="w-4 h-4" />
+                                <span className="text-green-400 font-medium">£{race.prize}</span>
+                              </div>
+                              <div className="text-gray-300 text-xs bg-gray-700 px-2 py-0.5 rounded">
+                                {race.surface}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* AI Top Picks List */}
+                          {race.ai_top_picks.length > 0 && (
+                            <div className="mb-4">
+                              <h4 className="text-sm font-medium text-gray-400 mb-2">AI Top Picks (3+ Models Agree)</h4>
+                              <div className="grid gap-3">
+                                {race.ai_top_picks.map((pick: any, index: number) => (
+                                  <div key={pick.horse_id} className="bg-gray-700/50 rounded-lg p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center space-x-3">
+                                        <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
+                                          {pick.number || index + 1}
+                                        </div>
+                                        <HorseNameWithSilk 
+                                          horseName={pick.horse_name}
+                                          silkUrl={pick.silk_url}
+                                          className="text-yellow-400 font-bold text-lg"
+                                        />
                                       </div>
-                                      <HorseNameWithSilk 
+                                      <div className="text-right">
+                                        <div className="text-green-400 font-bold text-lg">{pick.current_odds || 'TBC'}</div>
+                                        <div className="text-yellow-400 font-medium text-sm">
+                                          {pick.max_probability ? `${(pick.max_probability * 100).toFixed(1)}% ML` : 'N/A'}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-xs text-gray-400 mb-2">
+                                      {pick.trainer_name || 'Unknown'} • {pick.jockey_name || 'Unknown'}
+                                    </div>
+
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex flex-wrap gap-1">
+                                        <span className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-medium">
+                                          {pick.ai_reason}
+                                        </span>
+                                      </div>
+                                      <ShortlistButton
                                         horseName={pick.horse_name}
-                                        silkUrl={pick.silk_url}
-                                        className="text-yellow-400 font-bold text-lg"
+                                        raceTime={pick.off_time}
+                                        course={pick.course_name}
+                                        odds={pick.current_odds ? `${pick.current_odds}/1` : undefined}
+                                        source="ai_top_picks"
+                                        jockeyName={pick.jockey_name}
+                                        trainerName={pick.trainer_name}
+                                        mlInfo={`AI Top Pick: ${pick.ai_reason}`}
+                                        horseId={pick.horse_id}
+                                        raceId={pick.race_id}
                                       />
                                     </div>
-                                    <div className="text-right">
-                                      <div className="text-green-400 font-bold text-lg">{pick.current_odds || 'TBC'}</div>
-                                      <div className="text-yellow-400 font-medium text-sm">
-                                        {pick.max_probability ? `${(pick.max_probability * 100).toFixed(1)}% ML` : 'N/A'}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* AI Insights Results for Top Pick */}
+                          {raceInsight && (
+                            <div className="border-t border-gray-700 pt-4">
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center space-x-2">
+                                  <Brain className="w-5 h-5 text-purple-400" />
+                                  <span className="text-lg font-bold text-white">AI Top Pick Analysis</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-sm text-gray-400">Confidence:</span>
+                                  <span className={`text-xl font-bold ${getConfidenceColor(raceInsight.confidence_score)}`}>
+                                    {capConfidence(raceInsight.confidence_score)}%
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="grid md:grid-cols-2 gap-6">
+                                <div>
+                                  <h5 className="text-sm font-medium text-gray-400 mb-2">Analysis Summary</h5>
+                                  <FormattedAnalysisText text={raceInsight.analysis} className="mb-4" />
+
+                                  <h5 className="text-sm font-medium text-gray-400 mb-2">Key Insights</h5>
+                                  <ul className="space-y-1">
+                                    {raceInsight.key_insights.map((insight, index) => (
+                                      <li key={index} className="text-sm text-gray-300 flex items-start space-x-2">
+                                        <ChevronRight className="w-3 h-3 mt-0.5 text-yellow-400 flex-shrink-0" />
+                                        <span>{insight}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+
+                                <div>
+                                  <h5 className="text-sm font-medium text-gray-400 mb-2">Risk Assessment</h5>
+                                  <p className="text-gray-300 text-sm leading-relaxed mb-4">{raceInsight.risk_assessment}</p>
+
+                                  <div className="bg-gray-700/30 rounded-lg p-3">
+                                    <div className="grid grid-cols-2 gap-3 text-xs">
+                                      <div>
+                                        <span className="text-gray-400">ML Horses Analyzed:</span>
+                                        <div className="text-white font-medium">{raceInsight.total_ml_horses_analyzed}</div>
+                                      </div>
+                                      <div>
+                                        <span className="text-gray-400">Market Movement:</span>
+                                        <div className="text-white font-medium">{raceInsight.horses_with_movement}</div>
                                       </div>
                                     </div>
                                   </div>
-                                  
-                                  <div className="text-xs text-gray-400 mb-2">
-                                    {pick.trainer_name || 'Unknown'} • {pick.jockey_name || 'Unknown'}
-                                  </div>
-                                  
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex flex-wrap gap-1">
-                                      <span className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-medium">
-                                        {pick.ai_reason}
-                                      </span>
-                                    </div>
-                                    <ShortlistButton
-                                      horseName={pick.horse_name}
-                                      raceTime={pick.off_time}
-                                      course={pick.course_name}
-                                      odds={pick.current_odds ? `${pick.current_odds}/1` : undefined}
-                                      source="ai_top_picks"
-                                      jockeyName={pick.jockey_name}
-                                      trainerName={pick.trainer_name}
-                                      mlInfo={`AI Top Pick: ${pick.ai_reason}`}
-                                      horseId={pick.horse_id}
-                                      raceId={pick.race_id}
-                                    />
+                                </div>
+                              </div>
+
+                              {/* Market Confidence Horses */}
+                              {raceInsight.market_confidence_horses && raceInsight.market_confidence_horses.length > 0 && (
+                                <div className="mt-6">
+                                  <h5 className="text-sm font-medium text-gray-400 mb-3">Market Confidence Horses</h5>
+                                  <div className="grid gap-3">
+                                    {raceInsight.market_confidence_horses.map((horse) => (
+                                      <div key={horse.horse_id} className="bg-gray-700/50 rounded-lg p-4">
+                                        <div className="flex items-start justify-between mb-3">
+                                          <div>
+                                            <HorseNameWithSilk horseName={horse.horse_name} silkUrl={horse.silk_url} className="text-yellow-400 font-bold text-lg" />
+                                            <div className="text-sm text-gray-400 mt-1">{horse.trainer_name} • {horse.jockey_name}</div>
+                                          </div>
+                                          <div className="text-right">
+                                            <div className="text-green-400 font-bold text-lg">{horse.current_odds}</div>
+                                            <div className={`text-sm font-medium ${getConfidenceColor(horse.confidence_score)}`}>{capConfidence(horse.confidence_score)}% confidence</div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
-                              ))}
+                              )}
                             </div>
+                          )}
+
+                          {/* AI Top Pick Analysis Button (race level) */}
+                          <div className="mt-4 pt-4 border-t border-gray-700">
+                            <button
+                              onClick={() => getAiTopPickAnalysis(race.race_id, race.course_name, race.off_time)}
+                              disabled={isLoadingInsight || !!raceInsight}
+                              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+                            >
+                              {isLoadingInsight ? (
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                              ) : raceInsight ? (
+                                <span className="text-green-300">✓</span>
+                              ) : (
+                                <Brain className="w-4 h-4" />
+                              )}
+                              <span>
+                                {isLoadingInsight ? 'Analyzing Top Pick...' : raceInsight ? 'Top Pick Analysis Ready' : 'Analyse AI Top Pick'}
+                              </span>
+                            </button>
                           </div>
-                        )}
-                      </div>
-                    ))
+                        </div>
+                      )
+                    })
                   })()}
                 </div>
               ) : (
@@ -1491,8 +1757,10 @@ export function AIInsiderPage() {
               ) : mlValueBets && mlValueBets.length > 0 ? (
                 <div className="space-y-4">
                   {mlValueBets.map((race) => {
-                    const raceInsight = raceInsights[race.race_id]
-                    const isLoadingInsight = loadingInsights[race.race_id] || false
+                    const topHorseId = race.top_value_bets?.[0]?.horse_id
+                    const insightKey = topHorseId ? `${race.race_id}::${topHorseId}` : race.race_id
+                    const raceInsight = raceInsights[insightKey]
+                    const isLoadingInsight = loadingInsights[insightKey] || false
                     
                     return (
                       <div
@@ -1727,8 +1995,11 @@ export function AIInsiderPage() {
                     }[])
                       .sort((a, b) => a.off_time.localeCompare(b.off_time))
                       .map((raceGroup) => {
-                        const raceInsight = raceInsights[raceGroup.race_id]
-                        const isLoadingInsight = loadingInsights[raceGroup.race_id] || false
+                        // Trainer intent insights should be keyed by raceId::horseId (use first intent horse if available)
+                        const topIntentHorseId = raceGroup.intents?.[0]?.horse_id
+                        const intentInsightKey = topIntentHorseId ? `${raceGroup.race_id}::${topIntentHorseId}` : raceGroup.race_id
+                        const raceInsight = raceInsights[intentInsightKey]
+                        const isLoadingInsight = loadingInsights[intentInsightKey] || false
                         
                         return (
                           <div
@@ -1875,7 +2146,7 @@ export function AIInsiderPage() {
                             {/* AI Analyser Button */}
                             <div className="mt-4 pt-4 border-t border-gray-700">
                               <button
-                                onClick={() => getTrainerIntentAnalysis(raceGroup.race_id, raceGroup.course_name, raceGroup.off_time)}
+                                onClick={() => getTrainerIntentAnalysis(raceGroup.race_id, raceGroup.course_name, raceGroup.off_time, raceGroup.intents?.[0]?.horse_id)}
                                 disabled={isLoadingInsight || !!raceInsight}
                                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                               >

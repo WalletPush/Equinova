@@ -263,10 +263,11 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
+    console.error(`fetch-race-results: unexpected error for race ${race_id}:`, error?.stack || error);
     return new Response(JSON.stringify({
       success: false,
       code: "FETCH_RACE_RESULTS_ERROR",
-      message: error.message
+      message: error?.message || String(error)
     }), {
       status: 400,
       headers: {

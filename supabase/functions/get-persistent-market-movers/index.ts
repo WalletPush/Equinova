@@ -20,9 +20,9 @@ Deno.serve(async (req)=>{
     const today = new Date().toLocaleDateString('en-CA', {
       timeZone: 'Europe/London'
     });
-    // Get market movements from horse_market_movement_changes for today
-    // This gives us the most detailed movement data
-    const marketMoversResponse = await fetch(`${supabaseUrl}/rest/v1/horse_market_movement_changes?source_updated_at=gte.${today}T00:00:00.000Z&source_updated_at=lt.${today}T23:59:59.999Z&select=*&order=source_updated_at.desc`, {
+    // Get market movements from horse_market_movement for today
+    // Use the primary table rather than the changes table
+    const marketMoversResponse = await fetch(`${supabaseUrl}/rest/v1/horse_market_movement?source_updated_at=gte.${today}T00:00:00.000Z&source_updated_at=lt.${today}T23:59:59.999Z&select=*&order=source_updated_at.desc`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${supabaseKey}`,
