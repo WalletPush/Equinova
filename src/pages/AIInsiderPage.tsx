@@ -183,7 +183,6 @@ export function AIInsiderPage() {
   const [raceInsights, setRaceInsights] = useState<Record<string, AIMarketInsight>>({})
   const [loadingInsights, setLoadingInsights] = useState<Record<string, boolean>>({})
   const [shortlistOperations, setShortlistOperations] = useState<Record<string, boolean>>({})
-  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   
@@ -606,11 +605,8 @@ export function AIInsiderPage() {
   // Enhanced Value Bet Analysis using OpenAI-powered analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
     console.log('getValueBetAnalysis called', { raceId, course, offTime })
-    setDiagnosticMessage('Running Value Bet analysis...')
-    setTimeout(() => setDiagnosticMessage(null), 5000)
     if (!profile?.openai_api_key) {
-      setDiagnosticMessage('OpenAI API key required. Add it in Settings.')
-      setTimeout(() => setDiagnosticMessage(null), 4000)
+      console.error('OpenAI API key required. Add it in Settings.')
       return
     }
     // We'll key insights by raceId::horseId so they don't collide with race-level insights
@@ -679,8 +675,6 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
-      setDiagnosticMessage('Value Bet analysis completed')
-      setTimeout(() => setDiagnosticMessage(null), 4000)
       console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
     } catch (error: any) {
       console.error(`Failed to get OpenAI value bet analysis for race ${raceId}:`, error)
@@ -693,9 +687,9 @@ export function AIInsiderPage() {
           body: JSON.stringify({ raceId, horseId: topValueBet.horse_name })
         })
         const debugText = await debugResp.text()
-        setDiagnosticMessage(`Function error ${debugResp.status}: ${debugText.slice(0, 300)}`)
+        console.error(`Function error ${debugResp.status}: ${debugText.slice(0, 300)}`)
       } catch (dbgErr) {
-        setDiagnosticMessage(`Value Bet analysis failed: ${error?.message || String(error)}`)
+        console.error(`Value Bet analysis failed: ${error?.message || String(error)}`)
       }
       const errorData: AIMarketInsight = {
         race_id: raceId,
@@ -720,44 +714,35 @@ export function AIInsiderPage() {
   // Enhanced Trainer Intent Analysis using OpenAI-powered analysis
   const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
     console.log('getTrainerIntentAnalysis called', { raceId, course, offTime, horseIdOverride })
-    setDiagnosticMessage('Running Trainer Intent analysis...')
-    setTimeout(() => setDiagnosticMessage(null), 5000)
     if (!profile?.openai_api_key) {
-      setDiagnosticMessage('OpenAI API key required. Add it in Settings.')
-      setTimeout(() => setDiagnosticMessage(null), 4000)
+      console.error('OpenAI API key required. Add it in Settings.')
       return
     }
     // Trainer intent analysis should be keyed by raceId::horseId to avoid collisions
-    // Determine target intent (or use provided horseIdOverride)
-    const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
-    const horseIdentifier = horseIdOverride || targetIntent?.horse_id || targetIntent?.horse_name
+    // Use the exact same horse_id that the UI uses for the key
+    const topIntentHorseId = horseIdOverride || trainerIntents.find(intent => intent.race_id === raceId)?.horse_id
     // Use the same key format as the UI: raceGroup.race_id::topIntentHorseId
-    const uiInsightKey = horseIdentifier ? `${raceId}::${horseIdentifier}` : raceId
+    const uiInsightKey = topIntentHorseId ? `${raceId}::${topIntentHorseId}` : raceId
     if (loadingInsights[uiInsightKey]) return
 
     setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
     
     try {
       // Find the trainer intent and get the horse
-      if (!horseIdentifier) {
+      if (!topIntentHorseId) {
         throw new Error('No trainer intent found for analysis')
       }
 
-      // If horseIdOverride provided and is numeric use it, otherwise find by name
-      let horseData: any = null
-      let horseError: any = null
-      if (/^\d+$/.test(String(horseIdentifier))) {
-        const res = await supabase.from('race_entries').select('horse_id,id').eq('id', horseIdentifier).single()
-        horseData = res.data
-        horseError = res.error
-      } else {
-        const res = await supabase.from('race_entries').select('horse_id,id').eq('race_id', raceId).eq('horse_name', String(horseIdentifier)).single()
-        horseData = res.data
-        horseError = res.error
-      }
+      // Get the horse data using the horse_id
+      const { data: horseData, error: horseError } = await supabase
+        .from('race_entries')
+        .select('horse_id,id')
+        .eq('race_id', raceId)
+        .eq('horse_id', topIntentHorseId)
+        .single()
       
       if (horseError || !horseData) {
-        throw new Error(`Failed to find horse ID for ${horseIdentifier}`)
+        throw new Error(`Failed to find horse data for horse_id ${topIntentHorseId}`)
       }
       
       // No longer need Google Maps API check since we implemented Haversine formula
@@ -797,8 +782,7 @@ export function AIInsiderPage() {
       }
 
       setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
-      setDiagnosticMessage('Trainer Intent analysis completed')
-      setTimeout(() => setDiagnosticMessage(null), 4000)
+      console.log(`OpenAI trainer intent analysis completed for race ${raceId}`)
     } catch (error) {
       console.error(`Failed to get OpenAI trainer intent analysis for race ${raceId}:`, error)
       // Show error in UI
@@ -816,7 +800,7 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [uiInsightKey]: errorData }))
-      setDiagnosticMessage(`Trainer Intent analysis failed: ${error.message}`)
+      console.error(`Trainer Intent analysis failed: ${error.message}`)
     } finally {
       setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: false }))
     }
@@ -825,8 +809,6 @@ export function AIInsiderPage() {
   // AI Top Pick Analysis (mirrors value bet analysis but targets AI Top Picks)
   const getAiTopPickAnalysis = async (raceId: string, course: string, offTime: string) => {
     console.log('getAiTopPickAnalysis called', { raceId, course, offTime })
-    setDiagnosticMessage('Running AI Top Pick analysis...')
-    setTimeout(() => setDiagnosticMessage(null), 5000)
     // Determine top pick and key by raceId::horseId
     const targetRace = aiTopPicks.find((pick: any) => pick.race_id === raceId)
     if (!targetRace) {
@@ -894,8 +876,7 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
-      setDiagnosticMessage('AI Top Pick analysis completed')
-      setTimeout(() => setDiagnosticMessage(null), 4000)
+      console.log(`AI Top Pick analysis completed for race ${raceId}`)
       console.log(`OpenAI top pick analysis completed for ${topPick.horse_name}`)
     } catch (error) {
       console.error(`Failed to get OpenAI top pick analysis for race ${raceId}:`, error)
@@ -2395,7 +2376,6 @@ export function AIInsiderPage() {
             </div>
           )}
         </div>
-        <AIInsiderDebugToast message={diagnosticMessage} />
       </div>
     </AppLayout>
   )
