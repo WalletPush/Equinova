@@ -127,8 +127,18 @@ Deno.serve(async (req) => {
             body: JSON.stringify(row)
           });
 
+          // Capture debug info about PATCH/INSERT
+          let patchStatus = patchResp.status;
+          let patchBody = '';
+          try { patchBody = await patchResp.text() } catch (e) { patchBody = String(e) }
+
+          let insertStatus = null;
+          let insertBody = null;
+          let debugInfo = null;
+
           // If PATCH did not update any row (204 No Content) or failed, insert instead
           if (!patchResp.ok || patchResp.status === 204) {
+            // attempt insert
             const insertResp = await fetch(`${supabaseUrl}/rest/v1/monte_carlo_results`, {
               method: 'POST',
               headers: {
@@ -139,8 +149,17 @@ Deno.serve(async (req) => {
               },
               body: JSON.stringify(row)
             });
-            if (!insertResp.ok) console.warn('Failed to insert monte carlo row', await insertResp.text());
+            insertStatus = insertResp.status;
+            try { insertBody = await insertResp.text(); } catch (e) { insertBody = String(e) }
+            if (!insertResp.ok) console.warn('Failed to insert monte carlo row', insertStatus, insertBody);
+            else console.log('Inserted monte_carlo_results row:', insertStatus, insertBody);
+          } else {
+            console.log('PATCH updated monte_carlo_results row:', patchStatus, patchBody);
           }
+
+          // attach debug info to resultsSummary so function response includes it
+          debugInfo = { race_id: raceId, horse_id: p.horse_id, patchStatus, patchBody, insertStatus, insertBody };
+          resultsSummary.push(Object.assign({ job: job.id, race: raceId, status: 'done', sims: numSims }, { debug: debugInfo }));
         }
 
         // mark job done
@@ -150,7 +169,6 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ status: 'done', finished_at: new Date().toISOString(), locked_until: null })
         });
 
-        resultsSummary.push({ job: job.id, race: raceId, status: 'done', sims: numSims });
       } catch (jobErr) {
         console.error('Job failed', job.id, jobErr?.message || jobErr);
         await fetch(`${supabaseUrl}/rest/v1/monte_carlo_jobs?id=eq.${job.id}`, {
