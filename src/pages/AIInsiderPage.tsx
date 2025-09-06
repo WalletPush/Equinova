@@ -645,8 +645,8 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topValueBet.horse_name}`)
       }
       
-      // Store result using the same key the UI is checking
-      const finalInsightKey = `${raceId}::${horseData.horse_id}`
+      // Store result using the same key the UI is checking (topValueBet.horse_id, not horseData.horse_id)
+      const finalInsightKey = `${raceId}::${topValueBet.horse_id}`
       // Call the correct Value Bets analysis function with required parameters
       const response = await fetchFromSupabaseFunction('openai-value-bets-analysis', {
         method: 'POST',
@@ -748,8 +748,8 @@ export function AIInsiderPage() {
       // No longer need Google Maps API check since we implemented Haversine formula
       // Proceed directly with OpenAI-powered trainer intent analysis
       
-      // Store result using the same key the UI is checking
-      const finalInsightKey = `${raceId}::${horseData.horse_id}`
+      // Store result using the same key the UI is checking (topIntentHorseId, not horseData.horse_id)
+      const finalInsightKey = `${raceId}::${topIntentHorseId}`
 
       // Call the correct Trainer Intent analysis function with required parameters
       const response = await fetchFromSupabaseFunction('openai-trainer-intent-analysis', {
@@ -818,10 +818,11 @@ export function AIInsiderPage() {
     if (!topPick) {
       throw new Error('No top pick horse found for analysis')
     }
-    const insightKeyPlaceholder = `${raceId}::${topPick.horse_id || topPick.horse_name}`
-    if (loadingInsights[insightKeyPlaceholder]) return
+    // Use the exact same key format as the UI
+    const uiInsightKey = topPick.horse_id ? `${raceId}::${topPick.horse_id}` : raceId
+    if (loadingInsights[uiInsightKey]) return
 
-    setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: true }))
+    setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
 
     try {
       // Find the AI top pick race
@@ -848,7 +849,8 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topPick.horse_name}`)
       }
 
-      const insightKey = `${raceId}::${horseData.horse_id}`
+      // Store result using the same key the UI is checking (topPick.horse_id, not horseData.horse_id)
+      const finalInsightKey = `${raceId}::${topPick.horse_id}`
 
       // Use same server-side race analysis as RaceDetailPage for top pick
       const response = await fetchFromSupabaseFunction('ai-race-analysis', {
@@ -875,7 +877,7 @@ export function AIInsiderPage() {
         market_confidence_horses: body.market_confidence_horses || [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+      setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
       console.log(`AI Top Pick analysis completed for race ${raceId}`)
       console.log(`OpenAI top pick analysis completed for ${topPick.horse_name}`)
     } catch (error) {
@@ -893,9 +895,9 @@ export function AIInsiderPage() {
         market_confidence_horses: [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [insightKeyPlaceholder]: errorData }))
+      setRaceInsights(prev => ({ ...prev, [uiInsightKey]: errorData }))
     } finally {
-      setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: false }))
+      setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: false }))
     }
   }
 
