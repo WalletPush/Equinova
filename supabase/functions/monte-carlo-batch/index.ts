@@ -127,8 +127,8 @@ Deno.serve(async (req) => {
             body: JSON.stringify(row)
           });
 
-          if (!patchResp.ok) {
-            // insert new
+          // If PATCH did not update any row (204 No Content) or failed, insert instead
+          if (!patchResp.ok || patchResp.status === 204) {
             const insertResp = await fetch(`${supabaseUrl}/rest/v1/monte_carlo_results`, {
               method: 'POST',
               headers: {
