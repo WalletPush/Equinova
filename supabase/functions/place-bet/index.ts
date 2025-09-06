@@ -56,25 +56,10 @@ Deno.serve(async (req)=>{
     const userData = await userResponse.json();
     const userId = userData.id;
     console.log('User authenticated:', userId);
-    // Try to resolve horse_id from race_entries (best-effort)
-    let resolvedHorseId = horse_id || null;
-    if (!resolvedHorseId && race_id && horse_name) {
-      try {
-        const lookupResp = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${encodeURIComponent(race_id)}&horse_name=ilike.${encodeURIComponent(horse_name)}&select=horse_id&limit=1`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${serviceRoleKey}`,
-            'apikey': serviceRoleKey,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (lookupResp.ok) {
-          const lookupData = await lookupResp.json();
-          if (lookupData && lookupData.length > 0) resolvedHorseId = lookupData[0].horse_id;
-        }
-      } catch (lookupError) {
-        console.warn('Failed to resolve horse_id for bet:', lookupError?.message || lookupError);
-      }
+    // Require client to provide the race_entries horse_id. Do NOT attempt fuzzy name lookups.
+    const resolvedHorseId = horse_id || null;
+    if (!resolvedHorseId) {
+      throw new Error('Missing required horse_id from race_entries. Place bet requests must include race_entries.horse_id')
     }
 
     // Create the bet record with all the data from selections

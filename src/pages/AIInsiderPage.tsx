@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 import { getUKDateTime, formatTime, getQueryDateKey, getDateStatusLabel } from '@/lib/dateUtils'
 import {
   Brain,
@@ -174,6 +175,7 @@ interface AIMarketInsight {
 }
 
 export function AIInsiderPage() {
+  const { profile } = useAuth()
   const [activeTab, setActiveTab] = useState<'upcoming_races' | 'ai_top_picks' | 'ml_value_bets' | 'trainer_intent' | 'market_movers'>('upcoming_races')
   const [confidenceFilter, setConfidenceFilter] = useState<number>(60)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -360,6 +362,82 @@ export function AIInsiderPage() {
   const mlValueBets = mlValueBetsResponse?.data?.value_bet_races || []
   const aiTopPicks = aiTopPicksData || []
 
+  // Fetch race_entries for top-rated ML horses per race (rf, xgboost, benter, mlp, ensemble)
+  const { data: topRatedMapData, isLoading: topRatedLoading } = useQuery({
+    queryKey: ['race_entries_top_models', getQueryDateKey()],
+    queryFn: async () => {
+      try {
+        const raceIds = Array.from(new Set([
+          ...(upcomingRaces || []).map((r: any) => r.race_id),
+          ...(trainerIntentResponse?.data?.trainer_intent_signals || []).map((t: any) => t.race_id)
+        ].filter(Boolean)))
+
+        if (!raceIds || raceIds.length === 0) return {}
+
+        const { data: entries, error } = await supabase
+          .from('race_entries')
+          .select('id,horse_id,race_id,rf_proba,xgboost_proba,benter_proba,mlp_proba,ensemble_proba')
+          .in('race_id', raceIds)
+
+        if (error) {
+          console.error('Failed to fetch race_entries for top models:', error)
+          return {}
+        }
+
+        const grouped: Record<string, any[]> = {}
+        for (const e of entries || []) {
+          if (!grouped[e.race_id]) grouped[e.race_id] = []
+          grouped[e.race_id].push(e)
+        }
+
+        const result: Record<string, any> = {}
+        for (const raceId of Object.keys(grouped)) {
+          const rows = grouped[raceId]
+          const models = ['rf_proba','xgboost_proba','benter_proba','mlp_proba','ensemble_proba']
+          const topModels: Record<string, Set<string>> = {}
+          const ensembleMap: Record<string, number> = {}
+
+          for (const m of models) {
+            let max = -Infinity
+            for (const r of rows) {
+              const val = Number(r[m] ?? -Infinity)
+              if (isNaN(val)) continue
+              if (val > max) max = val
+            }
+            // include both race_entries.horse_id and race_entries.id keys for matching
+            topModels[m] = new Set()
+            for (const r of rows.filter(r => Number(r[m]) === max)) {
+              if (r.horse_id != null) topModels[m].add(String(r.horse_id))
+              if (r.id != null) topModels[m].add(String(r.id))
+            }
+          }
+
+          for (const r of rows) {
+            if (r.horse_id != null) ensembleMap[String(r.horse_id)] = Number(r.ensemble_proba) || 0
+            if (r.id != null) ensembleMap[String(r.id)] = Number(r.ensemble_proba) || 0
+          }
+
+          // topAny is union of all model top sets
+          const topAny = new Set<string>()
+          for (const s of Object.values(topModels)) for (const h of s) topAny.add(h)
+
+          result[raceId] = { topModels, topAny, ensembleMap }
+        }
+
+        return result
+      } catch (err) {
+        console.error('Error computing topRatedMap:', err)
+        return {}
+      }
+    },
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+    // Only run once we have upcoming races or trainer intent data available
+    enabled: (upcomingRaces && upcomingRaces.length > 0) || (trainerIntentResponse?.data?.trainer_intent_signals && trainerIntentResponse.data.trainer_intent_signals.length > 0)
+  })
+
+  const topRatedMap = topRatedMapData || {}
+
   const londonTime = getDateStatusLabel() // Use consistent UK timezone
 
   const handleRefreshAll = async () => {
@@ -419,6 +497,11 @@ export function AIInsiderPage() {
 
   // Enhanced Value Bet Analysis using OpenAI-powered analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
+    // Require OpenAI key
+    if (!profile?.openai_api_key) {
+      alert('To use the AI functionality you need to add your OpenAI key in Settings')
+      return
+    }
     // We'll key insights by raceId::horseId so they don't collide with race-level insights
     // Find the race and get the top value bet horse
     const targetRace = mlValueBets.find(race => race.race_id === raceId)
@@ -520,6 +603,11 @@ export function AIInsiderPage() {
 
   // Enhanced Trainer Intent Analysis using OpenAI-powered analysis
   const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
+    // Require OpenAI key
+    if (!profile?.openai_api_key) {
+      alert('To use the AI functionality you need to add your OpenAI key in Settings')
+      return
+    }
     // Trainer intent analysis should be keyed by raceId::horseId to avoid collisions
     // Determine target intent (or use provided horseIdOverride)
     const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
@@ -617,6 +705,11 @@ export function AIInsiderPage() {
 
   // AI Top Pick Analysis (mirrors value bet analysis but targets AI Top Picks)
   const getAiTopPickAnalysis = async (raceId: string, course: string, offTime: string) => {
+    // Require OpenAI key
+    if (!profile?.openai_api_key) {
+      alert('To use the AI functionality you need to add your OpenAI key in Settings')
+      return
+    }
     // Determine top pick and key by raceId::horseId
     const targetRace = aiTopPicks.find((pick: any) => pick.race_id === raceId)
     if (!targetRace) {
@@ -897,6 +990,18 @@ export function AIInsiderPage() {
     if (cappedScore >= 80) return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
     if (cappedScore >= 70) return 'bg-orange-500/20 text-orange-400 border-orange-500/30'
     return 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+  }
+
+  // Reusable badge renderer for model/top badges (keeps same styling as Value Bets)
+  const renderModelBadges = (labels?: string[] | Set<string> | null) => {
+    if (!labels) return null
+    const arr = Array.isArray(labels) ? labels : Array.from(labels)
+    if (!arr || arr.length === 0) return null
+    return arr.map((label, idx) => (
+      <span key={idx} className="ml-2 bg-blue-600/20 text-blue-400 border border-blue-600/30 px-2 py-0.5 rounded text-xs font-medium">
+        {label}
+      </span>
+    ))
   }
 
   // Shortlist Button Component
@@ -1303,42 +1408,13 @@ export function AIInsiderPage() {
                                     <div key={horse.horse_id} className="bg-gray-700/50 rounded-lg p-4">
                                       <div className="flex items-start justify-between mb-3">
                                         <div>
-                                          <HorseNameWithSilk 
-                                            horseName={horse.horse_name} 
-                                            silkUrl={horse.silk_url}
-                                            className="text-yellow-400 font-bold text-lg"
-                                          />
-                                          <div className="text-sm text-gray-400 mt-1">
-                                            {horse.trainer_name} • {horse.jockey_name}
-                                          </div>
+                                          <HorseNameWithSilk horseName={horse.horse_name} silkUrl={horse.silk_url} className="text-yellow-400 font-bold text-lg" />
+                                          <div className="text-sm text-gray-400 mt-1">{horse.trainer_name} • {horse.jockey_name}</div>
                                         </div>
                                         <div className="text-right">
                                           <div className="text-green-400 font-bold text-lg">{horse.current_odds}</div>
-                                          <div className={`text-sm font-medium ${getConfidenceColor(horse.confidence_score)}`}>
-                                            {capConfidence(horse.confidence_score)}% confidence
-                                          </div>
+                                          <div className={`text-sm font-medium ${getConfidenceColor(horse.confidence_score)}`}>{capConfidence(horse.confidence_score)}% confidence</div>
                                         </div>
-                                      </div>
-                                      
-                                      <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
-                                        <div>
-                                          <span className="text-gray-400">ML Prediction:</span>
-                                          <div className="text-yellow-400 font-medium">{horse.ml_prediction}%</div>
-                                        </div>
-                                        <div>
-                                          <span className="text-gray-400">Market Movement:</span>
-                                          <div className="text-red-400 font-medium">-{horse.market_movement_pct}%</div>
-                                        </div>
-                                      </div>
-                                      
-                                      <div className="space-y-1">
-                                        <div className="text-xs text-gray-400 mb-1">Confidence Factors:</div>
-                                        {horse.confidence_factors.map((factor, factorIndex) => (
-                                          <div key={factorIndex} className="text-xs text-gray-300 flex items-start space-x-2">
-                                            <div className="w-1.5 h-1.5 bg-yellow-400 rounded-full mt-1.5 flex-shrink-0"></div>
-                                            <span>{factor}</span>
-                                          </div>
-                                        ))}
                                       </div>
                                     </div>
                                   ))}
@@ -1714,7 +1790,7 @@ export function AIInsiderPage() {
                           <div className="mt-4 pt-4 border-t border-gray-700">
                             <button
                               onClick={() => getAiTopPickAnalysis(race.race_id, race.course_name, race.off_time)}
-                              disabled={isLoadingInsight || !!raceInsight}
+                              disabled={isLoadingInsight || !!raceInsight || !profile?.openai_api_key}
                               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                             >
                               {isLoadingInsight ? (
@@ -1834,11 +1910,7 @@ export function AIInsiderPage() {
                                   
                                   <div className="flex items-center justify-between">
                                     <div className="flex flex-wrap gap-1">
-                                      {bet.top_in_models.map((model, modelIndex) => (
-                                        <span key={modelIndex} className="bg-blue-600/20 text-blue-400 border border-blue-600/30 px-2 py-0.5 rounded text-xs font-medium">
-                                          {model} #1
-                                        </span>
-                                      ))}
+                                      {renderModelBadges(bet.top_in_models?.map((m: string) => `${m} #1`))}
                                     </div>
                                     <ShortlistButton
                                       horseName={bet.horse_name}
@@ -1921,7 +1993,7 @@ export function AIInsiderPage() {
                         <div className="mt-4 pt-4 border-t border-gray-700">
                           <button
                             onClick={() => getValueBetAnalysis(race.race_id, race.course_name, race.off_time)}
-                            disabled={isLoadingInsight || !!raceInsight}
+                            disabled={isLoadingInsight || !!raceInsight || !profile?.openai_api_key}
                             className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                           >
                             {isLoadingInsight ? (
@@ -2024,64 +2096,86 @@ export function AIInsiderPage() {
                             <div className="mb-4">
                               <h4 className="text-sm font-medium text-gray-400 mb-2">Trainer Intent Signals</h4>
                               <div className="grid gap-3">
-                                {raceGroup.intents.map((intent, index) => (
-                                  <div key={intent.id} className="bg-gray-700/50 rounded-lg p-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="flex items-center space-x-3">
-                                        <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
-                                          {index + 1}
+                                {raceGroup.intents.map((intent, index) => {
+                                  const topRated = topRatedMap?.[intent.race_id]
+                                  const horseKey = String(intent.horse_id)
+                                  const modelKeys = ['rf_proba','xgboost_proba','benter_proba','mlp_proba','ensemble_proba']
+                                  const modelLabels: Record<string,string> = {
+                                    rf_proba: 'Random Forest #1',
+                                    xgboost_proba: 'XGBoost #1',
+                                    benter_proba: 'Benter #1',
+                                    mlp_proba: 'MLP #1',
+                                    ensemble_proba: 'Ensemble #1'
+                                  }
+                                  const matchedModels: string[] = []
+                                  if (topRated) {
+                                    for (const k of modelKeys) {
+                                      if (topRated.topModels && topRated.topModels[k] && topRated.topModels[k].has(horseKey)) {
+                                        matchedModels.push(modelLabels[k])
+                                      }
+                                    }
+                                  }
+
+                                  return (
+                                    <div key={intent.id} className="bg-gray-700/50 rounded-lg p-4">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center space-x-3">
+                                          <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
+                                            {index + 1}
+                                          </div>
+                                          <HorseNameWithSilk 
+                                            horseName={intent.horse_name} 
+                                            silkUrl={intent.silk_url}
+                                            className="text-yellow-400 font-bold text-lg"
+                                          />
+                                          {!topRatedLoading && topRated ? renderModelBadges(matchedModels) : null}
                                         </div>
-                                        <HorseNameWithSilk 
-                                          horseName={intent.horse_name} 
-                                          silkUrl={intent.silk_url}
-                                          className="text-yellow-400 font-bold text-lg"
+                                        <div className="text-right">
+                                          <div className="text-green-400 font-bold text-lg">{intent.current_odds || 'TBC'}</div>
+                                          <div className="text-yellow-400 font-medium text-sm">
+                                            {capConfidence(intent.confidence_score)}%
+                                          </div>
+                                        </div>
+                                      </div>
+                                      
+                                      <div className="text-xs text-gray-400 mb-2">
+                                        {intent.trainer_name} • {intent.jockey_name || 'Unknown'}
+                                      </div>
+                                      
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex flex-wrap gap-1">
+                                          <span className="bg-blue-600/20 text-blue-400 border border-blue-600/30 px-2 py-0.5 rounded text-xs font-medium">
+                                            {intent.is_single_runner ? 'Single Runner' : 'Intent Signal'} #1
+                                          </span>
+                                          {intent.strike_rate && (
+                                            <span className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
+                                              {intent.strike_rate.toFixed(1)}% Strike Rate
+                                            </span>
+                                          )}
+                                          <span className={`border px-2 py-0.5 rounded text-xs font-medium ${
+                                            intent.confidence_score >= 80 ? 'bg-green-600/20 text-green-400 border-green-600/30' :
+                                            intent.confidence_score >= 60 ? 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30' :
+                                            'bg-gray-600/20 text-gray-400 border-gray-600/30'
+                                          }`}>
+                                            High Confidence
+                                          </span>
+                                        </div>
+                                        <ShortlistButton
+                                          horseName={intent.horse_name}
+                                          raceTime={intent.off_time || 'TBC'}
+                                          course={intent.course}
+                                          odds={intent.current_odds}
+                                          source="trainer_intent"
+                                          jockeyName={intent.jockey_name}
+                                          trainerName={intent.trainer_name}
+                                          mlInfo={intent.is_single_runner ? `Single Runner Intent | Strike Rate: ${intent.strike_rate?.toFixed(1) || 'N/A'}%` : `Trainer Intent | Strike Rate: ${intent.strike_rate?.toFixed(1) || 'N/A'}%`}
+                                          horseId={intent.horse_id}
+                                          raceId={intent.race_id}
                                         />
                                       </div>
-                                      <div className="text-right">
-                                        <div className="text-green-400 font-bold text-lg">{intent.current_odds || 'TBC'}</div>
-                                        <div className="text-yellow-400 font-medium text-sm">
-                                          {capConfidence(intent.confidence_score)}%
-                                        </div>
-                                      </div>
                                     </div>
-                                    
-                                    <div className="text-xs text-gray-400 mb-2">
-                                      {intent.trainer_name} • {intent.jockey_name || 'Unknown'}
-                                    </div>
-                                    
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex flex-wrap gap-1">
-                                        <span className="bg-blue-600/20 text-blue-400 border border-blue-600/30 px-2 py-0.5 rounded text-xs font-medium">
-                                          {intent.is_single_runner ? 'Single Runner' : 'Intent Signal'} #1
-                                        </span>
-                                        {intent.strike_rate && (
-                                          <span className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
-                                            {intent.strike_rate.toFixed(1)}% Strike Rate
-                                          </span>
-                                        )}
-                                        <span className={`border px-2 py-0.5 rounded text-xs font-medium ${
-                                          intent.confidence_score >= 80 ? 'bg-green-600/20 text-green-400 border-green-600/30' :
-                                          intent.confidence_score >= 60 ? 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30' :
-                                          'bg-gray-600/20 text-gray-400 border-gray-600/30'
-                                        }`}>
-                                          High Confidence
-                                        </span>
-                                      </div>
-                                      <ShortlistButton
-                                        horseName={intent.horse_name}
-                                        raceTime={intent.off_time || 'TBC'}
-                                        course={intent.course}
-                                        odds={intent.current_odds}
-                                        source="trainer_intent"
-                                        jockeyName={intent.jockey_name}
-                                        trainerName={intent.trainer_name}
-                                        mlInfo={intent.is_single_runner ? `Single Runner Intent | Strike Rate: ${intent.strike_rate?.toFixed(1) || 'N/A'}%` : `Trainer Intent | Strike Rate: ${intent.strike_rate?.toFixed(1) || 'N/A'}%`}
-                                        horseId={intent.horse_id}
-                                        raceId={intent.race_id}
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
+                                  )
+                                })}
                               </div>
                             </div>
                             
@@ -2147,7 +2241,7 @@ export function AIInsiderPage() {
                             <div className="mt-4 pt-4 border-t border-gray-700">
                               <button
                                 onClick={() => getTrainerIntentAnalysis(raceGroup.race_id, raceGroup.course_name, raceGroup.off_time, raceGroup.intents?.[0]?.horse_id)}
-                                disabled={isLoadingInsight || !!raceInsight}
+                                disabled={isLoadingInsight || !!raceInsight || !profile?.openai_api_key}
                                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                               >
                                 {isLoadingInsight ? (
