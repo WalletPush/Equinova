@@ -603,11 +603,7 @@ export function AIInsiderPage() {
 
   // Enhanced Value Bet Analysis using OpenAI-powered analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
-    // Require OpenAI key
-    if (!profile?.openai_api_key) {
-      alert('To use the AI functionality you need to add your OpenAI key in Settings')
-      return
-    }
+    console.log('getValueBetAnalysis called', { raceId, course, offTime })
     // We'll key insights by raceId::horseId so they don't collide with race-level insights
     // Find the race and get the top value bet horse
     const targetRace = mlValueBets.find(race => race.race_id === raceId)
@@ -698,11 +694,7 @@ export function AIInsiderPage() {
 
   // Enhanced Trainer Intent Analysis using OpenAI-powered analysis
   const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
-    // Require OpenAI key
-    if (!profile?.openai_api_key) {
-      alert('To use the AI functionality you need to add your OpenAI key in Settings')
-      return
-    }
+    console.log('getTrainerIntentAnalysis called', { raceId, course, offTime, horseIdOverride })
     // Trainer intent analysis should be keyed by raceId::horseId to avoid collisions
     // Determine target intent (or use provided horseIdOverride)
     const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
@@ -793,11 +785,7 @@ export function AIInsiderPage() {
 
   // AI Top Pick Analysis (mirrors value bet analysis but targets AI Top Picks)
   const getAiTopPickAnalysis = async (raceId: string, course: string, offTime: string) => {
-    // Require OpenAI key
-    if (!profile?.openai_api_key) {
-      alert('To use the AI functionality you need to add your OpenAI key in Settings')
-      return
-    }
+    console.log('getAiTopPickAnalysis called', { raceId, course, offTime })
     // Determine top pick and key by raceId::horseId
     const targetRace = aiTopPicks.find((pick: any) => pick.race_id === raceId)
     if (!targetRace) {
