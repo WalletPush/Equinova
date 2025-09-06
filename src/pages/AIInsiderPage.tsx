@@ -4,7 +4,7 @@ import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import { getUKDateTime, formatTime, getQueryDateKey, getDateStatusLabel } from '@/lib/dateUtils'
+import { getUKDateTime, formatTime, getQueryDateKey, getDateStatusLabel, isRaceUpcoming } from '@/lib/dateUtils'
 import {
   Brain,
   Target,
@@ -184,6 +184,8 @@ export function AIInsiderPage() {
   const [shortlistOperations, setShortlistOperations] = useState<Record<string, boolean>>({})
   const queryClient = useQueryClient()
 
+  
+
   // Fetch AI Insider Data from our API endpoint
   const { data: aiInsiderResponse, refetch: refetchAIInsider, isLoading: aiInsiderLoading, error: aiInsiderError } = useQuery({
     queryKey: ['aiInsiderData', getQueryDateKey()], // Dynamic date key
@@ -301,27 +303,131 @@ export function AIInsiderPage() {
     s => s.confidence_score >= confidenceFilter
   ) || []
   const trainerIntents = trainerIntentResponse?.data?.trainer_intent_signals || []
-  // Fetch persistent market movers
+  // Fetch market movers directly from `horse_market_movement` (only steaming horses,
+  // using `odds_movement_pct` filter as requested)
   const { data: persistentMarketMoversData, isLoading: persistentMarketMoversLoading } = useQuery({
-    queryKey: ['persistent-market-movers'],
+    queryKey: ['market-movers'],
     queryFn: async () => {
-      console.log('Fetching persistent market movers...')
-      const { data, error } = await supabase.functions.invoke('get-persistent-market-movers', {
-        body: {}
-      })
-      
+      console.log('Fetching market movers from horse_market_movement...')
+
+      const { data: rows, error } = await supabase
+        .from('horse_market_movement')
+        .select('*')
+        .eq('odds_movement', 'steaming')
+        .order('last_updated', { ascending: false })
+
       if (error) {
-        console.error('Error invoking persistent market movers API:', error)
+        console.error('Error fetching horse_market_movement:', error)
         throw error
       }
-      
-      if (!data.success) {
-        console.error('Persistent market movers API returned error:', data.error)
-        throw new Error(data.error?.message || 'Persistent market movers API failed')
+
+      // Enrich market mover rows with race_entries (horse name, jockey, trainer, silks)
+      const horseIds = Array.from(new Set((rows || []).map((r: any) => r.horse_id).filter(Boolean)))
+      let entries: any[] = []
+      if (horseIds.length > 0) {
+        const { data: fetchedEntries, error: entriesError } = await supabase
+          .from('race_entries')
+          .select('horse_id,horse_name,jockey_name,trainer_name,silk_url')
+          .in('horse_id', horseIds)
+
+        if (entriesError) {
+          console.warn('Failed to fetch race_entries for market movers enrichment:', entriesError)
+        } else {
+          entries = fetchedEntries || []
+        }
       }
-      
-      console.log('Persistent market movers fetched successfully:', data.data)
-      return data.data
+
+      const entryMap = new Map(entries.map((e: any) => [e.horse_id, e]))
+      // Also fetch race metadata for accurate date + off_time handling
+      const raceIds = Array.from(new Set((rows || []).map((r: any) => r.race_id).filter(Boolean)))
+      let races: any[] = []
+      if (raceIds.length > 0) {
+        const { data: fetchedRaces, error: racesError } = await supabase
+          .from('races')
+          .select('race_id,course_name,off_time,date')
+          .in('race_id', raceIds)
+
+        if (racesError) {
+          console.warn('Failed to fetch races for market movers enrichment:', racesError)
+        } else {
+          races = fetchedRaces || []
+        }
+      }
+
+      const raceMap = new Map(races.map((r: any) => [r.race_id, r]))
+
+      const currentUKDateTime = getUKDateTime().dateTime // 'YYYY-MM-DD HH:MM'
+
+      const marketMovers = (rows || []).map((m: any) => {
+        const entry = entryMap.get(m.horse_id)
+        const race = raceMap.get(m.race_id) || {}
+
+        // normalize off_time display using existing helper
+        const offTimeRaw = race.off_time || m.off_time || ''
+        const displayOffTime = formatTime(offTimeRaw)
+        const raceDate = race.date || ''
+        const raceDateTime = raceDate && displayOffTime ? `${raceDate} ${displayOffTime}` : ''
+
+        return {
+          horse_id: m.horse_id,
+          race_id: m.race_id,
+          horse_name: m.horse_name || entry?.horse_name || 'Unknown',
+          course: m.course || race.course_name || m.course_name,
+          off_time: displayOffTime,
+          race_date_time: raceDateTime,
+          jockey_name: m.jockey_name || entry?.jockey_name || null,
+          trainer_name: m.trainer_name || entry?.trainer_name || null,
+          silk_url: entry?.silk_url || m.silk_url || null,
+          bookmaker: m.bookmaker,
+          initial_odds: m.initial_odds,
+          current_odds: m.current_odds,
+          odds_movement: m.odds_movement,
+          odds_movement_pct: m.odds_movement_pct,
+          last_updated: m.last_updated,
+          first_detected_at: m.created_at || m.first_detected_at,
+          total_movements: m.change_count ?? 1,
+          latest_change: m,
+          _raceRaw: race
+        }
+      })
+
+      // Filter out races that have already started using UK-aware date+time comparison
+      const currentUK = getUKDateTime().dateTime // 'YYYY-MM-DD HH:MM'
+      const upcomingMovers = marketMovers.filter((m: any) => {
+        if (!m.race_date_time) return false
+        return m.race_date_time > currentUK
+      })
+
+      // Group by race (course + time) to match the frontend structure
+      const raceGroups = upcomingMovers.reduce((acc: any, mover: any) => {
+        const raceKey = `${mover.course}_${mover.off_time}`
+        if (!acc[raceKey]) {
+          acc[raceKey] = {
+            race_id: `mover_${raceKey}`,
+            course_name: mover.course,
+            off_time: mover.off_time,
+            movers: []
+          }
+        }
+        acc[raceKey].movers.push(Object.assign({ id: mover.horse_id }, mover))
+        return acc
+      }, {})
+
+      // Sort races by parsed time (use formatTime output to normalize AM/PM edge cases)
+      const sortedRaces = Object.values(raceGroups).sort((a: any, b: any) => {
+        const ta = formatTime(a.off_time)
+        const tb = formatTime(b.off_time)
+        return ta.localeCompare(tb)
+      })
+
+      console.log('Market movers fetched successfully', { marketMoversCount: marketMovers.length })
+
+      return {
+        market_movers: marketMovers,
+        race_groups: sortedRaces,
+        total_movers: marketMovers.length,
+        total_races: sortedRaces.length
+      }
     },
     staleTime: 1000 * 30, // 30 seconds
     retry: 3,
@@ -1499,10 +1605,27 @@ export function AIInsiderPage() {
                         <h4 className="text-sm font-medium text-gray-400 mb-2">Market Movement Activity</h4>
                         <div className="grid gap-3">
                           {raceGroup.movers.map((mover: any, index: number) => {
-                            // Check if this market mover is also a top ML pick
-                            const isMLPick = upcomingRaces?.some((race: any) => 
-                              race.top_ml_picks?.some((pick: any) => pick.horse_name === mover.horse_name)
-                            )
+                            // Determine model-specific #1 badges from `topRatedMap` (race_entries topModels)
+                            const modelLabelMap: Record<string, string> = {
+                              rf_proba: 'RF',
+                              xgboost_proba: 'XGBoost',
+                              benter_proba: 'Benter',
+                              mlp_proba: 'MLP',
+                              ensemble_proba: 'Ensemble'
+                            }
+                            const modelBadges: string[] = []
+                            try {
+                              const raceTop = topRatedMap?.[mover.race_id]
+                              if (raceTop && raceTop.topModels) {
+                                for (const key of Object.keys(modelLabelMap)) {
+                                  const label = modelLabelMap[key]
+                                  const set = raceTop.topModels[key]
+                                  if (set && set.has(String(mover.horse_id))) modelBadges.push(label)
+                                }
+                              }
+                            } catch (e) {
+                              // ignore and leave modelBadges empty
+                            }
                             
                             return (
                               <div key={mover.id} className="bg-gray-700/50 rounded-lg p-4">
@@ -1541,11 +1664,11 @@ export function AIInsiderPage() {
                                     }`}>
                                       {mover.odds_movement.charAt(0).toUpperCase() + mover.odds_movement.slice(1)}
                                     </span>
-                                    {isMLPick && (
-                                      <span className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
-                                        ML Pick #1
+                                    {modelBadges && modelBadges.length > 0 && modelBadges.map((b) => (
+                                      <span key={b} className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
+                                        {b} #1
                                       </span>
-                                    )}
+                                    ))}
                                   </div>
                                   <ShortlistButton
                                     horseName={mover.horse_name}
