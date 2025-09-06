@@ -630,10 +630,10 @@ export function AIInsiderPage() {
       // Get the top value bet horse (first one)
       const topValueBet = targetRace.top_value_bets[0]
       
-      // Get the horse ID from race_entries table
+      // Get the horse identifiers from race_entries table (both horse_id and entry id)
       const { data: horseData, error: horseError } = await supabase
         .from('race_entries')
-        .select('id')
+        .select('horse_id,id')
         .eq('race_id', raceId)
         .eq('horse_name', topValueBet.horse_name)
         .single()
@@ -642,11 +642,13 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topValueBet.horse_name}`)
       }
       
-      const insightKey = `${raceId}::${horseData.id}`
+      // Use horse_id (stable across entries) as insight key so frontend rendering matches other flows
+      const insightKey = `${raceId}::${horseData.horse_id}`
       // Call the new enhanced value bet analysis function (Monte Carlo + OpenAI) using authenticated helper
       const res = await callSupabaseFunction('enhanced-value-bet-analysis', {
         raceId: raceId,
-        horseId: horseData.id.toString()
+        horseId: horseData.horse_id,
+        raceEntryId: horseData.id
       })
 
       // Enhanced analysis with Monte Carlo data
@@ -672,6 +674,8 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+      setDiagnosticMessage('Value Bet analysis completed')
+      setTimeout(() => setDiagnosticMessage(null), 4000)
       console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
     } catch (error) {
       console.error(`Failed to get OpenAI value bet analysis for race ${raceId}:`, error)
@@ -690,6 +694,7 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [insightKeyPlaceholder]: errorData }))
+      setDiagnosticMessage(`Value Bet analysis failed: ${error.message}`)
     } finally {
       setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: false }))
     }
@@ -719,11 +724,11 @@ export function AIInsiderPage() {
       let horseData: any = null
       let horseError: any = null
       if (/^\d+$/.test(String(horseIdentifier))) {
-        const res = await supabase.from('race_entries').select('id').eq('id', horseIdentifier).single()
+        const res = await supabase.from('race_entries').select('horse_id,id').eq('id', horseIdentifier).single()
         horseData = res.data
         horseError = res.error
       } else {
-        const res = await supabase.from('race_entries').select('id').eq('race_id', raceId).eq('horse_name', String(horseIdentifier)).single()
+        const res = await supabase.from('race_entries').select('horse_id,id').eq('race_id', raceId).eq('horse_name', String(horseIdentifier)).single()
         horseData = res.data
         horseError = res.error
       }
@@ -735,10 +740,12 @@ export function AIInsiderPage() {
       // No longer need Google Maps API check since we implemented Haversine formula
       // Proceed directly with OpenAI-powered trainer intent analysis
       
-      // Call the new OpenAI-powered trainer intent analysis function (authenticated)
+      // Use horse_id as insight key and call function with both identifiers
+      const insightKey = `${raceId}::${horseData.horse_id}`
       const res = await callSupabaseFunction('openai-trainer-intent-analysis', {
         raceId: raceId,
-        horseId: horseData.id.toString()
+        horseId: horseData.horse_id,
+        raceEntryId: horseData.id
       })
 
       if (res && res.data && res.data.success) {
@@ -762,6 +769,8 @@ export function AIInsiderPage() {
           timestamp: new Date().toISOString()
         }
         setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+        setDiagnosticMessage('Trainer Intent analysis completed')
+        setTimeout(() => setDiagnosticMessage(null), 4000)
         console.log(`OpenAI trainer intent analysis completed for ${targetIntent?.horse_name || horseIdentifier}`)
       } else {
         throw new Error(res?.data?.error || 'OpenAI trainer intent analysis failed')
@@ -783,6 +792,7 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [insightKey]: errorData }))
+      setDiagnosticMessage(`Trainer Intent analysis failed: ${error.message}`)
     } finally {
       setLoadingInsights(prev => ({ ...prev, [insightKey]: false }))
     }
@@ -820,10 +830,10 @@ export function AIInsiderPage() {
         throw new Error('No top pick horse found for analysis')
       }
 
-      // Get the horse ID from race_entries table
+      // Get the horse identifiers from race_entries table
       const { data: horseData, error: horseError } = await supabase
         .from('race_entries')
-        .select('id')
+        .select('horse_id,id')
         .eq('race_id', raceId)
         .eq('horse_name', topPick.horse_name)
         .single()
@@ -832,11 +842,12 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topPick.horse_name}`)
       }
 
-      const insightKey = `${raceId}::${horseData.id}`
+      const insightKey = `${raceId}::${horseData.horse_id}`
       // Call the enhanced analysis function (Monte Carlo + OpenAI) authenticated
       const res = await callSupabaseFunction('enhanced-value-bet-analysis', {
         raceId: raceId,
-        horseId: horseData.id.toString()
+        horseId: horseData.horse_id,
+        raceEntryId: horseData.id
       })
 
       if (res && res.data && res.data.success) {
@@ -862,6 +873,8 @@ export function AIInsiderPage() {
           timestamp: new Date().toISOString()
         }
         setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+        setDiagnosticMessage('AI Top Pick analysis completed')
+        setTimeout(() => setDiagnosticMessage(null), 4000)
         console.log(`OpenAI top pick analysis completed for ${topPick.horse_name}`)
       } else {
         throw new Error(res?.data?.error || 'OpenAI top pick analysis failed')
