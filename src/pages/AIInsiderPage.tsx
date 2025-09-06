@@ -182,6 +182,7 @@ export function AIInsiderPage() {
   const [raceInsights, setRaceInsights] = useState<Record<string, AIMarketInsight>>({})
   const [loadingInsights, setLoadingInsights] = useState<Record<string, boolean>>({})
   const [shortlistOperations, setShortlistOperations] = useState<Record<string, boolean>>({})
+  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   
@@ -604,6 +605,8 @@ export function AIInsiderPage() {
   // Enhanced Value Bet Analysis using OpenAI-powered analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
     console.log('getValueBetAnalysis called', { raceId, course, offTime })
+    setDiagnosticMessage('Running Value Bet analysis...')
+    setTimeout(() => setDiagnosticMessage(null), 5000)
     // We'll key insights by raceId::horseId so they don't collide with race-level insights
     // Find the race and get the top value bet horse
     const targetRace = mlValueBets.find(race => race.race_id === raceId)
@@ -695,6 +698,8 @@ export function AIInsiderPage() {
   // Enhanced Trainer Intent Analysis using OpenAI-powered analysis
   const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
     console.log('getTrainerIntentAnalysis called', { raceId, course, offTime, horseIdOverride })
+    setDiagnosticMessage('Running Trainer Intent analysis...')
+    setTimeout(() => setDiagnosticMessage(null), 5000)
     // Trainer intent analysis should be keyed by raceId::horseId to avoid collisions
     // Determine target intent (or use provided horseIdOverride)
     const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
@@ -786,6 +791,8 @@ export function AIInsiderPage() {
   // AI Top Pick Analysis (mirrors value bet analysis but targets AI Top Picks)
   const getAiTopPickAnalysis = async (raceId: string, course: string, offTime: string) => {
     console.log('getAiTopPickAnalysis called', { raceId, course, offTime })
+    setDiagnosticMessage('Running AI Top Pick analysis...')
+    setTimeout(() => setDiagnosticMessage(null), 5000)
     // Determine top pick and key by raceId::horseId
     const targetRace = aiTopPicks.find((pick: any) => pick.race_id === raceId)
     if (!targetRace) {
@@ -2357,7 +2364,18 @@ export function AIInsiderPage() {
             </div>
           )}
         </div>
+        <AIInsiderDebugToast message={diagnosticMessage} />
       </div>
     </AppLayout>
+  )
+}
+
+// Diagnostic toast rendered at root of AIInsiderPage to aid debugging in-browser
+export function AIInsiderDebugToast({ message }: { message: string | null }) {
+  if (!message) return null
+  return (
+    <div className="fixed right-4 top-20 z-50">
+      <div className="bg-yellow-500/90 text-black px-4 py-2 rounded shadow">{message}</div>
+    </div>
   )
 }
