@@ -45,7 +45,8 @@ export async function callSupabaseFunction(functionName: string, payload: any) {
   
   if (!data?.success) {
     console.error(`API response error for ${functionName}:`, data?.error)
-    throw new Error(data?.error?.message || `${functionName} operation failed`)
+    const errInfo = data?.error || data
+    throw new Error(typeof errInfo === 'string' ? errInfo : JSON.stringify(errInfo))
   }
   
   return data
