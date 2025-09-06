@@ -621,11 +621,11 @@ export function AIInsiderPage() {
       return
     }
     const topValueBet = targetRace.top_value_bets[0]
-    const insightKeyPlaceholder = `${raceId}::${topValueBet.horse_id || topValueBet.horse_name}`
-    if (loadingInsights[insightKeyPlaceholder]) return
+    // Use the same key format as the UI: race.race_id::topHorseId
+    const uiInsightKey = topValueBet.horse_id ? `${raceId}::${topValueBet.horse_id}` : raceId
+    if (loadingInsights[uiInsightKey]) return
 
-    setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: true }))
-    let canonicalInsightKey = insightKeyPlaceholder // fallback
+    setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
     
     try {
       // Find the race and get the top value bet horse
@@ -649,16 +649,14 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topValueBet.horse_name}`)
       }
       
-      // Use horse_id (stable across entries) as insight key so frontend rendering matches other flows
-      canonicalInsightKey = `${raceId}::${horseData.horse_id}`
-      // also mark canonical key as loading so UI shows spinner/text
-      setLoadingInsights(prev => ({ ...prev, [canonicalInsightKey]: true }))
-      // Call the same ai-race-analysis function as AI Top Pick (which works)
-      const response = await fetchFromSupabaseFunction('ai-race-analysis', {
+      // Store result using the same key the UI is checking
+      const finalInsightKey = `${raceId}::${horseData.horse_id}`
+      // Call the correct Value Bets analysis function with required parameters
+      const response = await fetchFromSupabaseFunction('openai-value-bets-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          openaiApiKey: profile.openai_api_key
+          horseId: horseData.id // Use race_entries.id as horseId parameter
         })
       })
 
@@ -680,7 +678,7 @@ export function AIInsiderPage() {
         market_confidence_horses: body.market_confidence_horses || [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [canonicalInsightKey]: analysisData }))
+      setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
       setDiagnosticMessage('Value Bet analysis completed')
       setTimeout(() => setDiagnosticMessage(null), 4000)
       console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
@@ -689,10 +687,10 @@ export function AIInsiderPage() {
       // Try to fetch the raw function response for debugging
       try {
         const { url, headers } = createSupabaseClient()
-        const debugResp = await fetch(`${url}/functions/v1/ai-race-analysis`, {
+        const debugResp = await fetch(`${url}/functions/v1/openai-value-bets-analysis`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ raceId, openaiApiKey: profile?.openai_api_key })
+          body: JSON.stringify({ raceId, horseId: topValueBet.horse_name })
         })
         const debugText = await debugResp.text()
         setDiagnosticMessage(`Function error ${debugResp.status}: ${debugText.slice(0, 300)}`)
@@ -712,10 +710,10 @@ export function AIInsiderPage() {
         market_confidence_horses: [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [insightKeyPlaceholder]: errorData }))
+      setRaceInsights(prev => ({ ...prev, [uiInsightKey]: errorData }))
     } finally {
-      // clear both placeholder and canonical loading flags
-      setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: false, [canonicalInsightKey]: false }))
+      // clear loading flag for the UI key
+      setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: false }))
     }
   }
 
@@ -733,11 +731,11 @@ export function AIInsiderPage() {
     // Determine target intent (or use provided horseIdOverride)
     const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
     const horseIdentifier = horseIdOverride || targetIntent?.horse_id || targetIntent?.horse_name
-    const insightKey = `${raceId}::${horseIdentifier}`
-    if (loadingInsights[insightKey]) return
+    // Use the same key format as the UI: raceGroup.race_id::topIntentHorseId
+    const uiInsightKey = horseIdentifier ? `${raceId}::${horseIdentifier}` : raceId
+    if (loadingInsights[uiInsightKey]) return
 
-    setLoadingInsights(prev => ({ ...prev, [insightKey]: true }))
-    let canonicalInsightKey = insightKey // fallback
+    setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
     
     try {
       // Find the trainer intent and get the horse
@@ -765,17 +763,15 @@ export function AIInsiderPage() {
       // No longer need Google Maps API check since we implemented Haversine formula
       // Proceed directly with OpenAI-powered trainer intent analysis
       
-      // Use horse_id as insight key and call function with both identifiers
-      canonicalInsightKey = `${raceId}::${horseData.horse_id}`
-      // also mark canonical key as loading so UI shows spinner/text
-      setLoadingInsights(prev => ({ ...prev, [canonicalInsightKey]: true }))
+      // Store result using the same key the UI is checking
+      const finalInsightKey = `${raceId}::${horseData.horse_id}`
 
-      // Call the same ai-race-analysis function as AI Top Pick (which works)
-      const response = await fetchFromSupabaseFunction('ai-race-analysis', {
+      // Call the correct Trainer Intent analysis function with required parameters
+      const response = await fetchFromSupabaseFunction('openai-trainer-intent-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId,
-          openaiApiKey: profile.openai_api_key
+          horseId: horseData.id // Use race_entries.id as horseId parameter
         })
       })
 
@@ -800,7 +796,7 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
 
-      setRaceInsights(prev => ({ ...prev, [canonicalInsightKey]: analysisData }))
+      setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
       setDiagnosticMessage('Trainer Intent analysis completed')
       setTimeout(() => setDiagnosticMessage(null), 4000)
     } catch (error) {
@@ -819,10 +815,10 @@ export function AIInsiderPage() {
         market_confidence_horses: [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [insightKey]: errorData }))
+      setRaceInsights(prev => ({ ...prev, [uiInsightKey]: errorData }))
       setDiagnosticMessage(`Trainer Intent analysis failed: ${error.message}`)
     } finally {
-      setLoadingInsights(prev => ({ ...prev, [insightKey]: false, [canonicalInsightKey]: false }))
+      setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: false }))
     }
   }
 
