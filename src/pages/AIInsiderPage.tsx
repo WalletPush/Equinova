@@ -1888,7 +1888,7 @@ export function AIInsiderPage() {
                           <div className="mt-4 pt-4 border-t border-gray-700">
                             <button
                               onClick={() => getAiTopPickAnalysis(race.race_id, race.course_name, race.off_time)}
-                              disabled={isLoadingInsight || !!raceInsight || !profile?.openai_api_key}
+                              disabled={isLoadingInsight || !!raceInsight}
                               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                             >
                               {isLoadingInsight ? (
@@ -2091,7 +2091,7 @@ export function AIInsiderPage() {
                         <div className="mt-4 pt-4 border-t border-gray-700">
                           <button
                             onClick={() => getValueBetAnalysis(race.race_id, race.course_name, race.off_time)}
-                            disabled={isLoadingInsight || !!raceInsight || !profile?.openai_api_key}
+                            disabled={isLoadingInsight || !!raceInsight}
                             className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                           >
                             {isLoadingInsight ? (
@@ -2339,7 +2339,7 @@ export function AIInsiderPage() {
                             <div className="mt-4 pt-4 border-t border-gray-700">
                               <button
                                 onClick={() => getTrainerIntentAnalysis(raceGroup.race_id, raceGroup.course_name, raceGroup.off_time, raceGroup.intents?.[0]?.horse_id)}
-                                disabled={isLoadingInsight || !!raceInsight || !profile?.openai_api_key}
+                                disabled={isLoadingInsight || !!raceInsight}
                                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-3 rounded-lg font-bold transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                               >
                                 {isLoadingInsight ? (
