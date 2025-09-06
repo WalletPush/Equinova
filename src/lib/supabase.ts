@@ -43,12 +43,17 @@ export async function callSupabaseFunction(functionName: string, payload: any) {
     throw new Error(error.message || `Failed to call ${functionName}`)
   }
   
-  if (!data?.success) {
-    console.error(`API response error for ${functionName}:`, data?.error)
-    const errInfo = data?.error || data
+  // Some edge functions return a wrapper: { success: true, data: {...} }
+  // while others return the payload directly. Only throw if the function
+  // explicitly returned success === false (either at top-level or in the inner data).
+  const topLevelFailed = data && data.success === false
+  const innerFailed = data && data.data && data.data.success === false
+  if (topLevelFailed || innerFailed) {
+    const errInfo = data?.error || data?.data?.error || data
+    console.error(`API response error for ${functionName}:`, errInfo)
     throw new Error(typeof errInfo === 'string' ? errInfo : JSON.stringify(errInfo))
   }
-  
+
   return data
 }
 
