@@ -653,13 +653,11 @@ export function AIInsiderPage() {
       canonicalInsightKey = `${raceId}::${horseData.horse_id}`
       // also mark canonical key as loading so UI shows spinner/text
       setLoadingInsights(prev => ({ ...prev, [canonicalInsightKey]: true }))
-      // Call the correct Value Bets analysis function
-      const response = await fetchFromSupabaseFunction('openai-value-bets-analysis', {
+      // Call the same ai-race-analysis function as AI Top Pick (which works)
+      const response = await fetchFromSupabaseFunction('ai-race-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseId: horseData.horse_id,
-          raceEntryId: horseData.id,
           openaiApiKey: profile.openai_api_key
         })
       })
@@ -691,7 +689,7 @@ export function AIInsiderPage() {
       // Try to fetch the raw function response for debugging
       try {
         const { url, headers } = createSupabaseClient()
-        const debugResp = await fetch(`${url}/functions/v1/openai-value-bets-analysis`, {
+        const debugResp = await fetch(`${url}/functions/v1/ai-race-analysis`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ raceId, openaiApiKey: profile?.openai_api_key })
@@ -772,13 +770,11 @@ export function AIInsiderPage() {
       // also mark canonical key as loading so UI shows spinner/text
       setLoadingInsights(prev => ({ ...prev, [canonicalInsightKey]: true }))
 
-      // Call the correct Trainer Intent analysis function
-      const response = await fetchFromSupabaseFunction('openai-trainer-intent-analysis', {
+      // Call the same ai-race-analysis function as AI Top Pick (which works)
+      const response = await fetchFromSupabaseFunction('ai-race-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId,
-          horseId: horseData.horse_id,
-          raceEntryId: horseData.id,
           openaiApiKey: profile.openai_api_key
         })
       })
