@@ -605,6 +605,8 @@ export function AIInsiderPage() {
   // Enhanced Value Bet Analysis using OpenAI-powered analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
     console.log('getValueBetAnalysis called', { raceId, course, offTime })
+    const targetRaceForDebug = mlValueBets.find(race => race.race_id === raceId)
+    console.log('UI will look for key:', targetRaceForDebug?.top_value_bets?.[0]?.horse_id ? `${raceId}::${targetRaceForDebug.top_value_bets[0].horse_id}` : raceId)
     if (!profile?.openai_api_key) {
       console.error('OpenAI API key required. Add it in Settings.')
       return
@@ -676,6 +678,7 @@ export function AIInsiderPage() {
       }
       setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
       console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
+      console.log('Stored result with key:', finalInsightKey)
     } catch (error: any) {
       console.error(`Failed to get OpenAI value bet analysis for race ${raceId}:`, error)
       // Try to fetch the raw function response for debugging
@@ -714,6 +717,7 @@ export function AIInsiderPage() {
   // Enhanced Trainer Intent Analysis using OpenAI-powered analysis
   const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
     console.log('getTrainerIntentAnalysis called', { raceId, course, offTime, horseIdOverride })
+    console.log('trainerIntents for this race:', trainerIntents.filter(intent => intent.race_id === raceId))
     if (!profile?.openai_api_key) {
       console.error('OpenAI API key required. Add it in Settings.')
       return
