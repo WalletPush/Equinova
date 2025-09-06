@@ -649,7 +649,9 @@ export function AIInsiderPage() {
       }
       
       // Use horse_id (stable across entries) as insight key so frontend rendering matches other flows
-      const insightKey = `${raceId}::${horseData.horse_id}`
+      const canonicalInsightKey = `${raceId}::${horseData.horse_id}`
+      // also mark canonical key as loading so UI shows spinner/text
+      setLoadingInsights(prev => ({ ...prev, [canonicalInsightKey]: true }))
       // Use the exact same server-side race analysis that RaceDetailPage uses
       // (so behavior matches the working Today/RaceDetail flow)
       const response = await fetchFromSupabaseFunction('ai-race-analysis', {
@@ -678,7 +680,7 @@ export function AIInsiderPage() {
         market_confidence_horses: body.market_confidence_horses || [],
         timestamp: new Date().toISOString()
       }
-      setRaceInsights(prev => ({ ...prev, [insightKey]: analysisData }))
+      setRaceInsights(prev => ({ ...prev, [canonicalInsightKey]: analysisData }))
       setDiagnosticMessage('Value Bet analysis completed')
       setTimeout(() => setDiagnosticMessage(null), 4000)
       console.log(`OpenAI value bet analysis completed for ${topValueBet.horse_name}`)
@@ -712,6 +714,7 @@ export function AIInsiderPage() {
       }
       setRaceInsights(prev => ({ ...prev, [insightKeyPlaceholder]: errorData }))
     } finally {
+      // clear both placeholder and canonical loading flags
       setLoadingInsights(prev => ({ ...prev, [insightKeyPlaceholder]: false }))
     }
   }
