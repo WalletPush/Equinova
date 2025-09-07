@@ -614,8 +614,8 @@ export function AIInsiderPage() {
     if (!topValueBet) {
       throw new Error('No value bet horse found for analysis')
     }
-    // Use the exact same key format as the UI
-    const uiInsightKey = topValueBet.horse_id ? `${raceId}::${topValueBet.horse_id}` : raceId
+    // Use simple raceId key (like Code 2) to avoid key mismatches
+    const uiInsightKey = raceId
     if (loadingInsights[uiInsightKey]) return
 
     setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
@@ -633,15 +633,15 @@ export function AIInsiderPage() {
         throw new Error(`Failed to find horse ID for ${topValueBet.horse_name}`)
       }
 
-      // Store result using the same key the UI is checking
-      const finalInsightKey = `${raceId}::${topValueBet.horse_id}`
+      // Store result using simple raceId key
+      const finalInsightKey = raceId
 
-      // ONLY DIFFERENCE: Call openai-value-bets-analysis instead of ai-race-analysis
-      const response = await fetchFromSupabaseFunction('openai-value-bets-analysis', {
+      // ONLY DIFFERENCE: Call enhanced-value-bet-analysis instead of ai-race-analysis
+      const response = await fetchFromSupabaseFunction('enhanced-value-bet-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseId: horseData.id
+          horseId: horseData.id.toString()
         })
       })
 
@@ -686,43 +686,39 @@ export function AIInsiderPage() {
   // Enhanced Trainer Intent Analysis - EXACT COPY of AI Top Pick with different function call
   const getTrainerIntentAnalysis = async (raceId: string, course: string, offTime: string, horseIdOverride?: string) => {
     console.log('getTrainerIntentAnalysis called', { raceId, course, offTime, horseIdOverride })
-    // Find the trainer intent (same pattern as AI Top Pick)
-    const targetRace = trainerIntents.find(intent => intent.race_id === raceId)
-    if (!targetRace) {
-      throw new Error('No Trainer Intents found for analysis')
-    }
-    const topIntent = trainerIntents.filter((intent: any) => intent.race_id === raceId)[0]
-    if (!topIntent) {
+    // Find the trainer intent using horse_name (more reliable than horse_id)
+    const targetIntent = trainerIntents.find(intent => intent.race_id === raceId)
+    if (!targetIntent) {
       throw new Error('No trainer intent found for analysis')
     }
-    // Use the exact same key format as the UI
-    const uiInsightKey = topIntent.horse_id ? `${raceId}::${topIntent.horse_id}` : raceId
+    // Use simple raceId key (like Code 2) to avoid key mismatches
+    const uiInsightKey = raceId
     if (loadingInsights[uiInsightKey]) return
 
     setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
 
     try {
-      // Get the horse identifiers from race_entries table
+      // Get the horse identifiers using horse_name (more reliable)
       const { data: horseData, error: horseError } = await supabase
         .from('race_entries')
         .select('horse_id,id')
         .eq('race_id', raceId)
-        .eq('horse_name', topIntent.horse_name)
+        .eq('horse_name', targetIntent.horse_name)
         .single()
 
       if (horseError || !horseData) {
-        throw new Error(`Failed to find horse ID for ${topIntent.horse_name}`)
+        throw new Error(`Failed to find horse ID for ${targetIntent.horse_name}`)
       }
 
-      // Store result using the same key the UI is checking
-      const finalInsightKey = `${raceId}::${topIntent.horse_id}`
+      // Store result using simple raceId key
+      const finalInsightKey = raceId
 
       // ONLY DIFFERENCE: Call openai-trainer-intent-analysis instead of ai-race-analysis
       const response = await fetchFromSupabaseFunction('openai-trainer-intent-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseId: horseData.id
+          horseId: horseData.id.toString()
         })
       })
 
@@ -1898,8 +1894,8 @@ export function AIInsiderPage() {
               ) : mlValueBets && mlValueBets.length > 0 ? (
                 <div className="space-y-4">
                   {mlValueBets.map((race) => {
-                    const topHorseId = race.top_value_bets?.[0]?.horse_id
-                    const insightKey = topHorseId ? `${race.race_id}::${topHorseId}` : race.race_id
+                    // Use simple raceId key (like Code 2) to avoid key mismatches
+                    const insightKey = race.race_id
                     const raceInsight = raceInsights[insightKey]
                     const isLoadingInsight = loadingInsights[insightKey] || false
                     
@@ -2139,9 +2135,8 @@ export function AIInsiderPage() {
                     }[])
                       .sort((a, b) => a.off_time.localeCompare(b.off_time))
                       .map((raceGroup) => {
-                        // Trainer intent insights should be keyed by raceId::horseId (use first intent horse if available)
-                        const topIntentHorseId = raceGroup.intents?.[0]?.horse_id
-                        const intentInsightKey = topIntentHorseId ? `${raceGroup.race_id}::${topIntentHorseId}` : raceGroup.race_id
+                        // Use simple raceId key (like Code 2) to avoid key mismatches
+                        const intentInsightKey = raceGroup.race_id
                         const raceInsight = raceInsights[intentInsightKey]
                         const isLoadingInsight = loadingInsights[intentInsightKey] || false
                         
