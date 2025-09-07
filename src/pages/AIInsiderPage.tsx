@@ -1903,6 +1903,13 @@ export function AIInsiderPage() {
                     const raceInsight = raceInsights[insightKey]
                     const isLoadingInsight = loadingInsights[insightKey] || false
                     
+                    // Debug logging
+                    if (race.race_id === Object.keys(raceInsights)[0]?.split('::')[0]) {
+                      console.log('Value Bets UI looking for key:', insightKey)
+                      console.log('Available insight keys:', Object.keys(raceInsights))
+                      console.log('Found raceInsight:', !!raceInsight)
+                    }
+                    
                     return (
                       <div
                         key={race.race_id}
@@ -2137,6 +2144,13 @@ export function AIInsiderPage() {
                         const intentInsightKey = topIntentHorseId ? `${raceGroup.race_id}::${topIntentHorseId}` : raceGroup.race_id
                         const raceInsight = raceInsights[intentInsightKey]
                         const isLoadingInsight = loadingInsights[intentInsightKey] || false
+                        
+                        // Debug logging
+                        if (raceGroup.race_id === Object.keys(raceInsights)[0]?.split('::')[0]) {
+                          console.log('Trainer Intent UI looking for key:', intentInsightKey)
+                          console.log('Available insight keys:', Object.keys(raceInsights))
+                          console.log('Found raceInsight:', !!raceInsight)
+                        }
                         
                         return (
                           <div
