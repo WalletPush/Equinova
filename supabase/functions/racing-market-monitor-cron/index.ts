@@ -1,244 +1,257 @@
 // supabase/functions/racing-market-monitor-cron/index.ts
-// Ladbrokes-only market monitor: updates snapshot and logs EVERY odds change.
+// Fast Betfair market monitor with BULK IO to avoid timeouts.
+// - initial_odds (text): first decimal seen (e.g. "9.8")
+// - current_odds (text): latest decimal (e.g. "9.8")
+// - odds_change / odds_movement_pct = current - initial
+// Query params:
+//   ?force=1              bypass 08:00–21:00 UK window
+//   ?batch_size=300       rows per bulk upsert (100..1000)
+//   ?log=1                light per-batch logging
 Deno.serve(async (req)=>{
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE, PATCH',
-    'Access-Control-Max-Age': '86400',
-    'Access-Control-Allow-Credentials': 'false'
+  const CORS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
+    "Access-Control-Max-Age": "86400",
+    "Access-Control-Allow-Credentials": "false"
   };
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders
-    });
-  }
-  try {
-    // ---- Time gate (UK 08:00–21:00) ----------------------------------------
-    const now = new Date();
-    const londonTimeString = now.toLocaleString('en-GB', {
-      timeZone: 'Europe/London',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-    const [hh, mm] = londonTimeString.split(':').map(Number);
-    const minutes = hh * 60 + mm;
-    if (minutes < 8 * 60) {
-      return json({
-        success: true,
-        message: `Not active yet (${londonTimeString} UK); starts 08:00`
-      }, corsHeaders);
-    }
-    if (minutes >= 21 * 60) {
-      return json({
-        success: true,
-        message: `Ended for the day (${londonTimeString} UK); ends 21:00`
-      }, corsHeaders);
-    }
-    // ---- Env ----------------------------------------------------------------
-    const supabaseUrl = mustGetEnv('SUPABASE_URL');
-    const supabaseKey = mustGetEnv('SUPABASE_SERVICE_ROLE_KEY');
-    // Racing API (Ladbrokes only)
-    const API_USER = 'B06mvaMg9rdqfPBMJLe6wU0m';
-    const API_PASS = 'WC4kl7E2GvweCA9uxFAywbOY';
-    const auth = btoa(`${API_USER}:${API_PASS}`);
-    console.log('[MM] Start (Ladbrokes only)');
-    // ---- Fetch racecards ----------------------------------------------------
-    const apiRes = await fetch('https://api.theracingapi.com/v1/racecards/pro', {
-      method: 'GET',
+  if (req.method === "OPTIONS") return new Response(null, {
+    status: 200,
+    headers: CORS
+  });
+  const json = (body, status = 200)=>new Response(JSON.stringify(body), {
+      status,
       headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': 'application/json'
+        ...CORS,
+        "Content-Type": "application/json"
       }
     });
-    if (!apiRes.ok) {
-      const t = await apiRes.text();
-      throw new Error(`Racing API failed: ${apiRes.status} - ${t}`);
+  try {
+    // ---- Params & time gate ----
+    const url = new URL(req.url);
+    const force = url.searchParams.get("force") === "1";
+    const batchSize = clampInt(url.searchParams.get("batch_size"), 100, 1000, 300);
+    const doLog = url.searchParams.get("log") === "1";
+    const now = new Date();
+    const hhmm = now.toLocaleString("en-GB", {
+      timeZone: "Europe/London",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+    const [hh, mm] = hhmm.split(":").map(Number);
+    const minutes = hh * 60 + mm;
+    if (!force && (minutes < 8 * 60 || minutes >= 21 * 60)) {
+      return json({
+        success: true,
+        message: minutes < 8 * 60 ? `Not active yet (${hhmm} UK); starts 08:00` : `Ended for the day (${hhmm} UK); ends 21:00`,
+        force,
+        batch_size: batchSize
+      });
     }
-    const data = await apiRes.json();
-    const racecards = Array.isArray(data?.racecards) ? data.racecards : [];
+    // ---- Env / headers ----
+    const SUPABASE_URL = mustGetEnv("SUPABASE_URL");
+    const SUPABASE_KEY = mustGetEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const BOOKMAKER_DB = "Betfair"; // EXACT case stored in DB
+    const API_USER = "B06mvaMg9rdqfPBMJLe6wU0m";
+    const API_PASS = "WC4kl7E2GvweCA9uxFAywbOY";
+    const apiAuth = btoa(`${API_USER}:${API_PASS}`);
+    const restHeaders = {
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_KEY,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal"
+    };
+    // ---- 1) Fetch racecards once ----
+    const rcRes = await fetch("https://api.theracingapi.com/v1/racecards/pro", {
+      headers: {
+        Authorization: `Basic ${apiAuth}`,
+        "Content-Type": "application/json"
+      }
+    });
+    if (!rcRes.ok) throw new Error(`Racing API failed: ${rcRes.status} - ${await safeText(rcRes)}`);
+    const rc = await rcRes.json().catch(()=>({}));
+    const racecards = Array.isArray(rc?.racecards) ? rc.racecards : [];
     if (racecards.length === 0) {
       return json({
         success: true,
-        message: 'No racecards from API',
-        horses_processed: 0
-      }, corsHeaders);
-    }
-    // ---- Processing ---------------------------------------------------------
-    let horsesProcessed = 0;
-    let ladbrokesSeen = 0;
-    let changesRecorded = 0;
-    let unchanged = 0;
-    // Helper to POST SQL
-    const execSql = async (sql)=>{
-      const r = await fetch(`${supabaseUrl}/rest/v1/rpc/exec_sql`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          query: sql
-        })
+        message: "No racecards from API",
+        force,
+        batch_size: batchSize,
+        horses_found: 0,
+        upserted: 0
       });
-      if (!r.ok) {
-        const t = await r.text();
-        throw new Error(`exec_sql failed: HTTP ${r.status} - ${t}`);
-      }
-      return r;
-    };
-    // Tiny sanitizer for SQL strings
-    const esc = (v)=>String(v ?? '').replace(/'/g, "''");
+    }
+    const picks = [];
     for (const race of racecards){
       const runners = Array.isArray(race?.runners) ? race.runners : [];
       for (const runner of runners){
-        horsesProcessed++;
-        // --- pick Ladbrokes only (tolerant casing/spacing) -------------------
-        const lad = (runner?.odds || []).find((o)=>String(o?.bookmaker || '').trim().toLowerCase() === 'ladbrokes');
-        if (!lad || !lad.decimal) continue;
-        ladbrokesSeen++;
-        const race_id = race.race_id;
-        const horse_id = runner.horse_id;
-        const course = race.course;
-        const off_time = race.off_time;
-        const fractional = lad.fractional || '';
-        const decimalNow = parseFloat(lad.decimal);
-        const updated = lad.updated || new Date().toISOString();
-        // --- fetch existing snapshot for this horse --------------------------
-        let prevDecimal = null;
-        let initialOdds = fractional;
-        {
-          const getUrl = `${supabaseUrl}/rest/v1/horse_market_movement` + `?select=decimal_odds,initial_odds&race_id=eq.${encodeURIComponent(race_id)}` + `&horse_id=eq.${encodeURIComponent(horse_id)}` + `&bookmaker=eq.${encodeURIComponent('Ladbrokes')}` + `&limit=1`;
-          const exRes = await fetch(getUrl, {
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'apikey': supabaseKey
-            }
-          });
-          if (exRes.ok) {
-            const rows = await exRes.json();
-            if (rows?.length) {
-              prevDecimal = rows[0]?.decimal_odds ?? null;
-              // keep original initial_odds if already set
-              initialOdds = rows[0]?.initial_odds || initialOdds;
-            }
-          }
-        }
-        // --- compute movement & build statements -----------------------------
-        let changeAbs = 0;
-        let changePct = null;
-        let direction = 'stable';
-        if (prevDecimal != null && isFinite(prevDecimal) && prevDecimal !== decimalNow) {
-          changeAbs = +(decimalNow - prevDecimal).toFixed(2);
-          changePct = prevDecimal !== 0 ? +(100 * (changeAbs / prevDecimal)).toFixed(2) : null;
-          direction = changeAbs < 0 ? 'in' : 'out'; // IN = shortened (more likely), OUT = lengthened
-        }
-        // Snapshot UPSERT (always keep current)
-        const upsertSql = `
-            insert into horse_market_movement (
-              race_id, horse_id, course, off_time, bookmaker,
-              initial_odds, current_odds, decimal_odds, prev_decimal_odds,
-              odds_change, odds_movement, odds_movement_pct,
-              last_updated, created_at, updated_at
-            ) values (
-              '${esc(race_id)}','${esc(horse_id)}','${esc(course)}','${esc(off_time)}','Ladbrokes',
-              '${esc(initialOdds)}','${decimalNow} (${esc(fractional)})', ${decimalNow},
-              ${prevDecimal == null ? 'null' : prevDecimal},
-              ${changeAbs}, '${direction === 'stable' ? 'stable' : direction === 'in' ? 'steaming' : 'drifting'}',
-              ${changePct == null ? 'null' : changePct},
-              '${esc(updated)}', now(), now()
-            )
-            on conflict (race_id, horse_id, bookmaker) do update set
-              current_odds       = excluded.current_odds,
-              prev_decimal_odds  = horse_market_movement.decimal_odds,
-              decimal_odds       = excluded.decimal_odds,
-              odds_change        = excluded.odds_change,
-              odds_movement      = excluded.odds_movement,
-              odds_movement_pct  = excluded.odds_movement_pct,
-              last_updated       = excluded.last_updated,
-              updated_at         = excluded.updated_at;
-          `;
-        // Change log insert (only when price actually moved)
-        const changeSql = prevDecimal != null && prevDecimal !== decimalNow ? `
-              insert into horse_market_movement_changes (
-                race_id, horse_id, bookmaker,
-                from_decimal, to_decimal, change_abs, change_pct, direction,
-                source_updated_at, course, off_time
-              ) values (
-                '${esc(race_id)}','${esc(horse_id)}','Ladbrokes',
-                ${prevDecimal}, ${decimalNow},
-                ${changeAbs}, ${changePct == null ? 'null' : changePct},
-                '${direction}',
-                '${esc(updated)}','${esc(course)}','${esc(off_time)}'
-              );
-            ` : '';
-        try {
-          await execSql(upsertSql);
-          if (changeSql) {
-            await execSql(changeSql);
-            changesRecorded++;
-            console.log(`[MM] ${horse_id} ${direction.toUpperCase()}: ${prevDecimal} -> ${decimalNow}`);
-          } else {
-            unchanged++;
-          }
-        } catch (e) {
-          console.error(`[MM] DB error for ${horse_id}:`, e?.message || e);
-        }
+        const odds = Array.isArray(runner?.odds) ? runner.odds : [];
+        const betfairs = odds.filter((o)=>/betfair/i.test(String(o?.bookmaker ?? "")));
+        if (!betfairs.length) continue;
+        // prefer Exchange entry if present
+        betfairs.sort((a, b)=>{
+          const ax = /exchange/i.test(String(a?.bookmaker ?? ""));
+          const bx = /exchange/i.test(String(b?.bookmaker ?? ""));
+          return ax === bx ? 0 : ax ? -1 : 1;
+        });
+        const sel = betfairs[0];
+        const n = Number(sel?.decimal);
+        if (!Number.isFinite(n)) continue; // skip "SP"/"odds"
+        const raw = String(sel?.decimal ?? "");
+        const asStr = /^\s*\d+(\.\d+)?\s*$/.test(raw) ? raw.trim() : String(n);
+        picks.push({
+          race_id: String(race?.race_id ?? ""),
+          horse_id: String(runner?.horse_id ?? ""),
+          course: race?.course ?? null,
+          off_time: race?.off_time ?? null,
+          decNow: n,
+          decText: asStr,
+          updatedText: String(sel?.updated ?? new Date().toISOString())
+        });
       }
     }
-    // Update persistent market movers
-    try {
-      console.log('[MM] Updating persistent market movers...');
-      const updateResponse = await fetch(`${supabaseUrl}/functions/v1/update-persistent-market-movers`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json'
-        }
+    if (!picks.length) {
+      return json({
+        success: true,
+        message: "No Betfair prices found in payload",
+        force,
+        batch_size: batchSize,
+        horses_found: 0,
+        upserted: 0
       });
-      if (updateResponse.ok) {
-        const updateResult = await updateResponse.json();
-        console.log('[MM] Persistent market movers updated:', updateResult.summary);
-      } else {
-        console.warn('[MM] Failed to update persistent market movers');
+    }
+    // ---- 3) Bulk-load existing rows for these races (one request; filters by bookmaker) ----
+    const raceIds = Array.from(new Set(picks.map((p)=>p.race_id)));
+    // Build in.(...) safely; small batches if too many race_ids
+    const EXISTING = new Map();
+    const RACE_CHUNK = 100; // keep query string reasonable
+    for(let i = 0; i < raceIds.length; i += RACE_CHUNK){
+      const chunk = raceIds.slice(i, i + RACE_CHUNK);
+      const inList = chunk.map((id)=>encodeURIComponent(id)).join(",");
+      const selUrl = `${SUPABASE_URL}/rest/v1/horse_market_movement` + `?bookmaker=eq.${encodeURIComponent(BOOKMAKER_DB)}` + `&race_id=in.(${inList})` + `&select=race_id,horse_id,initial_odds,decimal_odds,change_count,last_change_at`;
+      const exRes = await fetch(selUrl, {
+        headers: restHeaders
+      });
+      if (!exRes.ok) throw new Error(`SELECT existing ${exRes.status}: ${await safeText(exRes)}`);
+      const rows = await exRes.json().catch(()=>[]);
+      for (const r of rows){
+        const key = `${r.race_id}::${r.horse_id}`;
+        EXISTING.set(key, {
+          initial_odds: r.initial_odds ?? undefined,
+          decimal_odds: Number(r.decimal_odds ?? NaN),
+          change_count: Number.isFinite(Number(r.change_count)) ? Number(r.change_count) : 0,
+          last_change_at: r.last_change_at ?? null
+        });
       }
-    } catch (error) {
-      console.error('[MM] Error updating persistent market movers:', error);
+    }
+    const rows = [];
+    for (const p of picks){
+      const key = `${p.race_id}::${p.horse_id}`;
+      const ex = EXISTING.get(key);
+      const initialText = ex?.initial_odds ?? p.decText;
+      const initialNum = toDecimal(initialText); // supports fractional legacy; here it’ll just be decimal string
+      const diff = Number.isFinite(initialNum) ? p.decNow - initialNum : 0;
+      const changeAbsStr = fmt2(diff); // TEXT(2dp)
+      const changePct = Number.isFinite(initialNum) && initialNum !== 0 ? round2(100 * (diff / initialNum)) : null;
+      const movement = Number.isFinite(initialNum) ? p.decNow < initialNum ? "steaming" : p.decNow > initialNum ? "drifting" : "stable" : "stable";
+      const prevNum = Number(ex?.decimal_odds ?? NaN);
+      const priceChanged = Number.isFinite(prevNum) ? prevNum !== p.decNow : false;
+      rows.push({
+        race_id: p.race_id,
+        horse_id: p.horse_id,
+        bookmaker: BOOKMAKER_DB,
+        course: p.course,
+        off_time: p.off_time,
+        initial_odds: initialText,
+        current_odds: p.decText,
+        decimal_odds: p.decNow,
+        prev_decimal_odds: Number.isFinite(prevNum) ? prevNum : null,
+        odds_change: changeAbsStr,
+        odds_movement: movement,
+        odds_movement_pct: changePct,
+        last_updated: p.updatedText,
+        updated_at: new Date().toISOString(),
+        change_count: (ex?.change_count ?? 0) + (priceChanged ? 1 : 0),
+        last_change_at: priceChanged ? new Date().toISOString() : ex?.last_change_at ?? null
+      });
+    }
+    // ---- 5) Bulk UPSERT in batches (super fast) ----
+    let upserted = 0;
+    for(let i = 0; i < rows.length; i += batchSize){
+      const chunk = rows.slice(i, i + batchSize);
+      const upUrl = `${SUPABASE_URL}/rest/v1/horse_market_movement?on_conflict=race_id,horse_id,bookmaker`;
+      const upRes = await fetch(upUrl, {
+        method: "POST",
+        headers: {
+          ...restHeaders,
+          Prefer: "resolution=merge-duplicates,return=minimal"
+        },
+        body: JSON.stringify(chunk)
+      });
+      if (!upRes.ok) {
+        // If payload too large, nudge the batch_size down via query param
+        throw new Error(`UPSERT ${upRes.status}: ${await safeText(upRes)}`);
+      }
+      upserted += chunk.length;
+      if (doLog) console.log(`[MM] upserted batch ${i + 1}-${i + chunk.length}`);
     }
     return json({
       success: true,
-      message: 'Ladbrokes market snapshot updated; ALL changes logged',
-      horses_processed: horsesProcessed,
-      ladbrokes_seen: ladbrokesSeen,
-      changes_recorded: changesRecorded,
-      unchanged
-    }, corsHeaders);
-  } catch (err) {
-    console.error('Racing market monitor error:', err);
+      message: "horse_market_movement updated (bulk)",
+      force,
+      batch_size: batchSize,
+      bookmaker: BOOKMAKER_DB,
+      horses_found: picks.length,
+      upserted
+    });
+  } catch (e) {
+    console.error("racing-market-monitor-cron error:", e?.message ?? String(e));
     return json({
       success: false,
       error: {
-        code: 'RACING_MARKET_ERROR',
-        message: err?.message || String(err)
+        code: "RACING_MARKET_ERROR",
+        message: e?.message ?? String(e)
       }
-    }, corsHeaders, 500);
+    }, 500);
   }
 });
-// -------------------- helpers --------------------
+// ---------- utils ----------
 function mustGetEnv(k) {
   const v = Deno.env.get(k);
   if (!v) throw new Error(`Missing env: ${k}`);
   return v;
 }
-function json(body, headers, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      ...headers,
-      'Content-Type': 'application/json'
-    }
-  });
+function clampInt(v, min, max, dflt) {
+  const n = Number(v ?? "");
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : dflt;
+}
+// accepts numeric strings or fractional like "10/1" or "EVS"
+function toDecimal(text) {
+  if (text == null) return NaN;
+  const s = String(text).trim().toUpperCase();
+  if (!s) return NaN;
+  if (s === "EVS") return 2.0;
+  if (s.includes("/")) {
+    const [a, b] = s.split("/").map(Number);
+    if (Number.isFinite(a) && Number.isFinite(b) && b) return round2(a / b + 1);
+    return NaN;
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+// 2dp string; avoid "-0.00"
+function fmt2(n) {
+  const v = Math.abs(n) < 1e-9 ? 0 : Math.round(n * 100) / 100;
+  return v.toFixed(2);
+}
+async function safeText(res) {
+  try {
+    return await res.text();
+  } catch  {
+    return "";
+  }
 }

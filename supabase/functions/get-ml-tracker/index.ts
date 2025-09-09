@@ -92,10 +92,10 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Error fetching ML tracker data:', error);
+    console.error(`get-ml-tracker: Error fetching ML tracker data for date ${today}:`, error?.stack || error);
     return new Response(JSON.stringify({
       success: false,
-      error: error.message,
+      error: error?.message || String(error),
       timestamp: new Date().toISOString()
     }), {
       status: 500,
@@ -130,18 +130,78 @@ async function getNextRunnerForModel(modelName, supabaseUrl, supabaseKey) {
     const today = new Date().toLocaleDateString('en-CA', {
       timeZone: 'Europe/London'
     });
-    // Find the next race (same for all models) - get the first race of the day or next upcoming race
-    const nextRaceResponse = await fetch(`${supabaseUrl}/rest/v1/races?date=eq.${today}&order=off_time.asc&limit=1&select=race_id,off_time,course_name`, {
+    // Find the next upcoming race that hasn't finished yet
+    // Fetch today's races and pick the first one whose off_time is >= current London time.
+    const racesResponse = await fetch(`${supabaseUrl}/rest/v1/races?date=eq.${today}&order=off_time.asc&limit=50&select=race_id,off_time,course_name`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${supabaseKey}`,
         'apikey': supabaseKey
       }
     });
-    if (!nextRaceResponse.ok) return null;
-    const nextRaceData = await nextRaceResponse.json();
-    if (!nextRaceData || nextRaceData.length === 0) return null;
-    const nextRace = nextRaceData[0];
+    if (!racesResponse.ok) return null;
+    const racesData = await racesResponse.json();
+    if (!racesData || racesData.length === 0) {
+      console.log(`No races found for ${modelName} today`);
+      return null;
+    }
+    // Current London time as HH:MM
+    const currentLondonTime = new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false, hour: '2-digit', minute: '2-digit' });
+
+    function normalizeTimeStr(t) {
+      if (!t) return null;
+      // If contains T it's likely an ISO datetime
+      if (t.includes('T')) return t;
+      // Extract HH:MM from formats like '1:15', '13:15', '13:15:00'
+      const m = t.match(/(\d{1,2}:\d{2})/);
+      if (m && m[1]) {
+        const parts = m[1].split(':');
+        const hh = String(Number(parts[0])).padStart(2, '0');
+        return `${hh}:${parts[1]}`;
+      }
+      return null;
+    }
+
+    // Find the first race that is at or after current London time
+    let nextRace = null;
+    for (const r of racesData) {
+      const off = r.off_time;
+      if (!off) continue;
+      // If off_time looks like ISO datetime, compare Date objects
+      if (off.includes('T')) {
+        const dt = new Date(off);
+        if (isNaN(dt.getTime())) continue;
+        const now = new Date();
+        if (dt > now) {
+          nextRace = r;
+          break;
+        }
+      } else {
+        const m = off.match(/(\d{1,2}):(\d{2})/);
+        if (!m) continue;
+        const hh = Number(m[1]);
+        const mm = m[2];
+        const pad = (n) => String(n).padStart(2, '0');
+        const candidate1 = `${pad(hh)}:${mm}`; // as-is (could be 12-hour)
+        // If hour < 12, also consider adding 12 to interpret as PM (e.g., 01:30 -> 13:30)
+        const candidate2 = hh < 12 ? `${pad((hh % 12) + 12)}:${mm}` : null;
+
+        // Prefer the earliest candidate that is at/after currentLondonTime
+        let chosen = null;
+        if (candidate1 > currentLondonTime) chosen = candidate1;
+        if (!chosen && candidate2 && candidate2 > currentLondonTime) chosen = candidate2;
+        if (chosen) {
+          nextRace = r;
+          break;
+        }
+        // otherwise continue to next race
+      }
+    }
+
+    if (!nextRace) {
+      console.log(`No upcoming races found for ${modelName} today (checked ${racesData.length})`);
+      return null;
+    }
     // Now get this model's top pick for that specific race
     const entriesResponse = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${nextRace.race_id}&select=horse_name,horse_id,trainer_name,jockey_name,current_odds,${modelName}_proba&${modelName}_proba=gt.0&order=${modelName}_proba.desc&limit=1`, {
       method: 'GET',

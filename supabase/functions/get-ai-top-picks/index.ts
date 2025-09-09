@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
           field_size: raceInfo?.field_size || 10,
           prize: raceInfo?.prize || '8140',
           surface: raceInfo?.surface || 'Turf',
-          ai_reason: `${g.models.length} models agree this is their top pick (${g.models.join(', ')})`,
+          ai_reason: `${g.models.length} model top pick`,
           source: "ai_top_picks",
         });
       }

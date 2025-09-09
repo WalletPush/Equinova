@@ -91,27 +91,13 @@ export function PlaceBetButton({
     },
     onError: (error: Error) => {
       console.error('Error placing bet:', error)
-      const msg = String(error.message || '')
-      // Map common edge-function messages to friendly UI messages
-      if (msg.includes('No bankroll found') || msg.includes('Failed to get bankroll')) {
-        setError('Your bankroll needs topping up. Please add funds in Settings.')
-      } else if (msg.includes('Missing required parameters')) {
-        setError('Invalid bet request. Please try again.')
-      } else if (msg.includes('Failed to create bet')) {
-        setError('Could not place bet. Please try again later.')
-      } else {
-        setError(msg)
-      }
+      setError(error.message)
       setIsLoading(false)
       setIsBetPlaced(false)
     }
   })
 
   const handlePlaceBet = () => {
-    if (!horseId) {
-      setError('Cannot place bet: missing race_entries.horse_id. Please shortlist from AI Insider or use a selection with a valid horse_id.')
-      return
-    }
     setShowBettingModal(true)
     setError(null)
   }

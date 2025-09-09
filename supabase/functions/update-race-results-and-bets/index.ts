@@ -191,8 +191,20 @@ Deno.serve(async (req)=>{
         const bets = await betsResponse.json();
         console.log(`Found ${bets.length} pending bets for race ${race_id}`);
         for (const bet of bets){
-          const isWinner = bet.horse_name === winnerHorse.horse;
+          // Prefer matching by horse_id when available, fall back to normalized horse_name
+          const betHorseId = bet.horse_id ? String(bet.horse_id).trim() : null;
+          const winnerHorseId = winnerHorse.horse_id ? String(winnerHorse.horse_id).trim() : null;
+          let isWinner = false;
+          if (betHorseId && winnerHorseId) {
+            isWinner = betHorseId === winnerHorseId;
+          } else {
+            const betHorseName = bet.horse_name?.toLowerCase().trim();
+            const winnerHorseName = winnerHorse.horse?.toLowerCase().trim();
+            isWinner = betHorseName && winnerHorseName ? betHorseName === winnerHorseName : false;
+          }
           const newStatus = isWinner ? 'won' : 'lost';
+
+          console.log(`🔍 Bet check: id:${bet.horse_id || 'n/a'} name:"${bet.horse_name}" vs Winner id:${winnerHorse.horse_id || 'n/a'} name:"${winnerHorse.horse}" - Match: ${isWinner}`);
           // Update bet status
           const updateBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet.id}`, {
             method: 'PATCH',
@@ -343,10 +355,15 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Error processing race results:', error);
+    // Log with context for easier debugging (include race_id when available)
+    try {
+      console.error(`update-race-results-and-bets: Error processing race ${race_id}:`, error?.stack || error);
+    } catch (logErr) {
+      console.error('update-race-results-and-bets: Error processing race (unable to read race_id):', error?.stack || error);
+    }
     return new Response(JSON.stringify({
       success: false,
-      error: error.message,
+      error: error?.message || String(error),
       timestamp: new Date().toISOString()
     }), {
       status: 500,

@@ -56,6 +56,12 @@ Deno.serve(async (req)=>{
     const userData = await userResponse.json();
     const userId = userData.id;
     console.log('User authenticated:', userId);
+    // Require client to provide the race_entries horse_id. Do NOT attempt fuzzy name lookups.
+    const resolvedHorseId = horse_id || null;
+    if (!resolvedHorseId) {
+      throw new Error('Missing required horse_id from race_entries. Place bet requests must include race_entries.horse_id')
+    }
+
     // Create the bet record with all the data from selections
     const betData = {
       user_id: userId,
@@ -63,6 +69,7 @@ Deno.serve(async (req)=>{
       race_date: new Date().toISOString().split('T')[0],
       course: course,
       off_time: off_time,
+      horse_id: resolvedHorseId,
       horse_name: horse_name,
       trainer_name: trainer_name || '',
       jockey_name: jockey_name || '',

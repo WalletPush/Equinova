@@ -205,10 +205,11 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
+    console.error('race-results-scheduler: unexpected error:', error?.stack || error);
     return new Response(JSON.stringify({
       success: false,
       code: "RACE_RESULTS_SCHEDULER_ERROR",
-      message: error.message
+      message: error?.message || String(error)
     }), {
       status: 400,
       headers: {
