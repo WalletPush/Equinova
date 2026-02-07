@@ -470,12 +470,14 @@ export function AIInsiderPage() {
 
   // Fetch race_entries for top-rated ML horses per race (rf, xgboost, benter, mlp, ensemble)
   const { data: topRatedMapData, isLoading: topRatedLoading } = useQuery({
-    queryKey: ['race_entries_top_models', getQueryDateKey()],
+    queryKey: ['race_entries_top_models', getQueryDateKey(), upcomingRaces?.length, aiTopPicks?.length, mlValueBets?.length, trainerIntentResponse?.data?.trainer_intent_signals?.length],
     queryFn: async () => {
       try {
         const raceIds = Array.from(new Set([
           ...(upcomingRaces || []).map((r: any) => r.race_id),
-          ...(trainerIntentResponse?.data?.trainer_intent_signals || []).map((t: any) => t.race_id)
+          ...(trainerIntentResponse?.data?.trainer_intent_signals || []).map((t: any) => t.race_id),
+          ...(aiTopPicks || []).map((p: any) => p.race_id),
+          ...(mlValueBets || []).flatMap((r: any) => [r.race_id, ...(r.top_value_bets || []).map((b: any) => b.race_id)].filter(Boolean))
         ].filter(Boolean)))
 
         if (!raceIds || raceIds.length === 0) return {}
@@ -538,8 +540,11 @@ export function AIInsiderPage() {
     },
     staleTime: 1000 * 60 * 5,
     retry: 1,
-    // Only run once we have upcoming races or trainer intent data available
-    enabled: (upcomingRaces && upcomingRaces.length > 0) || (trainerIntentResponse?.data?.trainer_intent_signals && trainerIntentResponse.data.trainer_intent_signals.length > 0)
+    // Run once we have data from any tab that needs normalization
+    enabled: (upcomingRaces && upcomingRaces.length > 0) ||
+      (trainerIntentResponse?.data?.trainer_intent_signals && trainerIntentResponse.data.trainer_intent_signals.length > 0) ||
+      (aiTopPicks && aiTopPicks.length > 0) ||
+      (mlValueBets && mlValueBets.length > 0)
   })
 
   const topRatedMap = topRatedMapData || {}
@@ -1765,16 +1770,17 @@ export function AIInsiderPage() {
                                       </div>
                                       <div className="text-right">
                                         <div className="text-green-400 font-bold text-lg">{pick.current_odds || 'TBC'}</div>
-                                        <div className={`font-medium text-sm ${
-                                          pick.horse_id && topRatedMap[race.race_id]?.ensembleMap?.[String(pick.horse_id)]
-                                            ? getNormalizedColor(normalizeProba(topRatedMap[race.race_id].ensembleMap[String(pick.horse_id)], race.race_id))
-                                            : 'text-yellow-400'
-                                        }`}>
+                                        <div className={`font-medium text-sm ${(() => {
+                                          const rawEns = pick.horse_id && topRatedMap[race.race_id]?.ensembleMap?.[String(pick.horse_id)]
+                                          const rawVal = rawEns || pick.ensemble_proba || pick.max_probability || 0
+                                          return rawVal ? getNormalizedColor(normalizeProba(rawVal, race.race_id)) : 'text-yellow-400'
+                                        })()}`}>
                                           {(() => {
                                             // Use normalized ensemble probability from full race field
                                             const rawEns = pick.horse_id && topRatedMap[race.race_id]?.ensembleMap?.[String(pick.horse_id)]
-                                            if (rawEns) return `${(normalizeProba(rawEns, race.race_id) * 100).toFixed(1)}%`
-                                            return pick.max_probability ? `${(pick.max_probability * 100).toFixed(1)}% ML` : 'N/A'
+                                            const rawVal = rawEns || pick.ensemble_proba || pick.max_probability
+                                            if (rawVal) return `${(normalizeProba(rawVal, race.race_id) * 100).toFixed(1)}%`
+                                            return 'N/A'
                                           })()}
                                         </div>
                                       </div>
