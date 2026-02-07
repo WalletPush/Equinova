@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { AppLayout } from '@/components/AppLayout'
 import { supabase } from '@/lib/supabase'
 import { useQuery } from '@tanstack/react-query'
 import { ShortlistButton } from '@/components/ShortlistButton'
+import { getUKDate, getUKTime, raceTimeToMinutes, formatTime, compareRaceTimes } from '@/lib/dateUtils'
 import {
   Brain,
   TrendingUp,
@@ -33,8 +34,10 @@ interface MLModelPerformance {
   model_name: string
   full_name: string
   total_races_today: number
+  races_completed: number
   races_won: number
   races_lost: number
+  races_top3: number
   win_rate: number
   next_runner?: {
     horse_name: string
@@ -49,15 +52,34 @@ interface MLModelPerformance {
   }
   is_due_winner: boolean
   performance_trend: 'hot' | 'cold' | 'normal'
+  race_results: {
+    race_id: string
+    course: string
+    off_time: string
+    horse_name: string
+    probability: number
+    finishing_position: number | null
+    is_winner: boolean
+  }[]
 }
 
 interface MLTrackerData {
   models: MLModelPerformance[]
   last_updated: string
   total_races_today: number
+  completed_races: number
 }
 
-const modelConfig = {
+const MODEL_NAMES = ['mlp', 'rf', 'xgboost', 'benter', 'ensemble'] as const
+type ModelName = typeof MODEL_NAMES[number]
+
+const modelConfig: Record<ModelName, {
+  full_name: string
+  icon: React.ElementType
+  color: string
+  bgColor: string
+  borderColor: string
+}> = {
   mlp: {
     full_name: 'Multi-Layer Perceptron',
     icon: Brain,
@@ -95,31 +117,227 @@ const modelConfig = {
   }
 }
 
+const PROBA_FIELDS: Record<ModelName, string> = {
+  mlp: 'mlp_proba',
+  rf: 'rf_proba',
+  xgboost: 'xgboost_proba',
+  benter: 'benter_proba',
+  ensemble: 'ensemble_proba'
+}
+
 export function MLTrackerPage() {
   const { profile } = useAuth()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // Fetch ML tracker data
+  // Compute ML tracker data entirely client-side
   const { data: mlTrackerData, isLoading, error, refetch } = useQuery({
-    queryKey: ['ml-tracker', new Date().toISOString().split('T')[0]], // Refresh daily
-    queryFn: async () => {
-      console.log('Fetching ML tracker data...')
-      const { data, error } = await supabase.functions.invoke('get-ml-tracker', {
-        body: {}
-      })
-      
-      if (error) {
-        console.error('Error invoking ML tracker API:', error)
-        throw error
+    queryKey: ['ml-tracker-client', getUKDate()],
+    queryFn: async (): Promise<MLTrackerData> => {
+      const today = getUKDate()
+      console.log('ML Tracker: Fetching races for', today)
+
+      // Step 1: Get all today's races
+      const { data: races, error: racesError } = await supabase
+        .from('races')
+        .select('race_id, off_time, course_name, date')
+        .eq('date', today)
+
+      if (racesError) {
+        console.error('ML Tracker: Failed to fetch races:', racesError)
+        throw new Error('Failed to fetch races: ' + racesError.message)
       }
-      
-      if (!data.success) {
-        console.error('ML tracker API returned error:', data.error)
-        throw new Error(data.error?.message || 'ML tracker API failed')
+
+      if (!races || races.length === 0) {
+        console.log('ML Tracker: No races found for today')
+        return {
+          models: MODEL_NAMES.map(name => ({
+            model_name: name,
+            full_name: modelConfig[name].full_name,
+            total_races_today: 0,
+            races_completed: 0,
+            races_won: 0,
+            races_lost: 0,
+            races_top3: 0,
+            win_rate: 0,
+            is_due_winner: false,
+            performance_trend: 'normal' as const,
+            race_results: []
+          })),
+          last_updated: new Date().toISOString(),
+          total_races_today: 0,
+          completed_races: 0
+        }
       }
-      
-      console.log('ML tracker data fetched successfully:', data.data)
-      return data.data as MLTrackerData
+
+      const raceIds = races.map(r => r.race_id)
+      console.log(`ML Tracker: Found ${races.length} races, fetching entries...`)
+
+      // Step 2: Get all race entries with ML predictions and finishing positions
+      // Supabase .in() has a limit, so batch if needed
+      const batchSize = 50
+      let allEntries: any[] = []
+
+      for (let i = 0; i < raceIds.length; i += batchSize) {
+        const batch = raceIds.slice(i, i + batchSize)
+        const { data: entries, error: entriesError } = await supabase
+          .from('race_entries')
+          .select('race_id, horse_id, horse_name, trainer_name, jockey_name, current_odds, silk_url, number, finishing_position, result_updated_at, mlp_proba, rf_proba, xgboost_proba, benter_proba, ensemble_proba')
+          .in('race_id', batch)
+
+        if (entriesError) {
+          console.error('ML Tracker: Failed to fetch entries batch:', entriesError)
+          continue
+        }
+        if (entries) allEntries = allEntries.concat(entries)
+      }
+
+      console.log(`ML Tracker: Got ${allEntries.length} entries across ${races.length} races`)
+
+      // Step 3: Build a map of race_id -> entries
+      const raceEntriesMap: Record<string, any[]> = {}
+      for (const entry of allEntries) {
+        if (!raceEntriesMap[entry.race_id]) raceEntriesMap[entry.race_id] = []
+        raceEntriesMap[entry.race_id].push(entry)
+      }
+
+      // Step 4: Build a map of race_id -> race info
+      const raceInfoMap: Record<string, any> = {}
+      for (const race of races) {
+        raceInfoMap[race.race_id] = race
+      }
+
+      // Step 5: Determine which races have results (at least one entry has finishing_position)
+      const completedRaceIds = new Set<string>()
+      for (const [raceId, entries] of Object.entries(raceEntriesMap)) {
+        if (entries.some(e => e.finishing_position != null && e.finishing_position > 0)) {
+          completedRaceIds.add(raceId)
+        }
+      }
+
+      console.log(`ML Tracker: ${completedRaceIds.size} races have results`)
+
+      // Step 6: Current time for finding next runner
+      const currentTime = getUKTime()
+      const [curH, curM] = currentTime.split(':').map(Number)
+      const curMinutes = curH * 60 + curM
+
+      // Step 7: Compute performance for each model
+      const modelPerformance: MLModelPerformance[] = []
+
+      for (const modelName of MODEL_NAMES) {
+        const probaField = PROBA_FIELDS[modelName]
+        const raceResults: MLModelPerformance['race_results'] = []
+        let racesWon = 0
+        let racesLost = 0
+        let racesTop3 = 0
+
+        // Process each completed race
+        for (const raceId of completedRaceIds) {
+          const entries = raceEntriesMap[raceId] || []
+          const raceInfo = raceInfoMap[raceId]
+
+          // Find the model's top pick (highest probability)
+          let topPick: any = null
+          let topProba = -1
+          for (const entry of entries) {
+            const proba = Number(entry[probaField]) || 0
+            if (proba > topProba) {
+              topProba = proba
+              topPick = entry
+            }
+          }
+
+          if (!topPick || topProba <= 0) continue
+
+          const pos = Number(topPick.finishing_position)
+          const isWinner = pos === 1
+          const isTop3 = pos >= 1 && pos <= 3
+
+          if (isWinner) racesWon++
+          else racesLost++
+          if (isTop3) racesTop3++
+
+          raceResults.push({
+            race_id: raceId,
+            course: raceInfo?.course_name || 'Unknown',
+            off_time: raceInfo?.off_time || '',
+            horse_name: topPick.horse_name || 'Unknown',
+            probability: topProba,
+            finishing_position: pos,
+            is_winner: isWinner
+          })
+        }
+
+        // Sort race results chronologically
+        raceResults.sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
+
+        const totalCompleted = racesWon + racesLost
+        const winRate = totalCompleted > 0 ? (racesWon / totalCompleted) * 100 : 0
+
+        // Find next upcoming runner for this model
+        let nextRunner: MLModelPerformance['next_runner'] = undefined
+
+        // Sort all races chronologically and find the first upcoming one
+        const sortedRaces = [...races].sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
+
+        for (const race of sortedRaces) {
+          const raceMin = raceTimeToMinutes(race.off_time)
+          if (raceMin <= curMinutes) continue // Race already started
+          if (completedRaceIds.has(race.race_id)) continue // Already has results
+
+          const entries = raceEntriesMap[race.race_id] || []
+          let topEntry: any = null
+          let topProba = -1
+          for (const entry of entries) {
+            const proba = Number(entry[probaField]) || 0
+            if (proba > topProba) {
+              topProba = proba
+              topEntry = entry
+            }
+          }
+
+          if (topEntry && topProba > 0) {
+            nextRunner = {
+              horse_name: topEntry.horse_name || 'Unknown',
+              odds: topEntry.current_odds ? `${topEntry.current_odds}/1` : 'N/A',
+              trainer: topEntry.trainer_name || 'N/A',
+              jockey: topEntry.jockey_name || 'N/A',
+              confidence: topProba * 100,
+              race_time: formatTime(race.off_time),
+              course: race.course_name || 'N/A',
+              race_id: race.race_id,
+              horse_id: topEntry.horse_id
+            }
+            break
+          }
+        }
+
+        // Check if model is "due a winner"
+        const racesWithoutWin = totalCompleted - racesWon
+        const isDueWinner = racesWithoutWin >= 5 && winRate < 20
+
+        modelPerformance.push({
+          model_name: modelName,
+          full_name: modelConfig[modelName].full_name,
+          total_races_today: races.length,
+          races_completed: totalCompleted,
+          races_won: racesWon,
+          races_lost: racesLost,
+          races_top3: racesTop3,
+          win_rate: winRate,
+          next_runner: nextRunner,
+          is_due_winner: isDueWinner,
+          performance_trend: winRate >= 40 ? 'hot' : winRate <= 10 && totalCompleted > 0 ? 'cold' : 'normal',
+          race_results: raceResults
+        })
+      }
+
+      return {
+        models: modelPerformance,
+        last_updated: new Date().toISOString(),
+        total_races_today: races.length,
+        completed_races: completedRaceIds.size
+      }
     },
     staleTime: 1000 * 30, // 30 seconds
     retry: 3,
@@ -138,12 +356,6 @@ export function MLTrackerPage() {
     }
   }
 
-  const getPerformanceTrend = (winRate: number): 'hot' | 'cold' | 'normal' => {
-    if (winRate >= 40) return 'hot'
-    if (winRate <= 10) return 'cold'
-    return 'normal'
-  }
-
   const getTrendIcon = (trend: 'hot' | 'cold' | 'normal') => {
     switch (trend) {
       case 'hot':
@@ -158,7 +370,7 @@ export function MLTrackerPage() {
   const getDueWinnerMessage = (model: MLModelPerformance) => {
     if (!model.is_due_winner) return null
     
-    const racesWithoutWin = model.total_races_today - model.races_won
+    const racesWithoutWin = model.races_completed - model.races_won
     return `${racesWithoutWin} races without a win - due for a winner!`
   }
 
@@ -169,7 +381,7 @@ export function MLTrackerPage() {
           <div className="text-center">
             <Brain className="w-12 h-12 text-blue-500 mx-auto mb-4 animate-pulse" />
             <h2 className="text-xl font-semibold text-white mb-2">Loading ML Tracker</h2>
-            <p className="text-gray-400">Fetching today's model performance...</p>
+            <p className="text-gray-400">Computing today's model performance...</p>
           </div>
         </div>
       </AppLayout>
@@ -228,7 +440,7 @@ export function MLTrackerPage() {
         </div>
 
         {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
             <div className="flex items-center space-x-3">
               <Calendar className="w-8 h-8 text-blue-400" />
@@ -241,13 +453,26 @@ export function MLTrackerPage() {
           
           <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
             <div className="flex items-center space-x-3">
+              <CheckCircle className="w-8 h-8 text-green-400" />
+              <div>
+                <p className="text-gray-400 text-sm">Completed Races</p>
+                <p className="text-2xl font-bold text-white">{mlTrackerData?.completed_races || 0}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
+            <div className="flex items-center space-x-3">
               <Trophy className="w-8 h-8 text-yellow-400" />
               <div>
                 <p className="text-gray-400 text-sm">Best Model Today</p>
-                <p className="text-xl font-bold text-white">
-                  {mlTrackerData?.models?.reduce((best, current) => 
-                    current.win_rate > best.win_rate ? current : best
-                  )?.full_name || 'N/A'}
+                <p className="text-lg font-bold text-white">
+                  {(() => {
+                    const modelsWithResults = mlTrackerData?.models?.filter(m => m.races_completed > 0) || []
+                    if (modelsWithResults.length === 0) return 'N/A'
+                    const best = modelsWithResults.reduce((a, b) => a.win_rate > b.win_rate ? a : b)
+                    return best.full_name
+                  })()}
                 </p>
               </div>
             </div>
@@ -255,11 +480,11 @@ export function MLTrackerPage() {
           
           <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
             <div className="flex items-center space-x-3">
-              <Activity className="w-8 h-8 text-green-400" />
+              <Activity className="w-8 h-8 text-purple-400" />
               <div>
                 <p className="text-gray-400 text-sm">Active Models</p>
                 <p className="text-2xl font-bold text-white">
-                  {mlTrackerData?.models?.filter(m => m.total_races_today > 0).length || 0}/5
+                  {mlTrackerData?.models?.length || 0}/5
                 </p>
               </div>
             </div>
@@ -267,11 +492,11 @@ export function MLTrackerPage() {
         </div>
 
         {/* Model Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
           {mlTrackerData?.models?.map((model) => {
-            const config = modelConfig[model.model_name as keyof typeof modelConfig]
+            const config = modelConfig[model.model_name as ModelName]
+            if (!config) return null
             const IconComponent = config.icon
-            const trend = getPerformanceTrend(model.win_rate)
             
             return (
               <div
@@ -289,14 +514,14 @@ export function MLTrackerPage() {
                       <p className="text-sm text-gray-400 capitalize">{model.model_name}</p>
                     </div>
                   </div>
-                  {getTrendIcon(trend)}
+                  {getTrendIcon(model.performance_trend)}
                 </div>
 
                 {/* Performance Stats */}
-                <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="grid grid-cols-4 gap-3 mb-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-white">{model.total_races_today}</p>
-                    <p className="text-xs text-gray-400">Races Run</p>
+                    <p className="text-2xl font-bold text-white">{model.races_completed}</p>
+                    <p className="text-xs text-gray-400">Completed</p>
                   </div>
                   <div className="text-center">
                     <p className="text-2xl font-bold text-green-400">{model.races_won}</p>
@@ -306,6 +531,10 @@ export function MLTrackerPage() {
                     <p className="text-2xl font-bold text-red-400">{model.races_lost}</p>
                     <p className="text-xs text-gray-400">Lost</p>
                   </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-blue-400">{model.races_top3}</p>
+                    <p className="text-xs text-gray-400">Top 3</p>
+                  </div>
                 </div>
 
                 {/* Win Rate */}
@@ -314,14 +543,15 @@ export function MLTrackerPage() {
                     <span className="text-sm text-gray-400">Win Rate</span>
                     <span className={`text-lg font-bold ${
                       model.win_rate >= 30 ? 'text-green-400' : 
-                      model.win_rate >= 20 ? 'text-yellow-400' : 'text-red-400'
+                      model.win_rate >= 20 ? 'text-yellow-400' : 
+                      model.races_completed === 0 ? 'text-gray-400' : 'text-red-400'
                     }`}>
-                      {model.win_rate.toFixed(1)}%
+                      {model.races_completed > 0 ? `${model.win_rate.toFixed(1)}%` : 'N/A'}
                     </span>
                   </div>
                   <div className="w-full bg-gray-700 rounded-full h-2">
                     <div
-                      className={`h-2 rounded-full ${
+                      className={`h-2 rounded-full transition-all duration-500 ${
                         model.win_rate >= 30 ? 'bg-green-500' : 
                         model.win_rate >= 20 ? 'bg-yellow-500' : 'bg-red-500'
                       }`}
@@ -337,6 +567,48 @@ export function MLTrackerPage() {
                       <AlertCircle className="w-4 h-4 text-yellow-400" />
                       <span className="text-sm text-yellow-400 font-medium">
                         {getDueWinnerMessage(model)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Race-by-Race Results */}
+                {model.race_results.length > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-xs font-semibold text-gray-400 mb-2">Race Results</h4>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {model.race_results.map((result) => (
+                        <div key={result.race_id} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-gray-800/50">
+                          <div className="flex items-center space-x-2 truncate">
+                            {result.is_winner ? (
+                              <Trophy className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                            ) : (
+                              <span className="w-3 h-3 flex items-center justify-center text-gray-500 flex-shrink-0">
+                                {result.finishing_position || '-'}
+                              </span>
+                            )}
+                            <span className="text-gray-300 truncate">{result.horse_name}</span>
+                          </div>
+                          <div className="flex items-center space-x-2 flex-shrink-0">
+                            <span className="text-gray-500">{result.course}</span>
+                            <span className="text-gray-500">{formatTime(result.off_time)}</span>
+                            <span className={result.is_winner ? 'text-green-400 font-bold' : 'text-red-400'}>
+                              P{result.finishing_position}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No results yet info */}
+                {model.race_results.length === 0 && model.total_races_today > 0 && (
+                  <div className="mb-4 p-3 bg-gray-700/30 rounded-lg">
+                    <div className="flex items-center space-x-2">
+                      <Clock className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm text-gray-400">
+                        No race results yet — {model.total_races_today} races scheduled
                       </span>
                     </div>
                   </div>
