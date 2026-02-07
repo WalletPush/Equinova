@@ -7,13 +7,11 @@ import {
   Settings, 
   Shield, 
   LogOut,
-  User,
   TrendingUp,
   Brain,
   Menu,
   X,
   List,
-  Heart,
   Wallet,
   BarChart3
 } from 'lucide-react'
@@ -50,17 +48,13 @@ export function AppLayout({ children }: AppLayoutProps) {
       {/* Header */}
       <header className="bg-gray-800 border-b border-gray-700">
         <div className="px-4 py-4 flex items-center justify-between">
-          <div>
-            {/* Logo and icon on same line */}
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-6 bg-gradient-to-r from-yellow-400 to-yellow-500 rounded-md flex items-center justify-center">
-                <TrendingUp className="w-4 h-4 text-gray-900" />
-              </div>
-              <h1 className="text-xl font-bold text-white">EquiNova</h1>
-            </div>
-            {/* Tagline below */}
-            <p className="text-xs text-gray-400 mt-1">AI powered intelligence</p>
-          </div>
+          <NavLink to="/races" className="flex items-center">
+            <img
+              src="/images/eq-logo.png"
+              alt="EquiNova"
+              className="h-9 w-auto brightness-200"
+            />
+          </NavLink>
           
           {/* Hamburger Menu */}
           <div className="relative">
