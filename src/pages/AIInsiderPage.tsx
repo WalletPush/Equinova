@@ -1603,9 +1603,14 @@ export function AIInsiderPage() {
                                     />
                                   </div>
                                   <div className="text-right">
-                                    <div className="text-green-400 font-bold text-lg">{mover.current_odds}</div>
+                                    <div className="text-green-400 font-bold text-lg">
+                                      {mover.fractional_current || mover.current_odds}
+                                    </div>
+                                    <div className="text-gray-400 text-xs">
+                                      was {mover.fractional_initial || mover.initial_odds}
+                                    </div>
                                     <div className="text-yellow-400 font-medium text-sm">
-                                      {mover.odds_movement_pct > 0 ? '+' : ''}{mover.odds_movement_pct}%
+                                      {mover.odds_movement_pct > 0 ? '+' : ''}{typeof mover.odds_movement_pct === 'number' ? mover.odds_movement_pct.toFixed(1) : mover.odds_movement_pct}%
                                     </div>
                                   </div>
                                 </div>
