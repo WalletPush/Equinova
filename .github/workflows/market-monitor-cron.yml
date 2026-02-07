@@ -1,0 +1,19 @@
+name: Market Monitor Cron
+
+on:
+  schedule:
+    # Run every minute during racing hours (function self-gates to 08:00-21:00 UK)
+    - cron: '* * * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  update-market-movement:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Market Monitor
+        run: |
+          curl -s -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/racing-market-monitor-cron \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json"
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

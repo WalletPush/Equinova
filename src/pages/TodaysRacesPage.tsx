@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
@@ -17,8 +17,35 @@ import {
   ChevronRight,
   ChevronDown,
   Bot,
-  RefreshCw
+  RefreshCw,
+  X,
+  Zap,
+  Brain,
+  UserCheck,
 } from 'lucide-react'
+
+/* ─── Smart Signal type ─────────────────────────────────────────── */
+interface SmartSignal {
+  horse_name: string
+  horse_id: string
+  race_id: string
+  course_name: string
+  off_time: string
+  current_odds: string
+  initial_odds: string
+  movement_pct: number
+  is_ml_top_pick: boolean
+  ml_models_agreeing: string[]
+  ml_top_probability: number
+  is_single_trainer_entry: boolean
+  trainer_name: string
+  jockey_name: string
+  signal_strength: 'strong' | 'medium'
+  silk_url: string
+  number: number | null
+  change_count: number
+  last_updated: string
+}
 
 export function TodaysRacesPage() {
   // Use UK timezone for proper date detection
@@ -103,6 +130,62 @@ export function TodaysRacesPage() {
     staleTime: 1000 * 60 * 5, // 5 minutes
     retry: 1
   })
+
+  // Smart signals query - polls every 30 seconds
+  const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
+  const isToday = selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+
+  const { data: smartSignalsData } = useQuery({
+    queryKey: ['smart-signals'],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke('smart-signals')
+      if (error) {
+        console.error('Smart signals error:', error)
+        return { signals: [] }
+      }
+      return data
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+    enabled: isToday,
+    retry: 1,
+  })
+
+  // Filter signals: remove dismissed and past races
+  const activeSignals = useMemo(() => {
+    const signals: SmartSignal[] = smartSignalsData?.signals ?? []
+    if (!signals.length) return []
+
+    const ukNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' }))
+
+    return signals.filter((s) => {
+      // Remove dismissed
+      const key = `${s.race_id}::${s.horse_id}`
+      if (dismissedSignals.has(key)) return false
+
+      // Remove past races
+      if (s.off_time) {
+        const time = s.off_time.substring(0, 5)
+        const today = selectedDate
+        const raceDate = new Date(`${today}T${time}:00`)
+        if (raceDate <= ukNow) return false
+      }
+      return true
+    })
+  }, [smartSignalsData, dismissedSignals, selectedDate])
+
+  // Build a set of horse_ids that have active smart signals (for pulsing dot)
+  const signalHorseIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of activeSignals) {
+      set.add(s.horse_id)
+    }
+    return set
+  }, [activeSignals])
+
+  const dismissSignal = (raceId: string, horseId: string) => {
+    setDismissedSignals((prev) => new Set(prev).add(`${raceId}::${horseId}`))
+  }
 
   // Helper function to check if horse is in shortlist
   const isHorseInShortlist = (horseName: string, course: string): boolean => {
@@ -209,6 +292,103 @@ export function TodaysRacesPage() {
             </div>
           )}
         </div>
+
+        {/* Smart Signal Alerts */}
+        {activeSignals.length > 0 && (
+          <div className="sticky top-[61px] z-40 -mx-4 px-4">
+            <div className="space-y-1.5 py-2">
+              {activeSignals.slice(0, 4).map((signal) => (
+                <Link
+                  key={`${signal.race_id}::${signal.horse_id}`}
+                  to={`/race/${signal.race_id}`}
+                  className={`block rounded-lg px-3 py-2.5 transition-all duration-200 hover:scale-[1.01] ${
+                    signal.signal_strength === 'strong'
+                      ? 'bg-yellow-500/10 border border-yellow-500/30 border-l-4 border-l-yellow-400'
+                      : 'bg-gray-800/90 border border-gray-700 border-l-4 border-l-gray-500'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {/* Pulsing dot */}
+                      <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                          signal.signal_strength === 'strong' ? 'bg-yellow-400' : 'bg-gray-400'
+                        }`} />
+                        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                          signal.signal_strength === 'strong' ? 'bg-yellow-400' : 'bg-gray-400'
+                        }`} />
+                      </span>
+
+                      {/* Horse + Course + Time */}
+                      <span className="text-white font-semibold text-sm truncate">
+                        {signal.horse_name}
+                      </span>
+                      <span className="text-gray-400 text-xs flex-shrink-0">
+                        {formatTime(signal.off_time)} {signal.course_name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Movement badge */}
+                      <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        {signal.movement_pct.toFixed(1)}%
+                      </span>
+
+                      {/* ML Top Pick badge */}
+                      {signal.is_ml_top_pick && (
+                        <span className="bg-purple-500/20 text-purple-400 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                          <Brain className="w-2.5 h-2.5" />
+                          ML{signal.ml_models_agreeing.length > 1 ? ` ${signal.ml_models_agreeing.length}` : ''}
+                        </span>
+                      )}
+
+                      {/* Trainer intent badge */}
+                      {signal.is_single_trainer_entry && (
+                        <span className="bg-green-500/20 text-green-400 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                          <UserCheck className="w-2.5 h-2.5" />
+                          Solo
+                        </span>
+                      )}
+
+                      {/* Dismiss button */}
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          dismissSignal(signal.race_id, signal.horse_id)
+                        }}
+                        className="text-gray-500 hover:text-gray-300 transition-colors p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Second line - trainer info for strong signals */}
+                  {signal.signal_strength === 'strong' && (
+                    <div className="mt-1 ml-[18px] text-[11px] text-gray-400">
+                      {signal.is_single_trainer_entry && signal.trainer_name
+                        ? `Only runner from ${signal.trainer_name} at this meeting`
+                        : signal.is_ml_top_pick
+                          ? `Top pick across ${signal.ml_models_agreeing.length} ML model${signal.ml_models_agreeing.length > 1 ? 's' : ''} (${(signal.ml_top_probability * 100).toFixed(0)}% confidence)`
+                          : `Significant market movement detected`
+                      }
+                      {signal.is_single_trainer_entry && signal.is_ml_top_pick && (
+                        <span className="text-yellow-400 font-medium"> + ML Top Pick ({signal.ml_models_agreeing.length})</span>
+                      )}
+                    </div>
+                  )}
+                </Link>
+              ))}
+
+              {activeSignals.length > 4 && (
+                <div className="text-center text-xs text-gray-500 py-1">
+                  +{activeSignals.length - 4} more signal{activeSignals.length - 4 > 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Loading */}
         {(isLoading || isRefreshing || isFetching) && (
@@ -375,11 +555,23 @@ export function TodaysRacesPage() {
                       <div className="space-y-3">
                         <h4 className="text-sm font-medium text-gray-300">All Runners</h4>
                         <div className="space-y-2">
-                          {race.topEntries.map((entry, index) => (
-                            <div key={entry.id} className="flex items-center justify-between py-2 px-3 bg-gray-700/30 rounded-lg">
+                          {race.topEntries.map((entry, index) => {
+                            const hasSignal = signalHorseIds.has(entry.horse_id)
+                            return (
+                            <div key={entry.id} className={`flex items-center justify-between py-2 px-3 rounded-lg ${
+                              hasSignal ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-gray-700/30'
+                            }`}>
                               <div className="flex items-center space-x-3">
-                                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
-                                  {entry.number}
+                                <div className="relative">
+                                  <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
+                                    {entry.number}
+                                  </div>
+                                  {hasSignal && (
+                                    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+                                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-400" />
+                                    </span>
+                                  )}
                                 </div>
                                 <div>
                                   <HorseNameWithSilk 
@@ -434,7 +626,8 @@ export function TodaysRacesPage() {
                                 </div>
                               </div>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </div>
                     )}
