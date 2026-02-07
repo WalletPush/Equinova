@@ -29,7 +29,7 @@ const tabs: TabConfig[] = [
   { id: 'overview', label: 'Overview', icon: Info },
   { id: 'form', label: 'Form', icon: TrendingUp },
   { id: 'connections', label: 'Connections', icon: Trophy },
-  { id: 'predictions', label: 'AI Predictions', icon: Bot }
+  { id: 'predictions', label: 'AI Analysis', icon: Bot }
 ]
 
 export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseDetailModalProps) {
@@ -324,7 +324,7 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
               <span className="font-medium">Form</span>
             </button>
             
-            {/* Row 2: Connections | AI Predictions */}
+            {/* Row 2: Connections | AI Analysis */}
             <button
               onClick={() => setActiveTab('connections')}
               className={`flex items-center justify-center space-x-2 px-4 py-3 rounded-lg transition-colors ${
@@ -345,7 +345,7 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
               }`}
             >
               <Bot className="w-4 h-4" />
-              <span className="font-medium">AI Predictions</span>
+              <span className="font-medium">AI Analysis</span>
             </button>
           </div>
         </div>

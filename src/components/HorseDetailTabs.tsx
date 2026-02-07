@@ -128,7 +128,7 @@ export function OverviewTab({ entry }: TabContentProps) {
             </span>
           </div>
           <div className="text-xs text-gray-500 mt-2">
-            See the AI Predictions tab for normalized win probability vs the field
+            See the AI Analysis tab for normalized win probability vs the field
           </div>
         </div>
       )}
