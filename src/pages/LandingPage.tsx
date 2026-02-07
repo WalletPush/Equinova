@@ -452,7 +452,7 @@ export function LandingPage() {
                 'The SafeBet System',
               ]}
               ctaLabel="Choose Monthly"
-              paypalLink="https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=YOUR_MONTHLY_PLAN_ID"
+              paypalLink="https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=P-2B2362947U415753DNC2MBSA"
             />
 
             <PricingCard
@@ -466,7 +466,7 @@ export function LandingPage() {
                 'The SafeBet System',
               ]}
               ctaLabel="Choose Yearly"
-              paypalLink="https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=YOUR_YEARLY_PLAN_ID"
+              paypalLink="https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=P-74P22738DL238650NNAOM7XI"
               highlighted
               badge="BEST VALUE"
             />
