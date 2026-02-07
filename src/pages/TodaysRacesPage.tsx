@@ -17,12 +17,15 @@ import {
   Calendar,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Bot,
   RefreshCw,
   X,
   Zap,
   Brain,
   UserCheck,
+  Search,
+  CheckCircle2,
 } from 'lucide-react'
 
 /* ─── Smart Signal type ─────────────────────────────────────────── */
@@ -188,6 +191,75 @@ export function TodaysRacesPage() {
     setDismissedSignals((prev) => new Set(prev).add(`${raceId}::${horseId}`))
   }
 
+  const races = (racesData as any)?.races || []
+
+  // ── Value Bet Scanner ──────────────────────────────────────────────
+  const [showValueScan, setShowValueScan] = useState(false)
+
+  interface ValueBetResult {
+    horse_name: string
+    horse_id: string
+    race_id: string
+    course_name: string
+    off_time: string
+    jockey_name: string
+    trainer_name: string
+    silk_url: string
+    number: number
+    current_odds: number
+    normProb: number
+    impliedProb: number
+    edge: number
+    entry: any // full entry for opening modal
+  }
+
+  const valueBets = useMemo<ValueBetResult[]>(() => {
+    if (!races.length) return []
+
+    const results: ValueBetResult[] = []
+
+    for (const race of races) {
+      if (!race.topEntries?.length) continue
+
+      // Normalize ensemble proba across this race's field
+      const normMap = normalizeField(race.topEntries, 'ensemble_proba', 'horse_id')
+
+      for (const entry of race.topEntries) {
+        const odds = Number(entry.current_odds)
+        if (!odds || odds <= 0 || !entry.ensemble_proba || entry.ensemble_proba <= 0) continue
+
+        const normProb = normMap.get(String(entry.horse_id)) ?? 0
+        const impliedProb = 1 / (odds + 1)
+        const edge = normProb - impliedProb
+
+        // Only include horses with a meaningful positive edge (> 2%)
+        if (edge > 0.02) {
+          results.push({
+            horse_name: entry.horse_name,
+            horse_id: entry.horse_id,
+            race_id: race.race_id,
+            course_name: race.course_name,
+            off_time: race.off_time,
+            jockey_name: entry.jockey_name,
+            trainer_name: entry.trainer_name,
+            silk_url: entry.silk_url,
+            number: entry.number,
+            current_odds: odds,
+            normProb,
+            impliedProb,
+            edge,
+            entry,
+          })
+        }
+      }
+    }
+
+    // Sort by edge descending (biggest value first)
+    results.sort((a, b) => b.edge - a.edge)
+
+    return results
+  }, [races])
+
   // Helper function to check if horse is in shortlist
   const isHorseInShortlist = (horseName: string, course: string): boolean => {
     if (!userShortlist || !Array.isArray(userShortlist)) return false
@@ -212,8 +284,6 @@ export function TodaysRacesPage() {
     setSelectedDate(newDate)
     // Query will automatically refetch due to key change
   }
-
-  const races = (racesData as any)?.races || []
 
   const formatTime = (timeString: string) => {
     if (!timeString) return ''
@@ -249,16 +319,42 @@ export function TodaysRacesPage() {
             <p className="text-gray-400 text-sm">AI-powered race predictions</p>
           </div>
           
-          {/* Line 2: Refresh button and date controls */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshing || isLoading}
-              className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 disabled:opacity-50 flex items-center space-x-2 transition-colors"
-            >
-              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </button>
+          {/* Line 2: Refresh + Scan buttons and date controls */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing || isLoading}
+                className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 disabled:opacity-50 flex items-center space-x-2 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+
+              {/* Scan For Value Bets button */}
+              {races.length > 0 && (
+                <button
+                  onClick={() => setShowValueScan(!showValueScan)}
+                  className={`rounded-lg px-3 py-2 text-sm font-bold flex items-center space-x-1.5 transition-all ${
+                    showValueScan
+                      ? 'bg-green-500/20 border border-green-500/40 text-green-400'
+                      : 'bg-green-500 hover:bg-green-400 text-gray-900'
+                  }`}
+                >
+                  <Search className="w-4 h-4" />
+                  <span>Value Bets</span>
+                  {valueBets.length > 0 && (
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                      showValueScan
+                        ? 'bg-green-500/30 text-green-300'
+                        : 'bg-gray-900/30 text-white'
+                    }`}>
+                      {valueBets.length}
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
             
             <div className="flex items-center space-x-2">
               <Calendar className="w-4 h-4 text-gray-400" />
@@ -270,6 +366,121 @@ export function TodaysRacesPage() {
               />
             </div>
           </div>
+
+          {/* Value Bets Scanner Results */}
+          {showValueScan && (
+            <div className="bg-gray-800/90 border border-green-500/30 rounded-xl overflow-hidden">
+              {/* Scanner header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-green-400" />
+                  <h3 className="text-white font-bold text-sm">Value Bet Scanner</h3>
+                  <span className="text-gray-400 text-xs">
+                    {valueBets.length} found across {races.length} races
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowValueScan(false)}
+                  className="text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Results */}
+              {valueBets.length === 0 ? (
+                <div className="text-center py-8 px-4">
+                  <Search className="w-10 h-10 text-gray-600 mx-auto mb-3" />
+                  <p className="text-gray-400 font-medium">No value bets found</p>
+                  <p className="text-gray-500 text-sm mt-1">No horses currently have a meaningful edge over the market odds</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-700/50 max-h-[60vh] overflow-y-auto">
+                  {valueBets.map((vb, idx) => (
+                    <div
+                      key={`${vb.race_id}::${vb.horse_id}`}
+                      className="px-4 py-3 hover:bg-gray-700/30 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        {/* Left: rank + horse info */}
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          {/* Rank badge */}
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                            idx === 0 ? 'bg-yellow-500 text-gray-900' :
+                            idx === 1 ? 'bg-gray-400 text-gray-900' :
+                            idx === 2 ? 'bg-amber-600 text-white' :
+                            'bg-gray-700 text-gray-300'
+                          }`}>
+                            {idx + 1}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <HorseNameWithSilk
+                                horseName={vb.horse_name}
+                                silkUrl={vb.silk_url}
+                                className="text-white font-semibold text-sm"
+                                clickable={true}
+                                onHorseClick={() => openHorseDetail(vb.entry, {
+                                  course_name: vb.course_name,
+                                  off_time: vb.off_time,
+                                  race_id: vb.race_id,
+                                })}
+                                horseEntry={vb.entry}
+                              />
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <Link
+                                to={`/race/${vb.race_id}`}
+                                className="text-[11px] text-gray-400 hover:text-yellow-400 transition-colors"
+                              >
+                                {formatTime(vb.off_time)} {vb.course_name}
+                              </Link>
+                              <span className="text-[11px] text-gray-500">
+                                {vb.jockey_name}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: edge + odds + action */}
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          {/* Edge + probabilities */}
+                          <div className="text-right">
+                            <div className="text-green-400 font-bold text-sm">
+                              +{(vb.edge * 100).toFixed(1)}% edge
+                            </div>
+                            <div className="text-[10px] text-gray-500">
+                              {formatNormalized(vb.normProb)} vs {formatNormalized(vb.impliedProb)}
+                            </div>
+                          </div>
+
+                          {/* Odds */}
+                          <div className="text-right">
+                            <div className="text-white font-mono font-bold text-sm">
+                              {vb.current_odds}/1
+                            </div>
+                          </div>
+
+                          {/* Form button */}
+                          <button
+                            onClick={() => openHorseDetail(vb.entry, {
+                              course_name: vb.course_name,
+                              off_time: vb.off_time,
+                              race_id: vb.race_id,
+                            })}
+                            className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
+                          >
+                            Form
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           
           {/* Line 3: Dynamic race summary (only for today) */}
           {selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) && raceStatsData && (
