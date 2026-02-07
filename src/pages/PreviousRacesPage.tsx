@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { supabase, Race } from '@/lib/supabase'
+import { normalizeField, formatNormalized } from '@/lib/normalize'
 import { 
   Calendar,
   Clock,
@@ -366,7 +367,9 @@ export function PreviousRacesPage() {
                 </div>
 
                 {/* Top Entries Preview */}
-                {race.topEntries && race.topEntries.length > 0 && (
+                {race.topEntries && race.topEntries.length > 0 && (() => {
+                  const raceNormMap = normalizeField(race.topEntries, 'ensemble_proba', 'horse_id')
+                  return (
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-300 mb-3">
                       {race.hasResults ? 'Results' : 'Top Predictions'}
@@ -409,7 +412,7 @@ export function PreviousRacesPage() {
                             ) : (
                               entry.ensemble_proba && (
                                 <div className="text-xs text-gray-400">
-                                  {Math.round(entry.ensemble_proba * 100)}% chance
+                                  {formatNormalized(raceNormMap.get(String(entry.horse_id)) ?? 0)} win prob
                                 </div>
                               )
                             )}
@@ -423,7 +426,8 @@ export function PreviousRacesPage() {
                       )
                     })}
                   </div>
-                )}
+                  )
+                })()}
 
                 {/* Going & Surface */}
                 <div className="flex items-center space-x-4 mt-4 pt-4 border-t border-gray-700">

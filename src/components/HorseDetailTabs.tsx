@@ -122,10 +122,13 @@ export function OverviewTab({ entry }: TabContentProps) {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-white">Win Probability</span>
+            <span className="text-white">Model Confidence</span>
             <span className={`text-xl font-bold ${getConfidenceColor(entry.ensemble_proba)}`}>
               {formatPercentage(entry.ensemble_proba)}
             </span>
+          </div>
+          <div className="text-xs text-gray-500 mt-2">
+            See the AI Predictions tab for normalized win probability vs the field
           </div>
         </div>
       )}

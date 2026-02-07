@@ -1375,8 +1375,8 @@ export function AIInsiderPage() {
                                       silkUrl={pick.silk_url}
                                       className="text-yellow-400 font-bold text-sm"
                                     />
-                                    <span className="text-green-400 font-bold text-sm">
-                                      {(pick.ensemble_proba * 100).toFixed(1)}%
+                                    <span className="text-green-400 font-bold text-sm" title="Raw model confidence score">
+                                      {(pick.ensemble_proba * 100).toFixed(1)}% ML
                                     </span>
                                   </div>
                                   <div className="text-xs text-gray-400">
@@ -1966,7 +1966,7 @@ export function AIInsiderPage() {
                                     </div>
                                     <div className="text-right">
                                       <div className="text-green-400 font-bold text-lg">{bet.current_odds}/1</div>
-                                      <div className="text-yellow-400 font-medium text-sm">
+                                      <div className="text-yellow-400 font-medium text-sm" title="Raw model confidence score">
                                         {(bet.ensemble_proba * 100).toFixed(1)}% ML
                                       </div>
                                     </div>

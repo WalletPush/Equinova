@@ -3,6 +3,13 @@ import { TrendingUp, TrendingDown, Minus, Star, Bot, CheckCircle2, XCircle, Trop
 import { useQuery } from '@tanstack/react-query'
 import { RaceEntry, supabase } from '@/lib/supabase'
 import { TabContentProps } from './HorseDetailTabs'
+import {
+  normalizeAllModels,
+  getNormalizedColor,
+  getNormalizedStars,
+  formatNormalized,
+  type ProbaField,
+} from '@/lib/normalize'
 
 const getPerformanceIndicator = (value: number | null | undefined, threshold: number = 50) => {
   if (!value) return <Minus className="w-4 h-4 text-gray-500" />
@@ -117,70 +124,85 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
     staleTime: 60_000,
   })
 
-  // ── Computed analysis ──────────────────────────────────────────
+  // ── Computed analysis (with normalized probabilities) ─────────────
   const analysis = useMemo(() => {
     if (!allEntries?.length || !entry.ensemble_proba) return null
 
     const runners = [...allEntries].filter((e) => e.ensemble_proba > 0)
     const totalRunners = allEntries.length
 
-    // Sort by ensemble proba desc
-    const sortedByEnsemble = [...runners].sort(
-      (a, b) => (b.ensemble_proba ?? 0) - (a.ensemble_proba ?? 0)
-    )
+    // ── Normalize all model probabilities across the field ──
+    const norm = normalizeAllModels(allEntries)
+    const horseId = String(entry.horse_id)
 
-    // This horse's rank
+    // Normalized ensemble probability for this horse
+    const normEnsemble = norm.ensemble_proba.get(horseId) ?? 0
+
+    // Sort by NORMALIZED ensemble proba desc
+    const sortedByEnsemble = [...runners]
+      .map((e) => ({
+        ...e,
+        norm_ensemble: norm.ensemble_proba.get(String(e.horse_id)) ?? 0,
+      }))
+      .sort((a, b) => b.norm_ensemble - a.norm_ensemble)
+
+    // This horse's rank (by normalized ensemble)
     const ensembleRank =
-      sortedByEnsemble.findIndex(
-        (e) => e.horse_id === entry.horse_id
-      ) + 1
+      sortedByEnsemble.findIndex((e) => String(e.horse_id) === horseId) + 1
 
     // Odds rank (lower odds = higher favourite)
     const sortedByOdds = [...allEntries]
       .filter((e) => e.current_odds && e.current_odds > 0)
       .sort((a, b) => (a.current_odds ?? Infinity) - (b.current_odds ?? Infinity))
     const oddsRank =
-      sortedByOdds.findIndex((e) => e.horse_id === entry.horse_id) + 1
+      sortedByOdds.findIndex((e) => String(e.horse_id) === horseId) + 1
 
-    // Value bet calculation
+    // Value bet: compare NORMALIZED probability to market implied probability
     const odds = Number(entry.current_odds)
-    const mlProb = entry.ensemble_proba
+    const mlProb = normEnsemble
     const impliedProb = odds > 0 ? 1 / (odds + 1) : 0
     const edge = mlProb - impliedProb
     const isValueBet = edge > 0.02 // 2%+ edge to avoid noise
 
-    // Model-by-model top picks & ranks
-    const models = [
-      { key: 'ensemble', label: 'Ensemble', field: 'ensemble_proba' as const },
-      { key: 'benter', label: 'Benter', field: 'benter_proba' as const },
-      { key: 'mlp', label: 'MLP', field: 'mlp_proba' as const },
-      { key: 'rf', label: 'Random Forest', field: 'rf_proba' as const },
-      { key: 'xgboost', label: 'XGBoost', field: 'xgboost_proba' as const },
+    // Model-by-model analysis using normalized probabilities
+    const models: { key: string; label: string; field: ProbaField }[] = [
+      { key: 'ensemble', label: 'Ensemble', field: 'ensemble_proba' },
+      { key: 'benter', label: 'Benter', field: 'benter_proba' },
+      { key: 'mlp', label: 'MLP', field: 'mlp_proba' },
+      { key: 'rf', label: 'Random Forest', field: 'rf_proba' },
+      { key: 'xgboost', label: 'XGBoost', field: 'xgboost_proba' },
     ]
 
     const modelAnalysis = models.map((m) => {
+      const normMap = norm[m.field]
+      // Build sorted list by normalized probability for this model
       const sorted = [...runners]
         .filter((e) => (e[m.field] ?? 0) > 0)
-        .sort((a, b) => (b[m.field] ?? 0) - (a[m.field] ?? 0))
-      const rank = sorted.findIndex((e) => e.horse_id === entry.horse_id) + 1
-      const prob = Number(entry[m.field] ?? 0)
+        .map((e) => ({
+          ...e,
+          normProb: normMap.get(String(e.horse_id)) ?? 0,
+        }))
+        .sort((a, b) => b.normProb - a.normProb)
+
+      const rank = sorted.findIndex((e) => String(e.horse_id) === horseId) + 1
+      const normProb = normMap.get(horseId) ?? 0
       const leader = sorted[0]
-      const leaderProb = leader ? Number(leader[m.field] ?? 0) : 0
+      const leaderProb = leader ? leader.normProb : 0
       const isTop = rank === 1
-      const gapToLeader = isTop ? 0 : leaderProb - prob
-      return { ...m, rank, prob, isTop, gapToLeader, totalRanked: sorted.length }
+      const gapToLeader = isTop ? 0 : leaderProb - normProb
+      return { ...m, rank, prob: normProb, isTop, gapToLeader, totalRanked: sorted.length }
     })
 
     const modelsWhereTop = modelAnalysis.filter((m) => m.isTop)
 
-    // Top 3 competitors (by ensemble, excluding this horse)
+    // Top 3 competitors (by normalized ensemble, excluding this horse)
     const competitors = sortedByEnsemble
-      .filter((e) => e.horse_id !== entry.horse_id)
+      .filter((e) => String(e.horse_id) !== horseId)
       .slice(0, 3)
 
-    // Field leader
-    const fieldLeader = sortedByEnsemble[0]
-    const isFieldLeader = fieldLeader?.horse_id === entry.horse_id
+    // Field leader (by normalized ensemble)
+    const fieldLeader = sortedByEnsemble[0] ?? null
+    const isFieldLeader = fieldLeader ? String(fieldLeader.horse_id) === horseId : false
 
     return {
       totalRunners,
@@ -188,32 +210,18 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
       ensembleRank,
       oddsRank,
       odds,
-      mlProb,
+      mlProb,        // normalized win probability
       impliedProb,
       edge,
       isValueBet,
       modelAnalysis,
       modelsWhereTop,
-      competitors,
+      competitors,   // each has norm_ensemble
       isFieldLeader,
-      fieldLeader,
+      fieldLeader,   // has norm_ensemble
+      normEnsemble,
     }
   }, [allEntries, entry])
-
-  // ── Helpers ────────────────────────────────────────────────────
-  const getConfidenceColor = (proba: number) => {
-    if (proba >= 0.7) return 'text-green-400'
-    if (proba >= 0.5) return 'text-yellow-400'
-    return 'text-gray-400'
-  }
-
-  const getConfidenceStars = (proba: number) => {
-    if (proba >= 0.8) return 5
-    if (proba >= 0.6) return 4
-    if (proba >= 0.4) return 3
-    if (proba >= 0.2) return 2
-    return 1
-  }
 
   // ── No predictions fallback ────────────────────────────────────
   if (!entry.ensemble_proba || entry.ensemble_proba === 0) {
@@ -263,7 +271,7 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
                 <Star
                   key={i}
                   className={`w-4 h-4 ${
-                    i < getConfidenceStars(entry.ensemble_proba)
+                    i < getNormalizedStars(analysis.normEnsemble)
                       ? 'text-yellow-400 fill-current'
                       : 'text-gray-600'
                   }`}
@@ -274,15 +282,15 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
 
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="text-center bg-gray-800/60 rounded-lg py-3 px-2">
-              <div className="text-xs text-gray-400 mb-1">ML Probability</div>
-              <div className={`text-xl font-bold ${getConfidenceColor(analysis.mlProb)}`}>
-                {(analysis.mlProb * 100).toFixed(1)}%
+              <div className="text-xs text-gray-400 mb-1">Win Probability</div>
+              <div className={`text-xl font-bold ${getNormalizedColor(analysis.mlProb)}`}>
+                {formatNormalized(analysis.mlProb)}
               </div>
             </div>
             <div className="text-center bg-gray-800/60 rounded-lg py-3 px-2">
               <div className="text-xs text-gray-400 mb-1">Market Implied</div>
               <div className="text-xl font-bold text-gray-300">
-                {(analysis.impliedProb * 100).toFixed(1)}%
+                {formatNormalized(analysis.impliedProb)}
               </div>
             </div>
             <div className="text-center bg-gray-800/60 rounded-lg py-3 px-2">
@@ -295,24 +303,24 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
 
           <p className="text-sm text-gray-300 leading-relaxed">
             {analysis.isValueBet
-              ? `Our ML models rate ${entry.horse_name} at ${(analysis.mlProb * 100).toFixed(1)}% win probability, but the current odds of ${analysis.odds}/1 imply only ${(analysis.impliedProb * 100).toFixed(1)}%. That's a ${(analysis.edge * 100).toFixed(1)}% edge — the market is undervaluing this horse.`
-              : `At ${analysis.odds}/1, the market implies a ${(analysis.impliedProb * 100).toFixed(1)}% chance. Our ML models rate ${entry.horse_name} at ${(analysis.mlProb * 100).toFixed(1)}% — there is no significant edge at current odds.`}
+              ? `Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} win probability, but the current odds of ${analysis.odds}/1 imply only ${formatNormalized(analysis.impliedProb)}. That's a ${(analysis.edge * 100).toFixed(1)}% edge — the market is undervaluing this horse.`
+              : `At ${analysis.odds}/1, the market implies a ${formatNormalized(analysis.impliedProb)} chance. Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} — there is no significant edge at current odds.`}
           </p>
         </div>
       ) : (
-        /* Fallback when no odds available - just show ML probability */
+        /* Fallback when no odds available - just show normalized probability */
         <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-yellow-400" />
-              <h3 className="text-yellow-400 font-bold text-lg">ML Win Probability</h3>
+              <h3 className="text-yellow-400 font-bold text-lg">Win Probability</h3>
             </div>
             <div className="flex items-center space-x-1">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Star
                   key={i}
                   className={`w-4 h-4 ${
-                    i < getConfidenceStars(entry.ensemble_proba)
+                    i < getNormalizedStars(analysis?.normEnsemble ?? 0)
                       ? 'text-yellow-400 fill-current'
                       : 'text-gray-600'
                   }`}
@@ -321,10 +329,10 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
             </div>
           </div>
           <div className="text-center">
-            <div className={`text-4xl font-bold ${getConfidenceColor(entry.ensemble_proba)} mb-1`}>
-              {(entry.ensemble_proba * 100).toFixed(1)}%
+            <div className={`text-4xl font-bold ${getNormalizedColor(analysis?.normEnsemble ?? 0)} mb-1`}>
+              {formatNormalized(analysis?.normEnsemble ?? 0)}
             </div>
-            <div className="text-gray-400 text-sm">Ensemble Model Confidence</div>
+            <div className="text-gray-400 text-sm">Normalized across {analysis?.runnersWithPredictions ?? '?'} runners</div>
           </div>
         </div>
       )}
@@ -361,11 +369,11 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
             </div>
           </div>
 
-          {/* Ensemble probability bar relative to field */}
+          {/* Win probability bar relative to field leader */}
           {analysis.fieldLeader && (
             <div>
               <div className="flex items-center justify-between text-xs text-gray-400 mb-1.5">
-                <span>Field strength</span>
+                <span>Win probability</span>
                 <span>{analysis.isFieldLeader ? 'Leading the field' : `Leader: ${analysis.fieldLeader.horse_name}`}</span>
               </div>
               <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden">
@@ -378,8 +386,8 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
                   style={{
                     width: `${Math.min(
                       100,
-                      analysis.fieldLeader.ensemble_proba > 0
-                        ? (entry.ensemble_proba / analysis.fieldLeader.ensemble_proba) * 100
+                      analysis.fieldLeader.norm_ensemble > 0
+                        ? (analysis.normEnsemble / analysis.fieldLeader.norm_ensemble) * 100
                         : 100
                     )}%`,
                   }}
@@ -417,8 +425,8 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className={`text-sm font-bold ${getConfidenceColor(m.prob)}`}>
-                    {(m.prob * 100).toFixed(1)}%
+                  <span className={`text-sm font-bold ${getNormalizedColor(m.prob)}`}>
+                    {formatNormalized(m.prob)}
                   </span>
                   <span className="text-xs text-gray-500 w-16 text-right">
                     {m.isTop
@@ -464,14 +472,14 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <div className="text-right">
-                      <div className={`text-sm font-bold ${getConfidenceColor(comp.ensemble_proba)}`}>
-                        {(comp.ensemble_proba * 100).toFixed(1)}%
+                      <div className={`text-sm font-bold ${getNormalizedColor(comp.norm_ensemble)}`}>
+                        {formatNormalized(comp.norm_ensemble)}
                       </div>
                       <div className="text-[10px] text-gray-500">
                         {comp.current_odds ? `${comp.current_odds}/1` : '—'}
                       </div>
                     </div>
-                    {comp.ensemble_proba > entry.ensemble_proba ? (
+                    {comp.norm_ensemble > analysis.normEnsemble ? (
                       <TrendingUp className="w-4 h-4 text-red-400" />
                     ) : (
                       <TrendingDown className="w-4 h-4 text-green-400" />
@@ -482,11 +490,11 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
             })}
           </div>
 
-          {analysis.competitors[0] && entry.ensemble_proba > 0 && (
+          {analysis.competitors[0] && analysis.normEnsemble > 0 && (
             <p className="text-xs text-gray-400 mt-3 leading-relaxed">
               {analysis.isFieldLeader
-                ? `${entry.horse_name} leads the field. Nearest threat is ${analysis.competitors[0].horse_name} at ${(analysis.competitors[0].ensemble_proba * 100).toFixed(1)}% — a ${((entry.ensemble_proba - analysis.competitors[0].ensemble_proba) * 100).toFixed(1)}% gap.`
-                : `${analysis.fieldLeader?.horse_name ?? 'The leader'} tops the ML rankings at ${(analysis.fieldLeader?.ensemble_proba * 100).toFixed(1)}%. ${entry.horse_name} sits ${((analysis.fieldLeader?.ensemble_proba - entry.ensemble_proba) * 100).toFixed(1)}% behind.`}
+                ? `${entry.horse_name} leads the field with ${formatNormalized(analysis.normEnsemble)} win probability. Nearest threat is ${analysis.competitors[0].horse_name} at ${formatNormalized(analysis.competitors[0].norm_ensemble)} — a ${((analysis.normEnsemble - analysis.competitors[0].norm_ensemble) * 100).toFixed(1)}% gap.`
+                : `${analysis.fieldLeader?.horse_name ?? 'The leader'} tops the ML rankings at ${formatNormalized(analysis.fieldLeader?.norm_ensemble ?? 0)}. ${entry.horse_name} sits ${((( analysis.fieldLeader?.norm_ensemble ?? 0) - analysis.normEnsemble) * 100).toFixed(1)}% behind.`}
             </p>
           )}
         </div>

@@ -4,6 +4,7 @@ import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ShortlistButton } from '@/components/ShortlistButton'
 import { Race } from '@/lib/supabase'
+import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { 
   Clock, 
   MapPin, 
@@ -38,14 +39,6 @@ export function RaceCard({
     return prize.replace(/[£,]/g, '')
   }
 
-  const getConfidenceStars = (proba: number) => {
-    if (proba >= 0.8) return 5
-    if (proba >= 0.6) return 4
-    if (proba >= 0.4) return 3
-    if (proba >= 0.2) return 2
-    return 1
-  }
-
   // Helper function to check if horse is in shortlist
   const isHorseInShortlist = (horseName: string, course: string): boolean => {
     if (!userShortlist || !Array.isArray(userShortlist)) return false
@@ -53,6 +46,11 @@ export function RaceCard({
       item.horse_name === horseName && item.course === course
     )
   }
+
+  // Normalize probabilities across all runners in this race
+  const normMap = race.topEntries?.length
+    ? normalizeField(race.topEntries, 'ensemble_proba', 'horse_id')
+    : new Map<string, number>()
 
   // Get the best AI prediction (highest ensemble_proba > 0)
   const aiPredictions = race.topEntries?.filter(entry => entry.ensemble_proba > 0) || []
@@ -144,7 +142,7 @@ export function RaceCard({
                     <Star 
                       key={i}
                       className={`w-3 h-3 ${
-                        i < getConfidenceStars(topPrediction.ensemble_proba) 
+                        i < getNormalizedStars(normMap.get(String(topPrediction.horse_id)) ?? 0) 
                           ? 'text-yellow-400 fill-current' 
                           : 'text-gray-600'
                       }`}
@@ -172,8 +170,8 @@ export function RaceCard({
                 
                 <div className="flex items-center space-x-3">
                   <div className="text-right">
-                    <div className="text-green-400 font-bold">
-                      {(topPrediction.ensemble_proba * 100).toFixed(0)}% confident
+                    <div className={`font-bold ${getNormalizedColor(normMap.get(String(topPrediction.horse_id)) ?? 0)}`}>
+                      {formatNormalized(normMap.get(String(topPrediction.horse_id)) ?? 0)} win prob
                     </div>
                     <div className="text-yellow-400 font-medium text-sm">
                       {topPrediction.current_odds || 'TBC'}
@@ -222,8 +220,8 @@ export function RaceCard({
                           {entry.current_odds || 'TBC'}
                         </div>
                         {entry.ensemble_proba > 0 && (
-                          <div className="text-green-400 text-xs">
-                            {(entry.ensemble_proba * 100).toFixed(0)}%
+                          <div className={`text-xs ${getNormalizedColor(normMap.get(String(entry.horse_id)) ?? 0)}`}>
+                            {formatNormalized(normMap.get(String(entry.horse_id)) ?? 0)}
                           </div>
                         )}
                       </div>

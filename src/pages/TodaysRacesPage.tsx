@@ -6,6 +6,7 @@ import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ShortlistButton } from '@/components/ShortlistButton'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, Race, callSupabaseFunction } from '@/lib/supabase'
+import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { 
   Clock, 
   MapPin, 
@@ -224,19 +225,6 @@ export function TodaysRacesPage() {
     return prize.replace(/[£,]/g, '')
   }
 
-  const getConfidenceColor = (proba: number) => {
-    if (proba >= 0.7) return 'text-green-400'
-    if (proba >= 0.5) return 'text-yellow-400'
-    return 'text-gray-400'
-  }
-
-  const getConfidenceStars = (proba: number) => {
-    if (proba >= 0.8) return 5
-    if (proba >= 0.6) return 4
-    if (proba >= 0.4) return 3
-    if (proba >= 0.2) return 2
-    return 1
-  }
 
   if (error) {
     return (
@@ -416,6 +404,10 @@ export function TodaysRacesPage() {
         <div className="space-y-2">
           {races.map((race: Race) => {
             const isExpanded = expandedRace === race.race_id
+            // Normalize probabilities across all runners in this race
+            const normMap = race.topEntries?.length
+              ? normalizeField(race.topEntries, 'ensemble_proba', 'horse_id')
+              : new Map<string, number>()
             // Get the best AI prediction (highest ensemble_proba > 0)
             const aiPredictions = race.topEntries?.filter(entry => entry.ensemble_proba > 0) || []
             const topPrediction = aiPredictions.length > 0 ? aiPredictions[0] : null
@@ -509,7 +501,7 @@ export function TodaysRacesPage() {
                               <Star 
                                 key={i}
                                 className={`w-3 h-3 ${
-                                  i < getConfidenceStars(topPrediction.ensemble_proba) 
+                                  i < getNormalizedStars(normMap.get(String(topPrediction.horse_id)) ?? 0) 
                                     ? 'text-yellow-400 fill-current' 
                                     : 'text-gray-600'
                                 }`}
@@ -539,11 +531,11 @@ export function TodaysRacesPage() {
                             </div>
                           </div>
                           <div className="text-right">
-                            <div className={`font-semibold ${getConfidenceColor(topPrediction.ensemble_proba)}`}>
-                              {(topPrediction.ensemble_proba * 100).toFixed(1)}%
+                            <div className={`font-semibold ${getNormalizedColor(normMap.get(String(topPrediction.horse_id)) ?? 0)}`}>
+                              {formatNormalized(normMap.get(String(topPrediction.horse_id)) ?? 0)}
                             </div>
                             <div className="text-sm text-gray-400">
-                              Confidence
+                              Win Prob
                             </div>
                           </div>
                         </div>
@@ -594,8 +586,8 @@ export function TodaysRacesPage() {
                               
                               <div className="flex items-center gap-2">
                                 {entry.ensemble_proba > 0 && (
-                                  <div className={`text-sm font-medium ${getConfidenceColor(entry.ensemble_proba)}`}>
-                                    {(entry.ensemble_proba * 100).toFixed(1)}%
+                                  <div className={`text-sm font-medium ${getNormalizedColor(normMap.get(String(entry.horse_id)) ?? 0)}`}>
+                                    {formatNormalized(normMap.get(String(entry.horse_id)) ?? 0)}
                                   </div>
                                 )}
                                 {entry.current_odds && (
