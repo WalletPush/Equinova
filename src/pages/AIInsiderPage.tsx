@@ -1328,7 +1328,7 @@ export function AIInsiderPage() {
                 </div>
               ) : upcomingRaces && upcomingRaces.length > 0 ? (
                 <div className="space-y-4">
-                  {upcomingRaces
+                  {[...upcomingRaces]
                     .sort((a, b) => compareRaceTimes(a.off_time, b.off_time)) // Chronological order
                     .slice(0, 4) // Show only next 4 upcoming races
                     .map((race) => {
