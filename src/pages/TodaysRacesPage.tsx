@@ -400,12 +400,10 @@ export function TodaysRacesPage() {
                                 </div>
                               </div>
                               
-                              <div className="flex items-center space-x-3">
+                              <div className="flex items-center gap-2">
                                 {entry.ensemble_proba > 0 && (
-                                  <div className="text-right">
-                                    <div className={`text-sm font-medium ${getConfidenceColor(entry.ensemble_proba)}`}>
-                                      {(entry.ensemble_proba * 100).toFixed(1)}%
-                                    </div>
+                                  <div className={`text-sm font-medium ${getConfidenceColor(entry.ensemble_proba)}`}>
+                                    {(entry.ensemble_proba * 100).toFixed(1)}%
                                   </div>
                                 )}
                                 {entry.current_odds && (
@@ -413,15 +411,27 @@ export function TodaysRacesPage() {
                                     {entry.current_odds}/1
                                   </div>
                                 )}
-                                <ShortlistButton 
-                                  horseName={entry.horse_name}
-                                  raceContext={raceContext}
-                                  odds={entry.current_odds ? String(entry.current_odds) : undefined}
-                                  jockeyName={entry.jockey_name}
-                                  trainerName={entry.trainer_name}
-                                  isInShortlist={isHorseInShortlist(entry.horse_name, race.course_name)}
-                                  size="small"
-                                />
+                                <div className="flex flex-col items-center gap-1">
+                                  <button
+                                    onClick={() => openHorseDetail(entry, {
+                                      course_name: race.course_name,
+                                      off_time: race.off_time,
+                                      race_id: race.race_id
+                                    })}
+                                    className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-2 py-0.5 rounded text-[10px] font-semibold transition-colors leading-tight"
+                                  >
+                                    Form
+                                  </button>
+                                  <ShortlistButton 
+                                    horseName={entry.horse_name}
+                                    raceContext={raceContext}
+                                    odds={entry.current_odds ? String(entry.current_odds) : undefined}
+                                    jockeyName={entry.jockey_name}
+                                    trainerName={entry.trainer_name}
+                                    isInShortlist={isHorseInShortlist(entry.horse_name, race.course_name)}
+                                    size="small"
+                                  />
+                                </div>
                               </div>
                             </div>
                           ))}
