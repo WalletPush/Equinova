@@ -255,18 +255,15 @@ export function TodaysRacesPage() {
                 className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 hover:border-yellow-400/30 rounded-lg transition-all duration-200"
               >
                 {/* Compact Race Header */}
-                <div 
-                  className="p-4 cursor-pointer"
-                  onClick={() => setExpandedRace(isExpanded ? null : race.race_id)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
                       {/* Line 1: Race name + class + off time */}
-                      <div className="flex items-center space-x-3 mb-2">
+                      <div className="flex items-center flex-wrap gap-2 mb-2">
                         <h3 className="text-lg font-semibold text-white">
                           {race.course_name}
                         </h3>
-                        <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
+                        <span className="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-xs font-medium">
                           {race.race_class}
                         </span>
                         <div className="flex items-center space-x-1 text-yellow-400">
@@ -275,41 +272,43 @@ export function TodaysRacesPage() {
                         </div>
                       </div>
                       
-                      {/* Line 2: Distance, runners, prize, surface, View button */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-4 text-sm text-gray-400">
-                          <div className="flex items-center space-x-1">
-                            <MapPin className="w-4 h-4" />
-                            <span>{race.distance}</span>
-                          </div>
-                          <div className="flex items-center space-x-1">
-                            <Users className="w-4 h-4" />
-                            <span>{race.field_size}</span>
-                          </div>
-                          {race.prize && (
-                            <div className="flex items-center space-x-1">
-                              <Trophy className="w-4 h-4" />
-                              <span className="text-green-400 font-medium">£{formatPrize(race.prize)}</span>
-                            </div>
-                          )}
+                      {/* Line 2: Distance, runners, prize */}
+                      <div className="flex items-center flex-wrap gap-3 text-sm text-gray-400">
+                        <div className="flex items-center space-x-1">
+                          <MapPin className="w-4 h-4" />
+                          <span>{race.distance}</span>
                         </div>
-                        
-                        <Link
-                          to={`/race/${race.race_id}`}
-                          className="bg-yellow-500 hover:bg-yellow-400 text-gray-900 px-3 py-1.5 rounded-md text-sm font-bold transition-colors flex-shrink-0 ml-3"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Analyse
-                        </Link>
+                        <div className="flex items-center space-x-1">
+                          <Users className="w-4 h-4" />
+                          <span>{race.field_size}</span>
+                        </div>
+                        {race.prize && (
+                          <div className="flex items-center space-x-1">
+                            <Trophy className="w-4 h-4" />
+                            <span className="text-green-400 font-medium">£{formatPrize(race.prize)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     
-                    <div className="ml-3 flex-shrink-0">
-                      {isExpanded ? (
-                        <ChevronDown className="w-5 h-5 text-gray-400" />
-                      ) : (
-                        <ChevronRight className="w-5 h-5 text-gray-400" />
-                      )}
+                    {/* Stacked action buttons */}
+                    <div className="flex flex-col gap-1.5 flex-shrink-0">
+                      <Link
+                        to={`/race/${race.race_id}`}
+                        className="bg-yellow-500 hover:bg-yellow-400 text-gray-900 px-4 py-1.5 rounded-md text-sm font-bold transition-colors text-center"
+                      >
+                        Analyse
+                      </Link>
+                      <button
+                        onClick={() => setExpandedRace(isExpanded ? null : race.race_id)}
+                        className={`border px-4 py-1.5 rounded-md text-sm font-medium transition-colors text-center ${
+                          isExpanded
+                            ? 'bg-gray-700 border-yellow-500/50 text-yellow-400'
+                            : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:border-gray-500 hover:text-white'
+                        }`}
+                      >
+                        Runners
+                      </button>
                     </div>
                   </div>
                 </div>
