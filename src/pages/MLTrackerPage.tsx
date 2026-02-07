@@ -10,25 +10,29 @@ import {
   TrendingUp,
   TrendingDown,
   Target,
-  Award,
   BarChart3,
-  PieChart,
   Zap,
   AlertCircle,
   Calendar,
   RefreshCw,
-  Sparkles,
   Trophy,
   Activity,
   Clock,
-  Download,
-  Star,
   CheckCircle,
-  ArrowUp,
-  ArrowDown,
   Minus,
-  Crown
+  Crown,
+  Download
 } from 'lucide-react'
+
+interface RaceResult {
+  race_id: string
+  course: string
+  off_time: string
+  horse_name: string
+  probability: number
+  finishing_position: number | null
+  is_winner: boolean
+}
 
 interface MLModelPerformance {
   model_name: string
@@ -52,15 +56,7 @@ interface MLModelPerformance {
   }
   is_due_winner: boolean
   performance_trend: 'hot' | 'cold' | 'normal'
-  race_results: {
-    race_id: string
-    course: string
-    off_time: string
-    horse_name: string
-    probability: number
-    finishing_position: number | null
-    is_winner: boolean
-  }[]
+  race_results: RaceResult[]
 }
 
 interface MLTrackerData {
@@ -68,6 +64,7 @@ interface MLTrackerData {
   last_updated: string
   total_races_today: number
   completed_races: number
+  results_source: string
 }
 
 const MODEL_NAMES = ['mlp', 'rf', 'xgboost', 'benter', 'ensemble'] as const
@@ -125,9 +122,107 @@ const PROBA_FIELDS: Record<ModelName, string> = {
   ensemble: 'ensemble_proba'
 }
 
+/**
+ * Try to get race results from multiple sources:
+ * 1. race_runners table (populated by fetch-race-results edge function)
+ * 2. race_entries.finishing_position (populated by update-race-results-and-bets)
+ * 3. ml_model_race_results table (populated by populate-ml-performance-data)
+ */
+async function fetchRacePositions(
+  raceIds: string[]
+): Promise<{ positions: Record<string, Record<string, number>>; source: string }> {
+  // positions = { race_id -> { horse_id -> finishing_position } }
+  const positions: Record<string, Record<string, number>> = {}
+
+  // Source 1: race_runners table
+  try {
+    const batchSize = 50
+    let allRunners: any[] = []
+    for (let i = 0; i < raceIds.length; i += batchSize) {
+      const batch = raceIds.slice(i, i + batchSize)
+      const { data: runners, error } = await supabase
+        .from('race_runners')
+        .select('race_id, horse_id, position, horse')
+        .in('race_id', batch)
+        .not('position', 'is', null)
+        .gt('position', 0)
+      if (!error && runners && runners.length > 0) {
+        allRunners = allRunners.concat(runners)
+      }
+    }
+    if (allRunners.length > 0) {
+      for (const r of allRunners) {
+        if (!positions[r.race_id]) positions[r.race_id] = {}
+        positions[r.race_id][r.horse_id] = Number(r.position)
+      }
+      console.log(`ML Tracker: Got ${allRunners.length} results from race_runners for ${Object.keys(positions).length} races`)
+      return { positions, source: 'race_runners' }
+    }
+    console.log('ML Tracker: race_runners returned no data')
+  } catch (e) {
+    console.warn('ML Tracker: race_runners query failed:', e)
+  }
+
+  // Source 2: race_entries.finishing_position
+  try {
+    const batchSize = 50
+    let allEntries: any[] = []
+    for (let i = 0; i < raceIds.length; i += batchSize) {
+      const batch = raceIds.slice(i, i + batchSize)
+      const { data: entries, error } = await supabase
+        .from('race_entries')
+        .select('race_id, horse_id, finishing_position')
+        .in('race_id', batch)
+        .not('finishing_position', 'is', null)
+        .gt('finishing_position', 0)
+      if (!error && entries && entries.length > 0) {
+        allEntries = allEntries.concat(entries)
+      }
+    }
+    if (allEntries.length > 0) {
+      for (const e of allEntries) {
+        if (!positions[e.race_id]) positions[e.race_id] = {}
+        positions[e.race_id][e.horse_id] = Number(e.finishing_position)
+      }
+      console.log(`ML Tracker: Got ${allEntries.length} results from race_entries.finishing_position for ${Object.keys(positions).length} races`)
+      return { positions, source: 'race_entries' }
+    }
+    console.log('ML Tracker: race_entries.finishing_position all null')
+  } catch (e) {
+    console.warn('ML Tracker: race_entries finishing_position query failed:', e)
+  }
+
+  // Source 3: ml_model_race_results
+  try {
+    const today = getUKDate()
+    const { data: mlResults, error } = await supabase
+      .from('ml_model_race_results')
+      .select('race_id, horse_id, actual_position, is_winner, model_name')
+      .gte('created_at', `${today}T00:00:00.000Z`)
+      .lt('created_at', `${today}T23:59:59.999Z`)
+    if (!error && mlResults && mlResults.length > 0) {
+      for (const r of mlResults) {
+        if (!positions[r.race_id]) positions[r.race_id] = {}
+        if (r.actual_position && r.actual_position > 0) {
+          positions[r.race_id][r.horse_id] = Number(r.actual_position)
+        }
+      }
+      console.log(`ML Tracker: Got ${mlResults.length} results from ml_model_race_results for ${Object.keys(positions).length} races`)
+      return { positions, source: 'ml_model_race_results' }
+    }
+    console.log('ML Tracker: ml_model_race_results empty for today')
+  } catch (e) {
+    console.warn('ML Tracker: ml_model_race_results query failed:', e)
+  }
+
+  return { positions, source: 'none' }
+}
+
 export function MLTrackerPage() {
   const { profile } = useAuth()
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isFetchingResults, setIsFetchingResults] = useState(false)
+  const [fetchStatus, setFetchStatus] = useState<string | null>(null)
 
   // Compute ML tracker data entirely client-side
   const { data: mlTrackerData, isLoading, error, refetch } = useQuery({
@@ -148,7 +243,6 @@ export function MLTrackerPage() {
       }
 
       if (!races || races.length === 0) {
-        console.log('ML Tracker: No races found for today')
         return {
           models: MODEL_NAMES.map(name => ({
             model_name: name,
@@ -165,78 +259,66 @@ export function MLTrackerPage() {
           })),
           last_updated: new Date().toISOString(),
           total_races_today: 0,
-          completed_races: 0
+          completed_races: 0,
+          results_source: 'none'
         }
       }
 
       const raceIds = races.map(r => r.race_id)
-      console.log(`ML Tracker: Found ${races.length} races, fetching entries...`)
+      console.log(`ML Tracker: Found ${races.length} races, fetching entries and results...`)
 
-      // Step 2: Get all race entries with ML predictions and finishing positions
-      // Supabase .in() has a limit, so batch if needed
+      // Step 2: Get all race entries with ML predictions
       const batchSize = 50
       let allEntries: any[] = []
-
       for (let i = 0; i < raceIds.length; i += batchSize) {
         const batch = raceIds.slice(i, i + batchSize)
         const { data: entries, error: entriesError } = await supabase
           .from('race_entries')
-          .select('race_id, horse_id, horse_name, trainer_name, jockey_name, current_odds, silk_url, number, finishing_position, result_updated_at, mlp_proba, rf_proba, xgboost_proba, benter_proba, ensemble_proba')
+          .select('race_id, horse_id, horse_name, trainer_name, jockey_name, current_odds, silk_url, number, mlp_proba, rf_proba, xgboost_proba, benter_proba, ensemble_proba')
           .in('race_id', batch)
-
-        if (entriesError) {
-          console.error('ML Tracker: Failed to fetch entries batch:', entriesError)
-          continue
-        }
-        if (entries) allEntries = allEntries.concat(entries)
+        if (!entriesError && entries) allEntries = allEntries.concat(entries)
       }
 
-      console.log(`ML Tracker: Got ${allEntries.length} entries across ${races.length} races`)
+      console.log(`ML Tracker: Got ${allEntries.length} entries`)
 
-      // Step 3: Build a map of race_id -> entries
+      // Step 3: Get actual race results from any available source
+      const { positions, source } = await fetchRacePositions(raceIds)
+      const completedRaceIds = new Set(Object.keys(positions))
+      console.log(`ML Tracker: ${completedRaceIds.size} completed races (source: ${source})`)
+
+      // Step 4: Build maps
       const raceEntriesMap: Record<string, any[]> = {}
       for (const entry of allEntries) {
         if (!raceEntriesMap[entry.race_id]) raceEntriesMap[entry.race_id] = []
         raceEntriesMap[entry.race_id].push(entry)
       }
 
-      // Step 4: Build a map of race_id -> race info
       const raceInfoMap: Record<string, any> = {}
       for (const race of races) {
         raceInfoMap[race.race_id] = race
       }
 
-      // Step 5: Determine which races have results (at least one entry has finishing_position)
-      const completedRaceIds = new Set<string>()
-      for (const [raceId, entries] of Object.entries(raceEntriesMap)) {
-        if (entries.some(e => e.finishing_position != null && e.finishing_position > 0)) {
-          completedRaceIds.add(raceId)
-        }
-      }
-
-      console.log(`ML Tracker: ${completedRaceIds.size} races have results`)
-
-      // Step 6: Current time for finding next runner
+      // Step 5: Current time for upcoming races
       const currentTime = getUKTime()
       const [curH, curM] = currentTime.split(':').map(Number)
       const curMinutes = curH * 60 + curM
 
-      // Step 7: Compute performance for each model
+      // Step 6: Compute performance for each model
       const modelPerformance: MLModelPerformance[] = []
 
       for (const modelName of MODEL_NAMES) {
         const probaField = PROBA_FIELDS[modelName]
-        const raceResults: MLModelPerformance['race_results'] = []
+        const raceResults: RaceResult[] = []
         let racesWon = 0
         let racesLost = 0
         let racesTop3 = 0
 
-        // Process each completed race
         for (const raceId of completedRaceIds) {
           const entries = raceEntriesMap[raceId] || []
           const raceInfo = raceInfoMap[raceId]
+          const racePositions = positions[raceId] || {}
 
-          // Find the model's top pick (highest probability)
+          // Find the model's top pick
           let topPick: any = null
           let topProba = -1
           for (const entry of entries) {
@@ -249,7 +331,10 @@ export function MLTrackerPage() {
 
           if (!topPick || topProba <= 0) continue
 
-          const pos = Number(topPick.finishing_position)
+          // Look up this horse's finishing position
+          const pos = racePositions[topPick.horse_id]
+          if (!pos || pos < 1) continue // No result for this horse
+
           const isWinner = pos === 1
           const isTop3 = pos >= 1 && pos <= 3
 
@@ -268,22 +353,19 @@ export function MLTrackerPage() {
           })
         }
 
-        // Sort race results chronologically
         raceResults.sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
 
         const totalCompleted = racesWon + racesLost
         const winRate = totalCompleted > 0 ? (racesWon / totalCompleted) * 100 : 0
 
-        // Find next upcoming runner for this model
+        // Find next upcoming runner
         let nextRunner: MLModelPerformance['next_runner'] = undefined
-
-        // Sort all races chronologically and find the first upcoming one
         const sortedRaces = [...races].sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
 
         for (const race of sortedRaces) {
           const raceMin = raceTimeToMinutes(race.off_time)
-          if (raceMin <= curMinutes) continue // Race already started
-          if (completedRaceIds.has(race.race_id)) continue // Already has results
+          if (raceMin <= curMinutes) continue
+          if (completedRaceIds.has(race.race_id)) continue
 
           const entries = raceEntriesMap[race.race_id] || []
           let topEntry: any = null
@@ -312,7 +394,6 @@ export function MLTrackerPage() {
           }
         }
 
-        // Check if model is "due a winner"
         const racesWithoutWin = totalCompleted - racesWon
         const isDueWinner = racesWithoutWin >= 5 && winRate < 20
 
@@ -336,13 +417,14 @@ export function MLTrackerPage() {
         models: modelPerformance,
         last_updated: new Date().toISOString(),
         total_races_today: races.length,
-        completed_races: completedRaceIds.size
+        completed_races: completedRaceIds.size,
+        results_source: source
       }
     },
-    staleTime: 1000 * 30, // 30 seconds
+    staleTime: 1000 * 30,
     retry: 3,
     retryDelay: 1000,
-    refetchInterval: 1000 * 60 // Auto-refresh every minute
+    refetchInterval: 1000 * 60
   })
 
   const handleRefresh = async () => {
@@ -353,6 +435,98 @@ export function MLTrackerPage() {
       console.error('Error refreshing ML tracker:', error)
     } finally {
       setIsRefreshing(false)
+    }
+  }
+
+  // Trigger result fetching for completed races that don't have results yet
+  const handleFetchResults = async () => {
+    setIsFetchingResults(true)
+    setFetchStatus('Triggering result fetching...')
+    try {
+      // First try calling the race-results-scheduler
+      try {
+        setFetchStatus('Calling race-results-scheduler...')
+        const { data: schedulerData, error: schedulerError } = await supabase.functions.invoke('race-results-scheduler', {
+          body: { limit: 50, rateMs: 300 }
+        })
+        if (!schedulerError && schedulerData) {
+          const readyCount = schedulerData.ready_count || schedulerData.data?.ready_count || 0
+          const msg = schedulerData.message || schedulerData.data?.message || ''
+          setFetchStatus(`Scheduler: ${msg} (${readyCount} results fetched)`)
+          if (readyCount > 0) {
+            // Results were fetched - now trigger update-race-results-and-bets for each
+            // and refresh the tracker
+            await new Promise(r => setTimeout(r, 2000))
+            await refetch()
+            setFetchStatus(`Done! ${readyCount} race results fetched and loaded.`)
+            return
+          }
+        }
+      } catch (schedulerErr) {
+        console.warn('race-results-scheduler failed, trying individual fetch:', schedulerErr)
+      }
+
+      // Fallback: fetch results one by one for completed races
+      const today = getUKDate()
+      const { data: races } = await supabase
+        .from('races')
+        .select('race_id, off_time')
+        .eq('date', today)
+
+      if (!races || races.length === 0) {
+        setFetchStatus('No races found for today')
+        return
+      }
+
+      const currentTime = getUKTime()
+      const [curH, curM] = currentTime.split(':').map(Number)
+      const curMinutes = curH * 60 + curM
+
+      // Find races that should be finished (off_time + 10 min buffer has passed)
+      const completedRaces = races.filter(r => {
+        const raceMin = raceTimeToMinutes(r.off_time)
+        return raceMin > 0 && (curMinutes - raceMin) > 10
+      })
+
+      setFetchStatus(`Fetching results for ${completedRaces.length} completed races...`)
+      let fetched = 0
+      let errors = 0
+
+      for (let i = 0; i < completedRaces.length; i++) {
+        const race = completedRaces[i]
+        setFetchStatus(`Fetching ${i + 1}/${completedRaces.length}: ${race.race_id}...`)
+        try {
+          const { data, error } = await supabase.functions.invoke('fetch-race-results', {
+            body: { race_id: race.race_id }
+          })
+          if (!error && data?.success) {
+            fetched++
+            // Also trigger the update function to write finishing_position back
+            try {
+              await supabase.functions.invoke('update-race-results-and-bets', {
+                body: { race_id: race.race_id }
+              })
+            } catch { /* ignore */ }
+          }
+        } catch (e) {
+          errors++
+          console.warn(`Failed to fetch results for ${race.race_id}:`, e)
+        }
+        // Small delay to avoid rate limiting
+        if (i < completedRaces.length - 1) {
+          await new Promise(r => setTimeout(r, 500))
+        }
+      }
+
+      setFetchStatus(`Done! Fetched ${fetched} results (${errors} errors). Refreshing...`)
+      await new Promise(r => setTimeout(r, 1000))
+      await refetch()
+      setFetchStatus(`Complete: ${fetched} race results loaded.`)
+    } catch (err: any) {
+      console.error('Error fetching results:', err)
+      setFetchStatus(`Error: ${err.message || 'Failed to fetch results'}`)
+    } finally {
+      setIsFetchingResults(false)
     }
   }
 
@@ -369,7 +543,6 @@ export function MLTrackerPage() {
 
   const getDueWinnerMessage = (model: MLModelPerformance) => {
     if (!model.is_due_winner) return null
-    
     const racesWithoutWin = model.races_completed - model.races_won
     return `${racesWithoutWin} races without a win - due for a winner!`
   }
@@ -408,23 +581,25 @@ export function MLTrackerPage() {
     )
   }
 
+  const hasNoResults = mlTrackerData?.completed_races === 0 && (mlTrackerData?.total_races_today || 0) > 0
+
   return (
     <AppLayout>
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-white mb-2">ML Model Tracker</h1>
             <p className="text-gray-400">Real-time performance tracking for today's races</p>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
             <div className="text-right">
               <p className="text-sm text-gray-400">Last Updated</p>
               <p className="text-white font-medium">
-                {mlTrackerData?.last_updated ? 
-                  new Date(mlTrackerData.last_updated).toLocaleTimeString('en-GB', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
+                {mlTrackerData?.last_updated ?
+                  new Date(mlTrackerData.last_updated).toLocaleTimeString('en-GB', {
+                    hour: '2-digit',
+                    minute: '2-digit'
                   }) : 'Never'}
               </p>
             </div>
@@ -439,6 +614,43 @@ export function MLTrackerPage() {
           </div>
         </div>
 
+        {/* Fetch Results Banner - shown when no results are available */}
+        {hasNoResults && (
+          <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <AlertCircle className="w-6 h-6 text-yellow-400" />
+                <div>
+                  <h3 className="text-yellow-400 font-semibold">No Race Results Found</h3>
+                  <p className="text-gray-400 text-sm">
+                    Race results need to be fetched from the Racing API. Click "Fetch Results" to pull in today's finished race results.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleFetchResults}
+                disabled={isFetchingResults}
+                className="bg-yellow-500 hover:bg-yellow-600 disabled:bg-yellow-500/50 text-gray-900 font-semibold px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 whitespace-nowrap"
+              >
+                <Download className={`w-4 h-4 ${isFetchingResults ? 'animate-bounce' : ''}`} />
+                <span>{isFetchingResults ? 'Fetching...' : 'Fetch Results'}</span>
+              </button>
+            </div>
+            {fetchStatus && (
+              <p className="mt-3 text-sm text-gray-300 bg-gray-800/50 p-2 rounded">
+                {fetchStatus}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Data source indicator */}
+        {mlTrackerData?.results_source && mlTrackerData.results_source !== 'none' && (
+          <div className="mb-4 text-xs text-gray-500">
+            Results source: {mlTrackerData.results_source}
+          </div>
+        )}
+
         {/* Summary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
@@ -450,12 +662,12 @@ export function MLTrackerPage() {
               </div>
             </div>
           </div>
-          
+
           <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
             <div className="flex items-center space-x-3">
               <CheckCircle className="w-8 h-8 text-green-400" />
               <div>
-                <p className="text-gray-400 text-sm">Completed Races</p>
+                <p className="text-gray-400 text-sm">Results Available</p>
                 <p className="text-2xl font-bold text-white">{mlTrackerData?.completed_races || 0}</p>
               </div>
             </div>
@@ -477,7 +689,7 @@ export function MLTrackerPage() {
               </div>
             </div>
           </div>
-          
+
           <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
             <div className="flex items-center space-x-3">
               <Activity className="w-8 h-8 text-purple-400" />
@@ -497,7 +709,7 @@ export function MLTrackerPage() {
             const config = modelConfig[model.model_name as ModelName]
             if (!config) return null
             const IconComponent = config.icon
-            
+
             return (
               <div
                 key={model.model_name}
@@ -542,8 +754,8 @@ export function MLTrackerPage() {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-gray-400">Win Rate</span>
                     <span className={`text-lg font-bold ${
-                      model.win_rate >= 30 ? 'text-green-400' : 
-                      model.win_rate >= 20 ? 'text-yellow-400' : 
+                      model.win_rate >= 30 ? 'text-green-400' :
+                      model.win_rate >= 20 ? 'text-yellow-400' :
                       model.races_completed === 0 ? 'text-gray-400' : 'text-red-400'
                     }`}>
                       {model.races_completed > 0 ? `${model.win_rate.toFixed(1)}%` : 'N/A'}
@@ -552,7 +764,7 @@ export function MLTrackerPage() {
                   <div className="w-full bg-gray-700 rounded-full h-2">
                     <div
                       className={`h-2 rounded-full transition-all duration-500 ${
-                        model.win_rate >= 30 ? 'bg-green-500' : 
+                        model.win_rate >= 30 ? 'bg-green-500' :
                         model.win_rate >= 20 ? 'bg-yellow-500' : 'bg-red-500'
                       }`}
                       style={{ width: `${Math.min(model.win_rate, 100)}%` }}
@@ -576,23 +788,22 @@ export function MLTrackerPage() {
                 {model.race_results.length > 0 && (
                   <div className="mb-4">
                     <h4 className="text-xs font-semibold text-gray-400 mb-2">Race Results</h4>
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
                       {model.race_results.map((result) => (
-                        <div key={result.race_id} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-gray-800/50">
-                          <div className="flex items-center space-x-2 truncate">
+                        <div key={result.race_id} className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-gray-800/50">
+                          <div className="flex items-center space-x-2 truncate flex-1 min-w-0">
                             {result.is_winner ? (
-                              <Trophy className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                              <Trophy className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
                             ) : (
-                              <span className="w-3 h-3 flex items-center justify-center text-gray-500 flex-shrink-0">
+                              <span className="w-3.5 h-3.5 flex items-center justify-center text-gray-500 flex-shrink-0 text-[10px]">
                                 {result.finishing_position || '-'}
                               </span>
                             )}
                             <span className="text-gray-300 truncate">{result.horse_name}</span>
                           </div>
-                          <div className="flex items-center space-x-2 flex-shrink-0">
+                          <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
                             <span className="text-gray-500">{result.course}</span>
-                            <span className="text-gray-500">{formatTime(result.off_time)}</span>
-                            <span className={result.is_winner ? 'text-green-400 font-bold' : 'text-red-400'}>
+                            <span className={`font-bold ${result.is_winner ? 'text-green-400' : result.finishing_position && result.finishing_position <= 3 ? 'text-yellow-400' : 'text-red-400'}`}>
                               P{result.finishing_position}
                             </span>
                           </div>
@@ -602,13 +813,13 @@ export function MLTrackerPage() {
                   </div>
                 )}
 
-                {/* No results yet info */}
+                {/* No results yet */}
                 {model.race_results.length === 0 && model.total_races_today > 0 && (
                   <div className="mb-4 p-3 bg-gray-700/30 rounded-lg">
                     <div className="flex items-center space-x-2">
                       <Clock className="w-4 h-4 text-gray-400" />
                       <span className="text-sm text-gray-400">
-                        No race results yet — {model.total_races_today} races scheduled
+                        No results yet — click "Fetch Results" above
                       </span>
                     </div>
                   </div>
@@ -651,7 +862,7 @@ export function MLTrackerPage() {
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Confidence</span>
                         <span className={`font-bold ${
-                          model.next_runner.confidence >= 70 ? 'text-green-400' : 
+                          model.next_runner.confidence >= 70 ? 'text-green-400' :
                           model.next_runner.confidence >= 50 ? 'text-yellow-400' : 'text-red-400'
                         }`}>
                           {model.next_runner.confidence.toFixed(1)}%
