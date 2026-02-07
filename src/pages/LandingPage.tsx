@@ -228,9 +228,9 @@ export function LandingPage() {
             {/* Image */}
             <div className="flex justify-center">
               <img
-                src="/images/equinova-mobile.png"
-                alt="EquiNova on mobile"
-                className="max-w-md w-full drop-shadow-2xl"
+                src="/images/equinova-form.png"
+                alt="EquiNova form analysis"
+                className="max-w-md w-full rounded-2xl border border-gray-700 shadow-2xl shadow-black/40"
               />
             </div>
           </div>
