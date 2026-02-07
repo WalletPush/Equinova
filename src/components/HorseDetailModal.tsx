@@ -355,7 +355,7 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
           {activeTab === 'overview' && <OverviewTab entry={entry} />}
           {activeTab === 'form' && <FormTab entry={entry} />}
           {activeTab === 'connections' && <ConnectionsTab entry={entry} />}
-          {activeTab === 'predictions' && <PredictionsTab entry={entry} />}
+          {activeTab === 'predictions' && <PredictionsTab entry={entry} raceId={raceContext?.race_id || entry.race_id} />}
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { RaceEntry } from '@/lib/supabase'
 
 export interface TabContentProps {
   entry: RaceEntry
+  raceId?: string
 }
 
 const getConfidenceColor = (proba: number) => {
