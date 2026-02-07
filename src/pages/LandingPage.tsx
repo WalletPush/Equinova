@@ -440,7 +440,7 @@ export function LandingPage() {
             </h2>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
             <PricingCard
               title="Monthly Plan"
               price="£29.00"
@@ -469,20 +469,6 @@ export function LandingPage() {
               paypalLink="https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=P-74P22738DL238650NNAOM7XI"
               highlighted
               badge="BEST VALUE"
-            />
-
-            <PricingCard
-              title="Limited Lifetime DEAL"
-              price="£290.00"
-              period="ONE TIME"
-              features={[
-                'Access to 4 machine learning models',
-                'The EquiNova Analyzer',
-                'EquiNova Profit Builders',
-                'The SafeBet System',
-              ]}
-              ctaLabel="Choose Lifetime"
-              paypalLink="https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=YOUR_LIFETIME_PLAN_ID"
             />
           </div>
         </div>

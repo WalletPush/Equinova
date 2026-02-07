@@ -10,6 +10,7 @@ import { AdminRoute } from '@/components/AdminRoute'
 import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { SignUpPage } from '@/pages/SignUpPage'
+import { PaymentSuccessPage } from '@/pages/PaymentSuccessPage'
 import { TodaysRacesPage } from '@/pages/TodaysRacesPage'
 import { PreviousRacesPage } from '@/pages/PreviousRacesPage'
 import { RaceDetailPage } from '@/pages/RaceDetailPage'
@@ -43,6 +44,7 @@ function App() {
                   <Route path="/" element={<LandingPage />} />
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/signup" element={<SignUpPage />} />
+                  <Route path="/payment-success" element={<PaymentSuccessPage />} />
                   <Route path="/races" element={
                     <ProtectedRoute>
                       <TodaysRacesPage />
