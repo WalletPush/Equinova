@@ -40,6 +40,11 @@ export function getUKDateTime(): { date: string; time: string; dateTime: string 
 /**
  * Format a time string (HH:MM) for display
  * Converts incorrectly stored AM times to proper PM times for race display
+ *
+ * UK racing runs ~10 AM to 9:30 PM. Times stored as:
+ *   01:XX-09:XX  → PM times (1 PM-9 PM), need +12
+ *   10:XX-12:XX  → genuine morning/noon (10 AM, 11 AM, 12 PM), keep as-is
+ *   13:XX+       → already 24h, keep as-is
  */
 export function formatTime(timeString: string): string {
   if (!timeString) return '';
@@ -48,15 +53,13 @@ export function formatTime(timeString: string): string {
   const timePart = timeString.substring(0, 5);
   const [hours, minutes] = timePart.split(':').map(Number);
   
-  // Race times stored as 01:XX, 02:XX, etc. should be PM times (13:XX, 14:XX)
-  // Convert early hours (01:00 - 11:59) to PM equivalent for race display
-  if (hours >= 1 && hours <= 11) {
+  // Only hours 1-9 are PM times stored without the PM indicator
+  if (hours >= 1 && hours <= 9) {
     const pmHours = hours + 12;
     return `${pmHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
   }
   
-  // 12:XX stays as 12:XX (noon hour)
-  // Other times (00:XX, 13:XX+) return as-is
+  // 10:XX = 10 AM, 11:XX = 11 AM, 12:XX = 12 PM, 13:XX+ = already correct
   return timePart;
 }
 
@@ -71,9 +74,9 @@ export function isRaceCompleted(raceTime: string, bufferMinutes: number = 120): 
   const [raceHour, raceMinute] = raceTime.split(':').map(Number);
   const [currentHour, currentMinute] = currentTime.split(':').map(Number);
   
-  // Convert race time from AM format to PM (add 12 hours for 01:XX - 11:XX)
+  // Convert race time from stored format to real 24h (only 01:XX-09:XX are PM)
   let adjustedRaceHour = raceHour;
-  if (raceHour >= 1 && raceHour <= 11) {
+  if (raceHour >= 1 && raceHour <= 9) {
     adjustedRaceHour = raceHour + 12;
   }
   
@@ -95,9 +98,9 @@ export function isRaceUpcoming(raceTime: string): boolean {
   const [raceHour, raceMinute] = raceTime.split(':').map(Number);
   const [currentHour, currentMinute] = currentTime.split(':').map(Number);
   
-  // Convert race time from AM format to PM (add 12 hours for 01:XX - 11:XX)
+  // Convert race time from stored format to real 24h (only 01:XX-09:XX are PM)
   let adjustedRaceHour = raceHour;
-  if (raceHour >= 1 && raceHour <= 11) {
+  if (raceHour >= 1 && raceHour <= 9) {
     adjustedRaceHour = raceHour + 12;
   }
   
@@ -124,12 +127,13 @@ export function getQueryDateKey(): string {
 
 /**
  * Convert a stored off_time string (e.g. "01:30", "12:00") to a sortable
- * minutes-since-midnight value. Hours 01-11 are treated as PM (13-23).
+ * minutes-since-midnight value. Only hours 01-09 are PM (13-21).
+ * Hours 10-12 are genuine morning/noon and stay as-is.
  */
 export function raceTimeToMinutes(offTime: string): number {
   if (!offTime) return 0
   const [h, m] = offTime.substring(0, 5).split(':').map(Number)
-  const adjusted = h >= 1 && h <= 11 ? h + 12 : h
+  const adjusted = h >= 1 && h <= 9 ? h + 12 : h
   return adjusted * 60 + (m || 0)
 }
 

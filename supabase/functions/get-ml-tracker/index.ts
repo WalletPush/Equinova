@@ -150,14 +150,15 @@ async function getNextRunnerForModel(modelName, supabaseUrl, supabaseKey) {
     const [curH, curM] = currentLondonTime.split(':').map(Number);
     const curMinutes = curH * 60 + curM;
 
-    // Convert stored off_time to proper 24h minutes (01:XX-11:XX are PM)
+    // Convert stored off_time to proper 24h minutes (only 01:XX-09:XX are PM)
+    // Hours 10-12 are genuine morning/noon times, keep as-is
     function raceTimeToMinutes(t) {
       if (!t) return -1;
       const m = t.match(/(\d{1,2}):(\d{2})/);
       if (!m) return -1;
       const hh = Number(m[1]);
       const mm = Number(m[2]);
-      const adjusted = (hh >= 1 && hh <= 11) ? hh + 12 : hh;
+      const adjusted = (hh >= 1 && hh <= 9) ? hh + 12 : hh;
       return adjusted * 60 + mm;
     }
 

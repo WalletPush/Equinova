@@ -6,6 +6,7 @@ import { AppLayout } from '@/components/AppLayout'
 
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase, RaceEntry } from '@/lib/supabase'
+import { formatTime } from '@/lib/dateUtils'
 import { fetchFromSupabaseFunction } from '@/lib/api'
 import { 
   ArrowLeft, 
@@ -71,10 +72,7 @@ export function RaceDetailPage() {
     }
   }
 
-  const formatTime = (timeString: string) => {
-    if (!timeString) return ''
-    return timeString.substring(0, 5)
-  }
+  // formatTime imported from @/lib/dateUtils
 
   const formatPrize = (prize: string) => {
     if (!prize) return ''

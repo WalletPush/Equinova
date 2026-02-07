@@ -7,7 +7,7 @@ import { ShortlistButton } from '@/components/ShortlistButton'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, Race, callSupabaseFunction } from '@/lib/supabase'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
-import { compareRaceTimes, raceTimeToMinutes } from '@/lib/dateUtils'
+import { compareRaceTimes, raceTimeToMinutes, formatTime } from '@/lib/dateUtils'
 import { 
   Clock, 
   MapPin, 
@@ -295,10 +295,7 @@ export function TodaysRacesPage() {
     // Query will automatically refetch due to key change
   }
 
-  const formatTime = (timeString: string) => {
-    if (!timeString) return ''
-    return timeString.substring(0, 5)
-  }
+  // formatTime imported from @/lib/dateUtils — converts stored times properly
 
   const formatPrize = (prize: string) => {
     if (!prize) return ''

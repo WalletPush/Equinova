@@ -190,11 +190,11 @@ Deno.serve(async (req) => {
     }
 
     // -------- 4) sort and return --------
-    // Convert stored AM times (01:XX-11:XX are PM) to minutes for proper chronological sort
+    // Convert stored times to minutes: only 01:XX-09:XX are PM, 10-12 are morning/noon
     const raceTimeMinutes = (t: string | null): number => {
       if (!t) return 0;
       const [h, m] = t.substring(0, 5).split(":").map(Number);
-      return (h >= 1 && h <= 11 ? h + 12 : h) * 60 + (m || 0);
+      return (h >= 1 && h <= 9 ? h + 12 : h) * 60 + (m || 0);
     };
     results.sort((a, b) => {
       const ta = raceTimeMinutes(a.off_time), tb = raceTimeMinutes(b.off_time);

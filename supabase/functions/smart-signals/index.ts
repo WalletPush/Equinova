@@ -289,8 +289,9 @@ function parseOffTime(offTime: string | null, raceDate: string | null): Date | n
   try {
     const time = offTime.substring(0, 5); // "HH:MM"
     const [hours, minutes] = time.split(":").map(Number);
-    // Race times stored as 01:XX-11:XX are actually PM (13:XX-23:XX)
-    const adjustedHours = hours >= 1 && hours <= 11 ? hours + 12 : hours;
+    // Race times stored as 01:XX-09:XX are PM (13:XX-21:XX)
+    // Hours 10-12 are genuine morning/noon, keep as-is
+    const adjustedHours = hours >= 1 && hours <= 9 ? hours + 12 : hours;
     const adjustedTime = `${String(adjustedHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
     const date = raceDate ?? getUKDate();
     return new Date(`${date}T${adjustedTime}:00`);

@@ -4,6 +4,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { supabase, Race } from '@/lib/supabase'
 import { normalizeField, formatNormalized } from '@/lib/normalize'
+import { formatTime } from '@/lib/dateUtils'
 import { 
   Calendar,
   Clock,
@@ -136,10 +137,7 @@ export function PreviousRacesPage() {
     })
   }
 
-  const formatTime = (timeString: string) => {
-    if (!timeString) return ''
-    return timeString.substring(0, 5)
-  }
+  // formatTime imported from @/lib/dateUtils
 
   const formatPrize = (prize: string) => {
     if (!prize) return ''
