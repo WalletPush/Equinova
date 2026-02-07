@@ -37,11 +37,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     { to: '/short-list', icon: List, label: 'Shortlist', active: 'short-list' },
   ]
 
-  // Add admin-specific navigation items
-  if (profile?.role === 'admin') {
-    navItems.push({ to: '/admin', icon: Shield, label: 'Admin', active: 'admin' })
-    navItems.push({ to: '/performance', icon: TrendingUp, label: 'ML Analytics', active: 'performance' })
-  }
+  const isAdmin = profile?.role === 'admin'
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -93,6 +89,27 @@ export function AppLayout({ children }: AppLayoutProps) {
                   <Settings className="w-4 h-4" />
                   <span>Settings</span>
                 </NavLink>
+                {isAdmin && (
+                  <>
+                    <div className="border-t border-gray-700 my-1" />
+                    <NavLink
+                      to="/admin"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                    >
+                      <Shield className="w-4 h-4" />
+                      <span>Admin</span>
+                    </NavLink>
+                    <NavLink
+                      to="/performance"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      <span>ML Analytics</span>
+                    </NavLink>
+                  </>
+                )}
                 <button
                   onClick={() => {
                     setIsMenuOpen(false)
