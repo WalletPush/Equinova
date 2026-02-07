@@ -232,8 +232,8 @@ export function TodaysRacesPage() {
         const impliedProb = 1 / (odds + 1)
         const edge = normProb - impliedProb
 
-        // Only include horses with a meaningful positive edge (> 2%)
-        if (edge > 0.02) {
+        // Only include horses with a strong positive edge (> 10%)
+        if (edge > 0.10) {
           results.push({
             horse_name: entry.horse_name,
             horse_id: entry.horse_id,
@@ -462,17 +462,25 @@ export function TodaysRacesPage() {
                             </div>
                           </div>
 
-                          {/* Form button */}
-                          <button
-                            onClick={() => openHorseDetail(vb.entry, {
-                              course_name: vb.course_name,
-                              off_time: vb.off_time,
-                              race_id: vb.race_id,
-                            })}
-                            className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
-                          >
-                            Form
-                          </button>
+                          {/* Action buttons */}
+                          <div className="flex flex-col gap-1">
+                            <Link
+                              to={`/race/${vb.race_id}`}
+                              className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors text-center"
+                            >
+                              Race
+                            </Link>
+                            <button
+                              onClick={() => openHorseDetail(vb.entry, {
+                                course_name: vb.course_name,
+                                off_time: vb.off_time,
+                                race_id: vb.race_id,
+                              })}
+                              className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
+                            >
+                              Form
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
