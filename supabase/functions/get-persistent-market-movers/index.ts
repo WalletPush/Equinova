@@ -144,8 +144,12 @@ Deno.serve(async (req)=>{
       });
       return acc;
     }, {});
-    // Convert to array and sort by race time
-    const sortedRaces = Object.values(raceGroups).sort((a, b)=>a.off_time.localeCompare(b.off_time));
+    // Convert to array and sort by race time (handle AM storage: 01:XX-11:XX are PM)
+    const raceTimeMin = (t: string): number => {
+      const [h, m] = t.substring(0, 5).split(":").map(Number);
+      return (h >= 1 && h <= 11 ? h + 12 : h) * 60 + (m || 0);
+    };
+    const sortedRaces = Object.values(raceGroups).sort((a, b) => raceTimeMin(a.off_time) - raceTimeMin(b.off_time));
     console.log(`Grouped into ${sortedRaces.length} races`);
     return new Response(JSON.stringify({
       success: true,

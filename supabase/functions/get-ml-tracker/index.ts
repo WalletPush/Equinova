@@ -145,56 +145,32 @@ async function getNextRunnerForModel(modelName, supabaseUrl, supabaseKey) {
       console.log(`No races found for ${modelName} today`);
       return null;
     }
-    // Current London time as HH:MM
+    // Current London time as HH:MM (24h format)
     const currentLondonTime = new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false, hour: '2-digit', minute: '2-digit' });
+    const [curH, curM] = currentLondonTime.split(':').map(Number);
+    const curMinutes = curH * 60 + curM;
 
-    function normalizeTimeStr(t) {
-      if (!t) return null;
-      // If contains T it's likely an ISO datetime
-      if (t.includes('T')) return t;
-      // Extract HH:MM from formats like '1:15', '13:15', '13:15:00'
-      const m = t.match(/(\d{1,2}:\d{2})/);
-      if (m && m[1]) {
-        const parts = m[1].split(':');
-        const hh = String(Number(parts[0])).padStart(2, '0');
-        return `${hh}:${parts[1]}`;
-      }
-      return null;
+    // Convert stored off_time to proper 24h minutes (01:XX-11:XX are PM)
+    function raceTimeToMinutes(t) {
+      if (!t) return -1;
+      const m = t.match(/(\d{1,2}):(\d{2})/);
+      if (!m) return -1;
+      const hh = Number(m[1]);
+      const mm = Number(m[2]);
+      const adjusted = (hh >= 1 && hh <= 11) ? hh + 12 : hh;
+      return adjusted * 60 + mm;
     }
 
-    // Find the first race that is at or after current London time
+    // Sort races by proper chronological time, then find the first upcoming one
+    racesData.sort((a, b) => raceTimeToMinutes(a.off_time) - raceTimeToMinutes(b.off_time));
+
     let nextRace = null;
     for (const r of racesData) {
-      const off = r.off_time;
-      if (!off) continue;
-      // If off_time looks like ISO datetime, compare Date objects
-      if (off.includes('T')) {
-        const dt = new Date(off);
-        if (isNaN(dt.getTime())) continue;
-        const now = new Date();
-        if (dt > now) {
-          nextRace = r;
-          break;
-        }
-      } else {
-        const m = off.match(/(\d{1,2}):(\d{2})/);
-        if (!m) continue;
-        const hh = Number(m[1]);
-        const mm = m[2];
-        const pad = (n) => String(n).padStart(2, '0');
-        const candidate1 = `${pad(hh)}:${mm}`; // as-is (could be 12-hour)
-        // If hour < 12, also consider adding 12 to interpret as PM (e.g., 01:30 -> 13:30)
-        const candidate2 = hh < 12 ? `${pad((hh % 12) + 12)}:${mm}` : null;
-
-        // Prefer the earliest candidate that is at/after currentLondonTime
-        let chosen = null;
-        if (candidate1 > currentLondonTime) chosen = candidate1;
-        if (!chosen && candidate2 && candidate2 > currentLondonTime) chosen = candidate2;
-        if (chosen) {
-          nextRace = r;
-          break;
-        }
-        // otherwise continue to next race
+      const raceMin = raceTimeToMinutes(r.off_time);
+      if (raceMin < 0) continue;
+      if (raceMin > curMinutes) {
+        nextRace = r;
+        break;
       }
     }
 

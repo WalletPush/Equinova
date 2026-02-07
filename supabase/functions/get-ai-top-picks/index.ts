@@ -190,9 +190,15 @@ Deno.serve(async (req) => {
     }
 
     // -------- 4) sort and return --------
+    // Convert stored AM times (01:XX-11:XX are PM) to minutes for proper chronological sort
+    const raceTimeMinutes = (t: string | null): number => {
+      if (!t) return 0;
+      const [h, m] = t.substring(0, 5).split(":").map(Number);
+      return (h >= 1 && h <= 11 ? h + 12 : h) * 60 + (m || 0);
+    };
     results.sort((a, b) => {
-      const ta = a.off_time ?? "", tb = b.off_time ?? "";
-      if (ta !== tb) return ta < tb ? -1 : 1;               // time first
+      const ta = raceTimeMinutes(a.off_time), tb = raceTimeMinutes(b.off_time);
+      if (ta !== tb) return ta - tb;                          // time first
       if (a.models_agree !== b.models_agree) return b.models_agree - a.models_agree; // agreements next
       return b.max_probability - a.max_probability;         // then prob
     });

@@ -288,8 +288,12 @@ function parseOffTime(offTime: string | null, raceDate: string | null): Date | n
   if (!offTime) return null;
   try {
     const time = offTime.substring(0, 5); // "HH:MM"
+    const [hours, minutes] = time.split(":").map(Number);
+    // Race times stored as 01:XX-11:XX are actually PM (13:XX-23:XX)
+    const adjustedHours = hours >= 1 && hours <= 11 ? hours + 12 : hours;
+    const adjustedTime = `${String(adjustedHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
     const date = raceDate ?? getUKDate();
-    return new Date(`${date}T${time}:00`);
+    return new Date(`${date}T${adjustedTime}:00`);
   } catch {
     return null;
   }

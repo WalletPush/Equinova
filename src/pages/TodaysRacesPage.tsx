@@ -7,6 +7,7 @@ import { ShortlistButton } from '@/components/ShortlistButton'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, Race, callSupabaseFunction } from '@/lib/supabase'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
+import { compareRaceTimes, raceTimeToMinutes } from '@/lib/dateUtils'
 import { 
   Clock, 
   MapPin, 
@@ -160,19 +161,25 @@ export function TodaysRacesPage() {
     const signals: SmartSignal[] = smartSignalsData?.signals ?? []
     if (!signals.length) return []
 
-    const ukNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' }))
+    // Get current UK time as minutes since midnight for proper comparison
+    const ukNowStr = new Date().toLocaleTimeString('en-GB', {
+      timeZone: 'Europe/London',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    const [nowH, nowM] = ukNowStr.split(':').map(Number)
+    const nowMinutes = nowH * 60 + nowM
 
     return signals.filter((s) => {
       // Remove dismissed
       const key = `${s.race_id}::${s.horse_id}`
       if (dismissedSignals.has(key)) return false
 
-      // Remove past races
+      // Remove past races (convert stored AM times to real PM)
       if (s.off_time) {
-        const time = s.off_time.substring(0, 5)
-        const today = selectedDate
-        const raceDate = new Date(`${today}T${time}:00`)
-        if (raceDate <= ukNow) return false
+        const raceMinutes = raceTimeToMinutes(s.off_time)
+        if (raceMinutes <= nowMinutes) return false
       }
       return true
     })
@@ -191,7 +198,10 @@ export function TodaysRacesPage() {
     setDismissedSignals((prev) => new Set(prev).add(`${raceId}::${horseId}`))
   }
 
-  const races = (racesData as any)?.races || []
+  const races = useMemo(() => {
+    const raw = (racesData as any)?.races || []
+    return [...raw].sort((a: Race, b: Race) => compareRaceTimes(a.off_time, b.off_time))
+  }, [racesData])
 
   // ── Value Bet Scanner ──────────────────────────────────────────────
   const [showValueScan, setShowValueScan] = useState(false)

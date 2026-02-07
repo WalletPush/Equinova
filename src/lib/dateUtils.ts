@@ -121,3 +121,23 @@ export function getDateStatusLabel(): string {
 export function getQueryDateKey(): string {
   return getUKDate();
 }
+
+/**
+ * Convert a stored off_time string (e.g. "01:30", "12:00") to a sortable
+ * minutes-since-midnight value. Hours 01-11 are treated as PM (13-23).
+ */
+export function raceTimeToMinutes(offTime: string): number {
+  if (!offTime) return 0
+  const [h, m] = offTime.substring(0, 5).split(':').map(Number)
+  const adjusted = h >= 1 && h <= 11 ? h + 12 : h
+  return adjusted * 60 + (m || 0)
+}
+
+/**
+ * Compare two off_time strings chronologically.
+ * Handles the AM storage quirk (01:00 = 1 PM).
+ * Usage: array.sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
+ */
+export function compareRaceTimes(a: string, b: string): number {
+  return raceTimeToMinutes(a) - raceTimeToMinutes(b)
+}

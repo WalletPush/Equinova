@@ -5,7 +5,8 @@ import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { fetchFromSupabaseFunction, createSupabaseClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
-import { getUKDateTime, formatTime, getQueryDateKey, getDateStatusLabel, isRaceUpcoming } from '@/lib/dateUtils'
+import { getUKDateTime, formatTime, getQueryDateKey, getDateStatusLabel, isRaceUpcoming, compareRaceTimes } from '@/lib/dateUtils'
+import { normalizeField, formatNormalized, getNormalizedColor } from '@/lib/normalize'
 import {
   Brain,
   Target,
@@ -414,11 +415,9 @@ export function AIInsiderPage() {
         return acc
       }, {})
 
-      // Sort races by parsed time (use formatTime output to normalize AM/PM edge cases)
+      // Sort races chronologically (handles AM storage quirk)
       const sortedRaces = Object.values(raceGroups).sort((a: any, b: any) => {
-        const ta = formatTime(a.off_time)
-        const tb = formatTime(b.off_time)
-        return ta.localeCompare(tb)
+        return compareRaceTimes(a.off_time, b.off_time)
       })
 
       console.log('Market movers fetched successfully', { marketMoversCount: marketMovers.length })
@@ -528,7 +527,7 @@ export function AIInsiderPage() {
           const topAny = new Set<string>()
           for (const s of Object.values(topModels)) for (const h of s) topAny.add(h)
 
-          result[raceId] = { topModels, topAny, ensembleMap }
+          result[raceId] = { topModels, topAny, ensembleMap, entries: rows }
         }
 
         return result
@@ -544,6 +543,31 @@ export function AIInsiderPage() {
   })
 
   const topRatedMap = topRatedMapData || {}
+
+  // Compute normalization sums per race for display
+  const raceEnsembleSum = React.useMemo(() => {
+    const sums: Record<string, number> = {}
+    for (const [raceId, data] of Object.entries(topRatedMap)) {
+      const d = data as any
+      if (d.entries?.length) {
+        sums[raceId] = d.entries.reduce(
+          (acc: number, e: any) => acc + (Number(e.ensemble_proba) || 0),
+          0
+        )
+      }
+    }
+    return sums
+  }, [topRatedMap])
+
+  // Normalize a raw ensemble_proba for a specific race
+  const normalizeProba = React.useCallback(
+    (rawProba: number, raceId: string): number => {
+      const sum = raceEnsembleSum[raceId]
+      if (!sum || sum <= 0) return rawProba // fallback to raw
+      return rawProba / sum
+    },
+    [raceEnsembleSum]
+  )
 
   const londonTime = getDateStatusLabel() // Use consistent UK timezone
 
@@ -1305,7 +1329,7 @@ export function AIInsiderPage() {
               ) : upcomingRaces && upcomingRaces.length > 0 ? (
                 <div className="space-y-4">
                   {upcomingRaces
-                    .sort((a, b) => a.off_time.localeCompare(b.off_time)) // Chronological order
+                    .sort((a, b) => compareRaceTimes(a.off_time, b.off_time)) // Chronological order
                     .slice(0, 4) // Show only next 4 upcoming races
                     .map((race) => {
                     const raceInsight = raceInsights[race.race_id]
@@ -1375,8 +1399,8 @@ export function AIInsiderPage() {
                                       silkUrl={pick.silk_url}
                                       className="text-yellow-400 font-bold text-sm"
                                     />
-                                    <span className="text-green-400 font-bold text-sm" title="Raw model confidence score">
-                                      {(pick.ensemble_proba * 100).toFixed(1)}% ML
+                                    <span className={`font-bold text-sm ${getNormalizedColor(normalizeProba(pick.ensemble_proba, race.race_id))}`} title="Normalized win probability">
+                                      {(normalizeProba(pick.ensemble_proba, race.race_id) * 100).toFixed(1)}%
                                     </span>
                                   </div>
                                   <div className="text-xs text-gray-400">
@@ -1672,7 +1696,7 @@ export function AIInsiderPage() {
                       return acc
                     }, {})
 
-                    return Object.values(groupedRaces).map((race: any) => {
+                    return Object.values(groupedRaces).sort((a: any, b: any) => compareRaceTimes(a.off_time, b.off_time)).map((race: any) => {
                       // Use horse-specific insight key so analyses don't collide with race-level insights
                       const topHorseId = race.ai_top_picks?.[0]?.horse_id
                       const insightKey = topHorseId ? `${race.race_id}::${topHorseId}` : race.race_id
@@ -1736,8 +1760,17 @@ export function AIInsiderPage() {
                                       </div>
                                       <div className="text-right">
                                         <div className="text-green-400 font-bold text-lg">{pick.current_odds || 'TBC'}</div>
-                                        <div className="text-yellow-400 font-medium text-sm">
-                                          {pick.max_probability ? `${(pick.max_probability * 100).toFixed(1)}% ML` : 'N/A'}
+                                        <div className={`font-medium text-sm ${
+                                          pick.horse_id && topRatedMap[race.race_id]?.ensembleMap?.[String(pick.horse_id)]
+                                            ? getNormalizedColor(normalizeProba(topRatedMap[race.race_id].ensembleMap[String(pick.horse_id)], race.race_id))
+                                            : 'text-yellow-400'
+                                        }`}>
+                                          {(() => {
+                                            // Use normalized ensemble probability from full race field
+                                            const rawEns = pick.horse_id && topRatedMap[race.race_id]?.ensembleMap?.[String(pick.horse_id)]
+                                            if (rawEns) return `${(normalizeProba(rawEns, race.race_id) * 100).toFixed(1)}%`
+                                            return pick.max_probability ? `${(pick.max_probability * 100).toFixed(1)}% ML` : 'N/A'
+                                          })()}
                                         </div>
                                       </div>
                                     </div>
@@ -1893,7 +1926,7 @@ export function AIInsiderPage() {
                 </div>
               ) : mlValueBets && mlValueBets.length > 0 ? (
                 <div className="space-y-4">
-                  {mlValueBets.map((race) => {
+                  {[...mlValueBets].sort((a, b) => compareRaceTimes(a.off_time, b.off_time)).map((race) => {
                     // Use simple raceId key (like Code 2) to avoid key mismatches
                     const insightKey = race.race_id
                     const raceInsight = raceInsights[insightKey]
@@ -1966,8 +1999,8 @@ export function AIInsiderPage() {
                                     </div>
                                     <div className="text-right">
                                       <div className="text-green-400 font-bold text-lg">{bet.current_odds}/1</div>
-                                      <div className="text-yellow-400 font-medium text-sm" title="Raw model confidence score">
-                                        {(bet.ensemble_proba * 100).toFixed(1)}% ML
+                                      <div className={`font-medium text-sm ${getNormalizedColor(normalizeProba(bet.ensemble_proba, race.race_id))}`} title="Normalized win probability">
+                                        {(normalizeProba(bet.ensemble_proba, race.race_id) * 100).toFixed(1)}%
                                       </div>
                                     </div>
                                   </div>
@@ -1988,7 +2021,7 @@ export function AIInsiderPage() {
                                       source="value_bet"
                                       jockeyName={bet.jockey_name}
                                       trainerName={bet.trainer_name}
-                                      mlInfo={`ML: ${(bet.ensemble_proba * 100).toFixed(1)}% | Models: ${bet.top_in_models.join(', ')}`}
+                                      mlInfo={`ML: ${(normalizeProba(bet.ensemble_proba, race.race_id) * 100).toFixed(1)}% | Models: ${bet.top_in_models.join(', ')}`}
                                       horseId={bet.horse_id}
                                       raceId={race.race_id}
                                     />
@@ -2133,7 +2166,7 @@ export function AIInsiderPage() {
                       off_time: string;
                       intents: typeof trainerIntents;
                     }[])
-                      .sort((a, b) => a.off_time.localeCompare(b.off_time))
+                      .sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
                       .map((raceGroup) => {
                         // Use simple raceId key (like Code 2) to avoid key mismatches
                         const intentInsightKey = raceGroup.race_id
