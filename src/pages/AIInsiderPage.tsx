@@ -633,46 +633,43 @@ export function AIInsiderPage() {
     }
   }
 
-  // Enhanced Value Bet Analysis - EXACT COPY of AI Top Pick with different function call
+  // Enhanced Value Bet Analysis - sends ALL value bet horses in the race for comparative analysis
   const getValueBetAnalysis = async (raceId: string, course: string, offTime: string) => {
     console.log('getValueBetAnalysis called', { raceId, course, offTime })
-    // Find the top value bet (same pattern as AI Top Pick)
-    const targetRace = mlValueBets.find(race => race.race_id === raceId)
+    const targetRace = mlValueBets.find((race: any) => race.race_id === raceId)
     if (!targetRace) {
       throw new Error('No Value Bets found for analysis')
     }
-    const topValueBet = mlValueBets.filter((race: any) => race.race_id === raceId)[0]?.top_value_bets?.[0]
-    if (!topValueBet) {
-      throw new Error('No value bet horse found for analysis')
+    const allValueBets = targetRace.top_value_bets
+    if (!allValueBets?.length) {
+      throw new Error('No value bet horses found for analysis')
     }
-    // Use simple raceId key (like Code 2) to avoid key mismatches
+
     const uiInsightKey = raceId
     if (loadingInsights[uiInsightKey]) return
-
     setLoadingInsights(prev => ({ ...prev, [uiInsightKey]: true }))
 
     try {
-      // Get the horse identifiers from race_entries table
-      const { data: horseData, error: horseError } = await supabase
+      // Look up race_entries IDs for ALL value bet horses in this race
+      const horseNames = allValueBets.map((b: any) => b.horse_name)
+      const { data: horsesData, error: horseError } = await supabase
         .from('race_entries')
-        .select('horse_id,id')
+        .select('horse_id,id,horse_name')
         .eq('race_id', raceId)
-        .eq('horse_name', topValueBet.horse_name)
-        .single()
+        .in('horse_name', horseNames)
 
-      if (horseError || !horseData) {
-        throw new Error(`Failed to find horse ID for ${topValueBet.horse_name}`)
+      if (horseError || !horsesData?.length) {
+        throw new Error(`Failed to find horse IDs for ${horseNames.join(', ')}`)
       }
 
-      // Store result using simple raceId key
       const finalInsightKey = raceId
 
-      // ONLY DIFFERENCE: Call enhanced-value-bet-analysis instead of ai-race-analysis
+      // Send ALL value bet horse IDs for comparative analysis
       const response = await fetchFromSupabaseFunction('enhanced-value-bet-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseId: horseData.id.toString(),
+          horseIds: horsesData.map((h: any) => h.id.toString()),
           openaiApiKey: profile?.openai_api_key
         })
       })
@@ -693,7 +690,7 @@ export function AIInsiderPage() {
         timestamp: new Date().toISOString()
       }
       setRaceInsights(prev => ({ ...prev, [finalInsightKey]: analysisData }))
-      console.log(`Value Bet analysis completed for race ${raceId}`)
+      console.log(`Value Bet analysis completed for race ${raceId} (${horsesData.length} horses analyzed)`)
     } catch (error) {
       console.error(`Failed to get Value Bet analysis for race ${raceId}:`, error)
       const errorData: AIMarketInsight = {
