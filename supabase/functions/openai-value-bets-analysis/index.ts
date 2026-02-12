@@ -17,15 +17,20 @@ serve(async (req) => {
   }
 
   try {
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!openaiApiKey || !supabaseUrl || !supabaseServiceKey) {
-      throw new Error('Missing required API keys or Supabase configuration');
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('Missing Supabase configuration');
     }
 
     const requestData = await req.json();
     const { raceId, horseId, horseIds } = requestData;
+
+    // Use env var first, fall back to request body (user's own key)
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY') || requestData.openaiApiKey;
+    if (!openaiApiKey) {
+      throw new Error('Missing OpenAI API key - set OPENAI_API_KEY env var or pass openaiApiKey in request');
+    }
 
     // Support both legacy single horseId and new horseIds array
     const targetIds: string[] = horseIds?.length
