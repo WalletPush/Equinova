@@ -65,6 +65,8 @@ interface MLTrackerData {
   total_races_today: number
   completed_races: number
   results_source: string
+  abandoned_courses: string[]
+  abandoned_count: number
 }
 
 const MODEL_NAMES = ['mlp', 'rf', 'xgboost', 'benter', 'ensemble'] as const
@@ -123,18 +125,23 @@ const PROBA_FIELDS: Record<ModelName, string> = {
 }
 
 /**
- * Try to get race results from multiple sources:
- * 1. race_runners table (populated by fetch-race-results edge function)
- * 2. race_entries.finishing_position (populated by update-race-results-and-bets)
- * 3. ml_model_race_results table (populated by populate-ml-performance-data)
+ * Strip country suffix e.g. "(IRE)", "(GB)", "(FR)" for name matching
+ */
+function bareHorseName(name: string): string {
+  return name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+}
+
+/**
+ * Fetch actual race results from race_runners table.
+ * Returns positions keyed by bare horse name (lowercase, no country suffix)
+ * so we can match against race_entries.horse_name reliably.
  */
 async function fetchRacePositions(
   raceIds: string[]
 ): Promise<{ positions: Record<string, Record<string, number>>; source: string }> {
-  // positions = { race_id -> { horse_id -> finishing_position } }
+  // positions = { race_id -> { bareHorseName -> finishing_position } }
   const positions: Record<string, Record<string, number>> = {}
 
-  // Source 1: race_runners table
   try {
     const batchSize = 50
     let allRunners: any[] = []
@@ -142,7 +149,7 @@ async function fetchRacePositions(
       const batch = raceIds.slice(i, i + batchSize)
       const { data: runners, error } = await supabase
         .from('race_runners')
-        .select('race_id, horse_id, position, horse')
+        .select('race_id, position, horse')
         .in('race_id', batch)
         .not('position', 'is', null)
         .gt('position', 0)
@@ -153,7 +160,7 @@ async function fetchRacePositions(
     if (allRunners.length > 0) {
       for (const r of allRunners) {
         if (!positions[r.race_id]) positions[r.race_id] = {}
-        positions[r.race_id][r.horse_id] = Number(r.position)
+        positions[r.race_id][bareHorseName(r.horse)] = Number(r.position)
       }
       console.log(`ML Tracker: Got ${allRunners.length} results from race_runners for ${Object.keys(positions).length} races`)
       return { positions, source: 'race_runners' }
@@ -161,58 +168,6 @@ async function fetchRacePositions(
     console.log('ML Tracker: race_runners returned no data')
   } catch (e) {
     console.warn('ML Tracker: race_runners query failed:', e)
-  }
-
-  // Source 2: race_entries.finishing_position
-  try {
-    const batchSize = 50
-    let allEntries: any[] = []
-    for (let i = 0; i < raceIds.length; i += batchSize) {
-      const batch = raceIds.slice(i, i + batchSize)
-      const { data: entries, error } = await supabase
-        .from('race_entries')
-        .select('race_id, horse_id, finishing_position')
-        .in('race_id', batch)
-        .not('finishing_position', 'is', null)
-        .gt('finishing_position', 0)
-      if (!error && entries && entries.length > 0) {
-        allEntries = allEntries.concat(entries)
-      }
-    }
-    if (allEntries.length > 0) {
-      for (const e of allEntries) {
-        if (!positions[e.race_id]) positions[e.race_id] = {}
-        positions[e.race_id][e.horse_id] = Number(e.finishing_position)
-      }
-      console.log(`ML Tracker: Got ${allEntries.length} results from race_entries.finishing_position for ${Object.keys(positions).length} races`)
-      return { positions, source: 'race_entries' }
-    }
-    console.log('ML Tracker: race_entries.finishing_position all null')
-  } catch (e) {
-    console.warn('ML Tracker: race_entries finishing_position query failed:', e)
-  }
-
-  // Source 3: ml_model_race_results
-  try {
-    const today = getUKDate()
-    const { data: mlResults, error } = await supabase
-      .from('ml_model_race_results')
-      .select('race_id, horse_id, actual_position, is_winner, model_name')
-      .gte('created_at', `${today}T00:00:00.000Z`)
-      .lt('created_at', `${today}T23:59:59.999Z`)
-    if (!error && mlResults && mlResults.length > 0) {
-      for (const r of mlResults) {
-        if (!positions[r.race_id]) positions[r.race_id] = {}
-        if (r.actual_position && r.actual_position > 0) {
-          positions[r.race_id][r.horse_id] = Number(r.actual_position)
-        }
-      }
-      console.log(`ML Tracker: Got ${mlResults.length} results from ml_model_race_results for ${Object.keys(positions).length} races`)
-      return { positions, source: 'ml_model_race_results' }
-    }
-    console.log('ML Tracker: ml_model_race_results empty for today')
-  } catch (e) {
-    console.warn('ML Tracker: ml_model_race_results query failed:', e)
   }
 
   return { positions, source: 'none' }
@@ -231,10 +186,10 @@ export function MLTrackerPage() {
       const today = getUKDate()
       console.log('ML Tracker: Fetching races for', today)
 
-      // Step 1: Get all today's races
-      const { data: races, error: racesError } = await supabase
+      // Step 1: Get all today's races (including going and is_abandoned to detect abandoned)
+      const { data: allRaces, error: racesError } = await supabase
         .from('races')
-        .select('race_id, off_time, course_name, date')
+        .select('race_id, off_time, course_name, date, going, is_abandoned, race_status')
         .eq('date', today)
 
       if (racesError) {
@@ -242,7 +197,7 @@ export function MLTrackerPage() {
         throw new Error('Failed to fetch races: ' + racesError.message)
       }
 
-      if (!races || races.length === 0) {
+      if (!allRaces || allRaces.length === 0) {
         return {
           models: MODEL_NAMES.map(name => ({
             model_name: name,
@@ -260,9 +215,26 @@ export function MLTrackerPage() {
           last_updated: new Date().toISOString(),
           total_races_today: 0,
           completed_races: 0,
-          results_source: 'none'
+          results_source: 'none',
+          abandoned_courses: [],
+          abandoned_count: 0
         }
       }
+
+      // Filter out abandoned races (check going field, is_abandoned column, and race_status)
+      const isAbandoned = (r: any) =>
+        r.going?.toLowerCase() === 'abandoned' ||
+        r.is_abandoned === true ||
+        r.race_status === 'abandoned'
+      const abandonedRaceIds = new Set(
+        allRaces.filter(isAbandoned).map(r => r.race_id)
+      )
+      const abandonedCourses = [...new Set(
+        allRaces.filter(isAbandoned).map(r => r.course_name)
+      )]
+      const races = allRaces.filter(r => !isAbandoned(r))
+      
+      console.log(`ML Tracker: ${allRaces.length} total races, ${abandonedRaceIds.size} abandoned (${abandonedCourses.join(', ')}), ${races.length} active`)
 
       const raceIds = races.map(r => r.race_id)
       console.log(`ML Tracker: Found ${races.length} races, fetching entries and results...`)
@@ -318,25 +290,47 @@ export function MLTrackerPage() {
           const raceInfo = raceInfoMap[raceId]
           const racePositions = positions[raceId] || {}
 
-          // Find the model's top pick
-          let topPick: any = null
-          let topProba = -1
-          for (const entry of entries) {
-            const proba = Number(entry[probaField]) || 0
-            if (proba > topProba) {
-              topProba = proba
-              topPick = entry
+          // Sort entries by model probability (descending) to find best pick
+          const sortedEntries = entries
+            .map((entry: any) => ({ entry, proba: Number(entry[probaField]) || 0 }))
+            .filter((e: any) => e.proba > 0)
+            .sort((a: any, b: any) => b.proba - a.proba)
+
+          if (sortedEntries.length === 0) continue
+
+          // Walk down the ranked picks to find the highest-rated horse that actually ran.
+          // If the top pick was a non-runner, fall through to the next best pick.
+          let matchedPick: any = null
+          let matchedProba = 0
+          let matchedPos: number | undefined
+
+          for (const { entry, proba } of sortedEntries) {
+            const bareName = bareHorseName(entry.horse_name)
+            // Try exact bare match first
+            let pos = racePositions[bareName]
+            // Fuzzy fallback: startsWith in either direction for slight name discrepancies
+            if (pos === undefined) {
+              for (const [resultName, resultPos] of Object.entries(racePositions)) {
+                if (resultName.startsWith(bareName) || bareName.startsWith(resultName)) {
+                  pos = resultPos
+                  break
+                }
+              }
             }
+            if (pos !== undefined) {
+              matchedPick = entry
+              matchedProba = proba
+              matchedPos = pos
+              break
+            }
+            // This horse was a non-runner (not in results) — try next pick
           }
 
-          if (!topPick || topProba <= 0) continue
+          // If no pick could be matched to results at all, skip this race entirely
+          if (!matchedPick || matchedPos === undefined) continue
 
-          // Look up this horse's finishing position
-          const pos = racePositions[topPick.horse_id]
-          if (!pos || pos < 1) continue // No result for this horse
-
-          const isWinner = pos === 1
-          const isTop3 = pos >= 1 && pos <= 3
+          const isWinner = matchedPos === 1
+          const isTop3 = matchedPos >= 1 && matchedPos <= 3
 
           if (isWinner) racesWon++
           else racesLost++
@@ -346,9 +340,9 @@ export function MLTrackerPage() {
             race_id: raceId,
             course: raceInfo?.course_name || 'Unknown',
             off_time: raceInfo?.off_time || '',
-            horse_name: topPick.horse_name || 'Unknown',
-            probability: topProba,
-            finishing_position: pos,
+            horse_name: matchedPick.horse_name || 'Unknown',
+            probability: matchedProba,
+            finishing_position: matchedPos,
             is_winner: isWinner
           })
         }
@@ -418,7 +412,9 @@ export function MLTrackerPage() {
         last_updated: new Date().toISOString(),
         total_races_today: races.length,
         completed_races: completedRaceIds.size,
-        results_source: source
+        results_source: source,
+        abandoned_courses: abandonedCourses,
+        abandoned_count: abandonedRaceIds.size
       }
     },
     staleTime: 1000 * 30,
@@ -441,40 +437,37 @@ export function MLTrackerPage() {
   // Trigger result fetching for completed races that don't have results yet
   const handleFetchResults = async () => {
     setIsFetchingResults(true)
-    setFetchStatus('Triggering result fetching...')
+    setFetchStatus('Checking for completed race results...')
     try {
-      // First try calling the race-results-scheduler
+      // First try the batch scheduler
       try {
-        setFetchStatus('Calling race-results-scheduler...')
+        setFetchStatus('Scanning for new results...')
         const { data: schedulerData, error: schedulerError } = await supabase.functions.invoke('race-results-scheduler', {
           body: { limit: 50, rateMs: 300 }
         })
         if (!schedulerError && schedulerData) {
           const readyCount = schedulerData.ready_count || schedulerData.data?.ready_count || 0
-          const msg = schedulerData.message || schedulerData.data?.message || ''
-          setFetchStatus(`Scheduler: ${msg} (${readyCount} results fetched)`)
           if (readyCount > 0) {
-            // Results were fetched - now trigger update-race-results-and-bets for each
-            // and refresh the tracker
+            setFetchStatus(`Found ${readyCount} new results, updating tracker...`)
             await new Promise(r => setTimeout(r, 2000))
             await refetch()
-            setFetchStatus(`Done! ${readyCount} race results fetched and loaded.`)
+            setFetchStatus(`Done! ${readyCount} new race results loaded.`)
             return
           }
         }
       } catch (schedulerErr) {
-        console.warn('race-results-scheduler failed, trying individual fetch:', schedulerErr)
+        console.warn('Batch scheduler unavailable, trying individual fetch:', schedulerErr)
       }
 
       // Fallback: fetch results one by one for completed races
       const today = getUKDate()
       const { data: races } = await supabase
         .from('races')
-        .select('race_id, off_time')
+        .select('race_id, off_time, course_name')
         .eq('date', today)
 
       if (!races || races.length === 0) {
-        setFetchStatus('No races found for today')
+        setFetchStatus('No races scheduled for today.')
         return
       }
 
@@ -488,43 +481,58 @@ export function MLTrackerPage() {
         return raceMin > 0 && (curMinutes - raceMin) > 10
       })
 
+      if (completedRaces.length === 0) {
+        setFetchStatus('No completed races found yet. Results will appear once races finish.')
+        return
+      }
+
       setFetchStatus(`Fetching results for ${completedRaces.length} completed races...`)
       let fetched = 0
       let errors = 0
+      let notReady = 0
 
       for (let i = 0; i < completedRaces.length; i++) {
         const race = completedRaces[i]
-        setFetchStatus(`Fetching ${i + 1}/${completedRaces.length}: ${race.race_id}...`)
+        const courseName = race.course_name || 'Race'
+        const raceTime = formatTime(race.off_time)
+        setFetchStatus(`Loading results (${i + 1}/${completedRaces.length}): ${courseName} ${raceTime}...`)
         try {
           const { data, error } = await supabase.functions.invoke('fetch-race-results', {
             body: { race_id: race.race_id }
           })
           if (!error && data?.success) {
             fetched++
-            // Also trigger the update function to write finishing_position back
+            // Also update finishing positions
             try {
               await supabase.functions.invoke('update-race-results-and-bets', {
                 body: { race_id: race.race_id }
               })
             } catch { /* ignore */ }
+          } else if (data?.code === 'RESULT_NOT_AVAILABLE') {
+            notReady++
           }
         } catch (e) {
           errors++
-          console.warn(`Failed to fetch results for ${race.race_id}:`, e)
+          console.warn(`Failed to fetch results for ${race.course_name}:`, e)
         }
-        // Small delay to avoid rate limiting
+        // Small delay between requests
         if (i < completedRaces.length - 1) {
           await new Promise(r => setTimeout(r, 500))
         }
       }
 
-      setFetchStatus(`Done! Fetched ${fetched} results (${errors} errors). Refreshing...`)
+      const parts = []
+      if (fetched > 0) parts.push(`${fetched} results loaded`)
+      if (notReady > 0) parts.push(`${notReady} not yet available`)
+      if (errors > 0) parts.push(`${errors} failed`)
+
+      setFetchStatus(`Done! ${parts.join(', ')}. Refreshing tracker...`)
       await new Promise(r => setTimeout(r, 1000))
       await refetch()
-      setFetchStatus(`Complete: ${fetched} race results loaded.`)
+      setFetchStatus(`Complete: ${parts.join(', ')}.`)
     } catch (err: any) {
       console.error('Error fetching results:', err)
-      setFetchStatus(`Error: ${err.message || 'Failed to fetch results'}`)
+      setFetchStatus('Something went wrong while fetching results. Please try again.')
     } finally {
       setIsFetchingResults(false)
     }
@@ -614,40 +622,63 @@ export function MLTrackerPage() {
           </div>
         </div>
 
-        {/* Fetch Results Banner - shown when no results are available */}
-        {hasNoResults && (
-          <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
+        {/* Get Latest Results Banner */}
+        <div className="mb-6 p-4 bg-gray-800/80 border border-gray-700 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              {hasNoResults ? (
                 <AlertCircle className="w-6 h-6 text-yellow-400" />
-                <div>
-                  <h3 className="text-yellow-400 font-semibold">No Race Results Found</h3>
-                  <p className="text-gray-400 text-sm">
-                    Race results need to be fetched from the Racing API. Click "Fetch Results" to pull in today's finished race results.
-                  </p>
-                </div>
+              ) : (
+                <CheckCircle className="w-6 h-6 text-green-400" />
+              )}
+              <div>
+                {hasNoResults ? (
+                  <>
+                    <h3 className="text-yellow-400 font-semibold">No Race Results Yet</h3>
+                    <p className="text-gray-400 text-sm">
+                      Click "Get Latest Results" to pull in the latest finishing positions for completed races.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-green-400 font-semibold">
+                      {mlTrackerData?.completed_races || 0} Race Results Loaded
+                    </h3>
+                    <p className="text-gray-400 text-sm">
+                      Click "Get Latest Results" to check for any new results from recently finished races.
+                    </p>
+                  </>
+                )}
               </div>
-              <button
-                onClick={handleFetchResults}
-                disabled={isFetchingResults}
-                className="bg-yellow-500 hover:bg-yellow-600 disabled:bg-yellow-500/50 text-gray-900 font-semibold px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 whitespace-nowrap"
-              >
-                <Download className={`w-4 h-4 ${isFetchingResults ? 'animate-bounce' : ''}`} />
-                <span>{isFetchingResults ? 'Fetching...' : 'Fetch Results'}</span>
-              </button>
             </div>
-            {fetchStatus && (
-              <p className="mt-3 text-sm text-gray-300 bg-gray-800/50 p-2 rounded">
-                {fetchStatus}
-              </p>
-            )}
+            <button
+              onClick={handleFetchResults}
+              disabled={isFetchingResults}
+              className={`${hasNoResults ? 'bg-yellow-500 hover:bg-yellow-600 disabled:bg-yellow-500/50 text-gray-900' : 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 text-white'} font-semibold px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 whitespace-nowrap`}
+            >
+              <Download className={`w-4 h-4 ${isFetchingResults ? 'animate-bounce' : ''}`} />
+              <span>{isFetchingResults ? 'Loading...' : 'Get Latest Results'}</span>
+            </button>
           </div>
-        )}
+          {fetchStatus && (
+            <p className="mt-3 text-sm text-gray-300 bg-gray-800/50 p-2 rounded">
+              {fetchStatus}
+            </p>
+          )}
+        </div>
 
-        {/* Data source indicator */}
-        {mlTrackerData?.results_source && mlTrackerData.results_source !== 'none' && (
-          <div className="mb-4 text-xs text-gray-500">
-            Results source: {mlTrackerData.results_source}
+        {/* Abandoned Meeting Banner */}
+        {mlTrackerData?.abandoned_count && mlTrackerData.abandoned_count > 0 && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <div className="flex items-center space-x-3">
+              <AlertCircle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <div>
+                <h3 className="text-red-400 font-semibold">Meeting Abandoned</h3>
+                <p className="text-gray-400 text-sm">
+                  {mlTrackerData.abandoned_courses.join(', ')} — {mlTrackerData.abandoned_count} race{mlTrackerData.abandoned_count > 1 ? 's' : ''} abandoned and excluded from results.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -819,7 +850,7 @@ export function MLTrackerPage() {
                     <div className="flex items-center space-x-2">
                       <Clock className="w-4 h-4 text-gray-400" />
                       <span className="text-sm text-gray-400">
-                        No results yet — click "Fetch Results" above
+                        No results yet — click "Get Latest Results" above
                       </span>
                     </div>
                   </div>

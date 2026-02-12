@@ -183,6 +183,17 @@ export function RaceDetailPage() {
           </div>
         </div>
 
+        {/* Abandoned Race Warning */}
+        {(race.going?.toLowerCase() === 'abandoned' || race.is_abandoned === true || race.race_status === 'abandoned') && (
+          <div className="bg-red-500/15 border border-red-500/40 rounded-xl p-4 flex items-center space-x-3">
+            <span className="text-red-400 text-2xl flex-shrink-0">&#x26A0;</span>
+            <div>
+              <p className="text-red-400 font-semibold text-lg">Meeting Abandoned</p>
+              <p className="text-gray-400 text-sm">This race was abandoned and will not take place. All predictions and analysis are void.</p>
+            </div>
+          </div>
+        )}
+
         {/* Race Info */}
         <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -192,7 +203,7 @@ export function RaceDetailPage() {
             </div>
             <div>
               <div className="text-sm text-gray-400">Going</div>
-              <div className="text-white font-medium">{race.going}</div>
+              <div className={`font-medium ${(race.going?.toLowerCase() === 'abandoned' || race.is_abandoned === true) ? 'text-red-400' : 'text-white'}`}>{race.is_abandoned ? 'Abandoned' : race.going}</div>
             </div>
             <div>
               <div className="text-sm text-gray-400">Surface</div>

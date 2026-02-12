@@ -1,7 +1,7 @@
 // API client utilities
 const getSupabaseConfig = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL || 'https://zjqojacejstbqmxzstyk.supabase.co'
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqcW9qYWNlanN0YnFteHpzdHlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNjM2OTYsImV4cCI6MjA3MTkzOTY5Nn0.G8JPyYNQkH1IKiRAyluZ4fOAZjGoRZ7judlKphdkYks'
+  const url = import.meta.env.VITE_SUPABASE_URL || 'https://nzabewdpotnlttftimej.supabase.co'
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56YWJld2Rwb3RubHR0ZnRpbWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0Nzk2NzYsImV4cCI6MjA4NjA1NTY3Nn0.tdmtly1nth6-9JQZv31gmJgFS_bpuhy97IOpWY228CE'
   
   if (!url || !anonKey) {
     throw new Error('Missing Supabase environment variables. Check your .env file.')
