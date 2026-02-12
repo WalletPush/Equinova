@@ -102,13 +102,18 @@ Deno.serve(async (req) => {
       return { ...r, norm, avgWinPct, impliedPct, valueEdge };
     });
 
-    // Split into target value bet horses and other runners
+    // Split into target value bet horses and other runners, SORT BY VALUE EDGE (highest first = best pick)
     const targetIdSet = new Set(targetIds.map(String));
-    const targetHorses = normalized.filter((h: any) => targetIdSet.has(String(h.id)));
+    const targetHorses = normalized
+      .filter((h: any) => targetIdSet.has(String(h.id)))
+      .sort((a: any, b: any) => b.valueEdge - a.valueEdge);
     const otherRunners = normalized.filter((h: any) => !targetIdSet.has(String(h.id)));
     if (!targetHorses.length) throw new Error('Failed to match target horse data');
 
-    // Build per-horse analysis blocks with NORMALIZED probabilities and value edge
+    // The TOP PICK is always the horse with the highest value edge
+    const topPick = targetHorses[0];
+
+    // Build per-horse data blocks
     const valueBetBlocks = targetHorses.map((horse: any, idx: number) => {
       const bestModel = (['Ensemble', 'MLP', 'XGBoost', 'RF', 'Benter'] as const).reduce(
         (best, name, i) => {
@@ -118,69 +123,67 @@ Deno.serve(async (req) => {
         { name: 'Ensemble', pct: horse.norm.ensemble_proba }
       );
 
-      return `VALUE BET #${idx + 1}: ${horse.horse_name}
-- Odds: ${horse.current_odds} (market implied win chance: ${horse.impliedPct.toFixed(1)}%)
-- ML Average Win Probability: ${horse.avgWinPct.toFixed(1)}% (normalized across the field)
-- VALUE EDGE: ${horse.valueEdge.toFixed(1)}x (ML thinks ${horse.valueEdge > 1 ? 'MORE likely to win than odds suggest' : 'less likely'})
-- Best ML Model: ${bestModel.name} at ${bestModel.pct.toFixed(1)}%
-- All Normalized ML Win%: Ensemble ${horse.norm.ensemble_proba.toFixed(1)}%, MLP ${horse.norm.mlp_proba.toFixed(1)}%, XGB ${horse.norm.xgboost_proba.toFixed(1)}%, RF ${horse.norm.rf_proba.toFixed(1)}%, Benter ${horse.norm.benter_proba.toFixed(1)}%
-- Trainer: ${horse.trainer_name}, Jockey: ${horse.jockey_name}
-- Form: ${horse.form}`;
+      return `${idx === 0 ? 'TOP PICK' : 'SECONDARY'}: ${horse.horse_name} at ${horse.current_odds} odds
+  Value Edge: ${horse.valueEdge.toFixed(1)}x | ML Win%: ${horse.avgWinPct.toFixed(1)}% vs Market Implied: ${horse.impliedPct.toFixed(1)}%
+  Best Model: ${bestModel.name} at ${bestModel.pct.toFixed(1)}%
+  Models: Ens ${horse.norm.ensemble_proba.toFixed(1)}%, MLP ${horse.norm.mlp_proba.toFixed(1)}%, XGB ${horse.norm.xgboost_proba.toFixed(1)}%, RF ${horse.norm.rf_proba.toFixed(1)}%, Benter ${horse.norm.benter_proba.toFixed(1)}%
+  Trainer: ${horse.trainer_name} | Jockey: ${horse.jockey_name} | Form: ${horse.form}`;
     }).join('\n\n');
 
-    // Other runners text with normalized data
+    // Other runners summary
     const otherHorsesText = otherRunners.map((r: any, i: number) =>
-      `${i + 1}. ${r.horse_name} - Odds: ${r.current_odds}, ML Win%: ${r.avgWinPct.toFixed(1)}%, Value Edge: ${r.valueEdge.toFixed(1)}x, Form: ${r.form}, Trainer: ${r.trainer_name}, Jockey: ${r.jockey_name}`
-    ).join('\n') || 'No other runners found';
+      `${i + 1}. ${r.horse_name} - ${r.current_odds} odds, ML Win%: ${r.avgWinPct.toFixed(1)}%, Edge: ${r.valueEdge.toFixed(1)}x, Form: ${r.form}`
+    ).join('\n') || 'No other runners';
 
-    // Find the favorite (lowest odds)
     const favorite = otherRunners.length
       ? otherRunners.reduce((min: any, r: any) => Number(r.current_odds) < Number(min.current_odds) ? r : min, otherRunners[0])
       : null;
 
     const isMultiple = targetHorses.length > 1;
-    const horseNames = targetHorses.map((h: any) => h.horse_name).join(' and ');
 
     const prompt = isMultiple
-      ? `You are analyzing ${targetHorses.length} CONFIRMED value bets in the ${raceData.off_time} ${raceData.type} ${raceData.race_class || ''} at ${raceData.course_name}.
-Going: ${raceData.going || 'Unknown'}, Distance: ${raceData.distance || 'Unknown'}, Surface: ${raceData.surface || 'Unknown'}
-Field size: ${allEntries.length} runners
+      ? `Race: ${raceData.off_time} ${raceData.type} ${raceData.race_class || ''} at ${raceData.course_name}
+Conditions: ${raceData.going || 'Unknown'} going, ${raceData.distance || 'Unknown'}, ${raceData.surface || 'Unknown'}
+Field: ${allEntries.length} runners
 
-CRITICAL CONTEXT: These horses have been flagged as VALUE BETS by our ML system. A value bet means the ML models believe the horse has a HIGHER true chance of winning than the betting market implies. A value edge of 2.0x means the ML models rate the horse as twice as likely to win as the odds suggest. These are long-shot plays where the market is UNDERRATING the horse. Your job is to determine WHICH value bet is the strongest play, NOT to dismiss them.
-
-${valueBetBlocks}
-
-Other runners in the field:
-${otherHorsesText}
-
-${favorite ? `Market favorite: ${favorite.horse_name} at ${favorite.current_odds} (ML Win%: ${favorite.avgWinPct.toFixed(1)}%, Value Edge: ${favorite.valueEdge.toFixed(1)}x)` : ''}
-
-For EACH value bet horse, analyze:
-1. **Why the ML models rate this horse higher than the market** — what the market might be missing (form cycles, trainer patterns, conditions, class drop, etc.)
-2. **Strengths that could cause an upset** — any factors that support the ML edge
-3. **Risks** — what could go wrong
-
-Then:
-4. **Head-to-Head**: Compare ${horseNames} directly — which has the stronger value case and why?
-5. **Final Recommendation**: Which value bet to back, at what stake level (e.g., small/medium), and why. You MUST recommend at least one — these are value bets, the whole point is backing horses the market underrates.`
-      : `You are analyzing a CONFIRMED value bet in the ${raceData.off_time} ${raceData.type} ${raceData.race_class || ''} at ${raceData.course_name}.
-Going: ${raceData.going || 'Unknown'}, Distance: ${raceData.distance || 'Unknown'}, Surface: ${raceData.surface || 'Unknown'}
-Field size: ${allEntries.length} runners
-
-CRITICAL CONTEXT: This horse has been flagged as a VALUE BET by our ML system. The ML models believe it has a HIGHER true chance of winning than the betting market implies. Your job is to analyze WHY this horse represents value and how to play it, NOT to dismiss it.
+These ${targetHorses.length} horses are CONFIRMED ML value bets, ranked by value edge. The horse with the highest value edge is the TOP PICK.
 
 ${valueBetBlocks}
 
-Other runners in the field:
+Rest of field:
 ${otherHorsesText}
+${favorite ? `Favorite: ${favorite.horse_name} at ${favorite.current_odds} (ML Win%: ${favorite.avgWinPct.toFixed(1)}%)` : ''}
 
-${favorite ? `Market favorite: ${favorite.horse_name} at ${favorite.current_odds} (ML Win%: ${favorite.avgWinPct.toFixed(1)}%, Value Edge: ${favorite.valueEdge.toFixed(1)}x)` : ''}
+THE TOP PICK IS ${topPick.horse_name} (${topPick.valueEdge.toFixed(1)}x edge). This is non-negotiable — the highest value edge determines the pick.
 
-Analyze:
-1. **Why the ML models rate this horse higher than the market** — what might the market be missing?
-2. **Upset potential** — form, trainer intent, conditions, anything supporting the value edge
-3. **Key risks** — what needs to go right for this horse to hit
-4. **Betting recommendation** — stake level (small/medium) and confidence. This IS a value bet — recommend how to play it.`;
+Write your analysis as follows. Use PLAIN TEXT only — no markdown, no bold, no headers, no bullet points. Write in short clear paragraphs.
+
+Paragraph 1 — TOP PICK VERDICT: State ${topPick.horse_name} is the value pick at ${topPick.current_odds} with a ${topPick.valueEdge.toFixed(1)}x edge. The ML models give it a ${topPick.avgWinPct.toFixed(1)}% win chance vs the market's ${topPick.impliedPct.toFixed(1)}%. Explain in 2-3 sentences what the market is likely missing.
+
+Paragraph 2 — WHY THE EDGE EXISTS: Explain what could be driving the ML confidence — form patterns, trainer intent, class level, conditions, anything that supports the edge.
+
+Paragraph 3 — THE OTHER VALUE BET: Briefly cover ${targetHorses.length > 1 ? targetHorses[1].horse_name : 'N/A'} as a secondary option with its ${targetHorses.length > 1 ? targetHorses[1].valueEdge.toFixed(1) : '0'}x edge. Explain why it ranks below the top pick.
+
+Paragraph 4 — RISKS AND STAKES: What needs to go right. Recommend stake sizing (small stake for high-odds picks, medium for shorter odds). End with a clear one-line verdict.`
+      : `Race: ${raceData.off_time} ${raceData.type} ${raceData.race_class || ''} at ${raceData.course_name}
+Conditions: ${raceData.going || 'Unknown'} going, ${raceData.distance || 'Unknown'}, ${raceData.surface || 'Unknown'}
+Field: ${allEntries.length} runners
+
+This horse is a CONFIRMED ML value bet:
+
+${valueBetBlocks}
+
+Rest of field:
+${otherHorsesText}
+${favorite ? `Favorite: ${favorite.horse_name} at ${favorite.current_odds} (ML Win%: ${favorite.avgWinPct.toFixed(1)}%)` : ''}
+
+Write your analysis as follows. Use PLAIN TEXT only — no markdown, no bold, no headers, no bullet points. Write in short clear paragraphs.
+
+Paragraph 1 — VERDICT: ${topPick.horse_name} is the value pick at ${topPick.current_odds} with a ${topPick.valueEdge.toFixed(1)}x edge. ML gives it ${topPick.avgWinPct.toFixed(1)}% vs the market's ${topPick.impliedPct.toFixed(1)}%. Explain what the market is missing.
+
+Paragraph 2 — WHY THE EDGE EXISTS: What drives the ML confidence — form, trainer, conditions, class.
+
+Paragraph 3 — RISKS AND STAKES: What needs to go right. Recommend stake sizing. End with a clear one-line verdict.`;
 
     // Call OpenAI API via model fallback helper — increase max_tokens for multi-horse analysis
     const maxTokens = isMultiple ? 1500 : 1000;
@@ -188,7 +191,7 @@ Analyze:
     const openaiData = await callOpenAI(openaiApiKey, [
       {
         role: 'system',
-        content: 'You are a professional value bettor and horse racing analyst. You understand that value betting means backing horses where the true probability of winning is HIGHER than what the market odds imply — the market is underrating them. All ML probabilities shown are NORMALIZED win percentages that sum to 100% across the field. A "value edge" of 2.0x means the ML models think the horse is twice as likely to win as the odds suggest. Your job is to explain WHY a value bet is worth backing, identify what the market is missing, and recommend which bet to place. You should NEVER dismiss a confirmed value bet — instead, rank them and recommend the best play with appropriate stake sizing.'
+        content: 'You are a value betting analyst. The horse with the HIGHEST value edge is always the top pick — this is determined by the data, not your opinion. A value edge of 3x means the ML models rate a horse 3 times more likely to win than the market odds imply. Your job is to explain WHY the edge exists, what the market is missing, and how to play it. NEVER dismiss a value bet. NEVER recommend the favorite instead. NEVER use markdown formatting — no bold, no headers, no asterisks, no bullet points. Write in plain short paragraphs only.'
       },
       {
         role: 'user',
