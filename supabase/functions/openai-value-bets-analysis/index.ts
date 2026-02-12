@@ -79,98 +79,108 @@ Deno.serve(async (req) => {
     }
 
     // Fetch race data via REST API
-    const raceRes = await fetch(`${supabaseUrl}/rest/v1/races?race_id=eq.${encodeURIComponent(raceId)}&select=race_id,course_name,off_time,type,race_class`, { headers: restHeaders });
+    const raceRes = await fetch(`${supabaseUrl}/rest/v1/races?race_id=eq.${encodeURIComponent(raceId)}&select=race_id,course_name,off_time,type,race_class,going,distance,surface`, { headers: restHeaders });
     const raceData = (raceRes.ok ? await raceRes.json() : [])[0];
     if (!raceData) throw new Error('Race not found');
 
-    // Fetch ALL target value bet horses via REST API
-    const idsFilter = targetIds.map(id => encodeURIComponent(id)).join(',');
-    const horsesRes = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${encodeURIComponent(raceId)}&id=in.(${idsFilter})&select=id,horse_name,trainer_name,jockey_name,current_odds,benter_proba,ensemble_proba,mlp_proba,xgboost_proba,rf_proba,form`, { headers: restHeaders });
-    const targetHorses = horsesRes.ok ? await horsesRes.json() : [];
-    if (!targetHorses.length) throw new Error('Failed to fetch target horse data');
+    // Fetch ALL runners in the race (needed to normalize probabilities)
+    const allEntriesRes = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${encodeURIComponent(raceId)}&select=id,horse_name,trainer_name,jockey_name,current_odds,benter_proba,ensemble_proba,mlp_proba,xgboost_proba,rf_proba,form&order=ensemble_proba.desc.nullslast`, { headers: restHeaders });
+    const allEntries = allEntriesRes.ok ? await allEntriesRes.json() : [];
+    if (!allEntries.length) throw new Error('No entries found for this race');
 
-    // Fetch all OTHER runners (exclude value bet horses)
-    const excludeFilter = targetHorses.map((h: any) => h.id).join(',');
-    const runnersRes = await fetch(`${supabaseUrl}/rest/v1/race_entries?race_id=eq.${encodeURIComponent(raceId)}&id=not.in.(${excludeFilter})&select=horse_name,trainer_name,jockey_name,current_odds,benter_proba,ensemble_proba,mlp_proba,xgboost_proba,rf_proba,form&order=current_odds.asc`, { headers: restHeaders });
-    const allRunners = runnersRes.ok ? await runnersRes.json() : [];
+    // Normalize ML probabilities so they sum to 100% across the field (proper win percentages)
+    const mlFields = ['ensemble_proba', 'mlp_proba', 'xgboost_proba', 'rf_proba', 'benter_proba'];
+    const sums: Record<string, number> = {};
+    for (const f of mlFields) sums[f] = allEntries.reduce((acc: number, r: any) => acc + (Number(r[f]) || 0), 0);
+    const normalized = allEntries.map((r: any) => {
+      const norm: Record<string, number> = {};
+      for (const f of mlFields) { const raw = Number(r[f]) || 0; norm[f] = sums[f] > 0 ? (raw / sums[f]) * 100 : 0; }
+      // Average normalized win% across models
+      const avgWinPct = (norm.ensemble_proba + norm.mlp_proba + norm.xgboost_proba + norm.rf_proba + norm.benter_proba) / 5;
+      const impliedPct = Number(r.current_odds) > 0 ? (1 / Number(r.current_odds)) * 100 : 0;
+      const valueEdge = impliedPct > 0 ? avgWinPct / impliedPct : 0;
+      return { ...r, norm, avgWinPct, impliedPct, valueEdge };
+    });
 
-    // Build per-horse analysis blocks
-    const valueBetBlocks = targetHorses.map((horse, idx) => {
-      const mlProbs = {
-        Benter: horse.benter_proba,
-        Ensemble: horse.ensemble_proba,
-        MLP: horse.mlp_proba,
-        XgBoost: horse.xgboost_proba,
-        'Random Forest': horse.rf_proba,
-      };
-      const bestModel = Object.entries(mlProbs).reduce(
-        (best, [model, prob]) => (prob > best.probability ? { name: model, probability: prob } : best),
-        { name: 'Ensemble', probability: horse.ensemble_proba }
+    // Split into target value bet horses and other runners
+    const targetIdSet = new Set(targetIds.map(String));
+    const targetHorses = normalized.filter((h: any) => targetIdSet.has(String(h.id)));
+    const otherRunners = normalized.filter((h: any) => !targetIdSet.has(String(h.id)));
+    if (!targetHorses.length) throw new Error('Failed to match target horse data');
+
+    // Build per-horse analysis blocks with NORMALIZED probabilities and value edge
+    const valueBetBlocks = targetHorses.map((horse: any, idx: number) => {
+      const bestModel = (['Ensemble', 'MLP', 'XGBoost', 'RF', 'Benter'] as const).reduce(
+        (best, name, i) => {
+          const val = horse.norm[mlFields[i]];
+          return val > best.pct ? { name, pct: val } : best;
+        },
+        { name: 'Ensemble', pct: horse.norm.ensemble_proba }
       );
-      const impliedProb = horse.current_odds > 0 ? (1 / horse.current_odds * 100).toFixed(1) : '0';
 
       return `VALUE BET #${idx + 1}: ${horse.horse_name}
-- Current Odds: ${horse.current_odds} (${impliedProb}% implied probability)
-- Best ML Model: ${bestModel.name} at ${bestModel.probability}%
-- All ML Probabilities: Benter ${horse.benter_proba}%, Ensemble ${horse.ensemble_proba}%, MLP ${horse.mlp_proba}%, XgBoost ${horse.xgboost_proba}%, RF ${horse.rf_proba}%
-- Trainer: ${horse.trainer_name}
-- Jockey: ${horse.jockey_name}
+- Odds: ${horse.current_odds} (market implied win chance: ${horse.impliedPct.toFixed(1)}%)
+- ML Average Win Probability: ${horse.avgWinPct.toFixed(1)}% (normalized across the field)
+- VALUE EDGE: ${horse.valueEdge.toFixed(1)}x (ML thinks ${horse.valueEdge > 1 ? 'MORE likely to win than odds suggest' : 'less likely'})
+- Best ML Model: ${bestModel.name} at ${bestModel.pct.toFixed(1)}%
+- All Normalized ML Win%: Ensemble ${horse.norm.ensemble_proba.toFixed(1)}%, MLP ${horse.norm.mlp_proba.toFixed(1)}%, XGB ${horse.norm.xgboost_proba.toFixed(1)}%, RF ${horse.norm.rf_proba.toFixed(1)}%, Benter ${horse.norm.benter_proba.toFixed(1)}%
+- Trainer: ${horse.trainer_name}, Jockey: ${horse.jockey_name}
 - Form: ${horse.form}`;
     }).join('\n\n');
 
-    // Other runners text
-    const otherHorsesText = allRunners?.map((runner, index) =>
-      `${index + 1}. ${runner.horse_name} - Odds: ${runner.current_odds}, Benter: ${runner.benter_proba}%, Ensemble: ${runner.ensemble_proba}%, MLP: ${runner.mlp_proba}%, XgBoost: ${runner.xgboost_proba}%, RF: ${runner.rf_proba}%, Trainer: ${runner.trainer_name}, Jockey: ${runner.jockey_name}, Form: ${runner.form}`
+    // Other runners text with normalized data
+    const otherHorsesText = otherRunners.map((r: any, i: number) =>
+      `${i + 1}. ${r.horse_name} - Odds: ${r.current_odds}, ML Win%: ${r.avgWinPct.toFixed(1)}%, Value Edge: ${r.valueEdge.toFixed(1)}x, Form: ${r.form}, Trainer: ${r.trainer_name}, Jockey: ${r.jockey_name}`
     ).join('\n') || 'No other runners found';
 
-    // Find the favorite (lowest odds among other runners)
-    const favorite = allRunners?.length
-      ? allRunners.reduce((min, runner) => runner.current_odds < min.current_odds ? runner : min, allRunners[0])
+    // Find the favorite (lowest odds)
+    const favorite = otherRunners.length
+      ? otherRunners.reduce((min: any, r: any) => Number(r.current_odds) < Number(min.current_odds) ? r : min, otherRunners[0])
       : null;
 
     const isMultiple = targetHorses.length > 1;
-    const horseNames = targetHorses.map(h => h.horse_name).join(' and ');
+    const horseNames = targetHorses.map((h: any) => h.horse_name).join(' and ');
 
     const prompt = isMultiple
-      ? `Analyze these ${targetHorses.length} value bet candidates in the ${raceData.off_time} ${raceData.type} ${raceData.race_class} race at ${raceData.course_name}.
+      ? `You are analyzing ${targetHorses.length} CONFIRMED value bets in the ${raceData.off_time} ${raceData.type} ${raceData.race_class || ''} at ${raceData.course_name}.
+Going: ${raceData.going || 'Unknown'}, Distance: ${raceData.distance || 'Unknown'}, Surface: ${raceData.surface || 'Unknown'}
+Field size: ${allEntries.length} runners
+
+CRITICAL CONTEXT: These horses have been flagged as VALUE BETS by our ML system. A value bet means the ML models believe the horse has a HIGHER true chance of winning than the betting market implies. A value edge of 2.0x means the ML models rate the horse as twice as likely to win as the odds suggest. These are long-shot plays where the market is UNDERRATING the horse. Your job is to determine WHICH value bet is the strongest play, NOT to dismiss them.
 
 ${valueBetBlocks}
 
-Here are ALL the other runners in this race:
+Other runners in the field:
 ${otherHorsesText}
 
-${favorite ? `The current market favorite is ${favorite.horse_name} at ${favorite.current_odds} odds with Ensemble ${favorite.ensemble_proba}%, Benter ${favorite.benter_proba}% ML probabilities.` : ''}
+${favorite ? `Market favorite: ${favorite.horse_name} at ${favorite.current_odds} (ML Win%: ${favorite.avgWinPct.toFixed(1)}%, Value Edge: ${favorite.valueEdge.toFixed(1)}x)` : ''}
 
-IMPORTANT: There are ${targetHorses.length} value bet candidates in this race. You MUST analyze EACH one individually, then compare them head-to-head.
+For EACH value bet horse, analyze:
+1. **Why the ML models rate this horse higher than the market** — what the market might be missing (form cycles, trainer patterns, conditions, class drop, etc.)
+2. **Strengths that could cause an upset** — any factors that support the ML edge
+3. **Risks** — what could go wrong
 
-For EACH value bet horse provide:
-1. **Value Assessment**: Is the ML probability edge over the implied odds genuine or a false signal?
-2. **Strengths & Weaknesses**: Form, connections, conditions suitability
-3. **Risk Level**: Low / Medium / High
+Then:
+4. **Head-to-Head**: Compare ${horseNames} directly — which has the stronger value case and why?
+5. **Final Recommendation**: Which value bet to back, at what stake level (e.g., small/medium), and why. You MUST recommend at least one — these are value bets, the whole point is backing horses the market underrates.`
+      : `You are analyzing a CONFIRMED value bet in the ${raceData.off_time} ${raceData.type} ${raceData.race_class || ''} at ${raceData.course_name}.
+Going: ${raceData.going || 'Unknown'}, Distance: ${raceData.distance || 'Unknown'}, Surface: ${raceData.surface || 'Unknown'}
+Field size: ${allEntries.length} runners
 
-Then provide:
-4. **Head-to-Head Comparison**: Compare ${horseNames} directly — which has the stronger case?
-5. **Field Context**: How do both compare against the favorite and the rest of the field?
-6. **Final Ranking & Recommendation**: Rank the value bets from strongest to weakest. Which should be backed, at what confidence level? Should you back one, both, or neither?
-
-Be decisive. Provide a clear recommendation.`
-      : `Analyze this value bet: ${targetHorses[0].horse_name} at ${targetHorses[0].current_odds} odds in the ${raceData.off_time} ${raceData.type} ${raceData.race_class} race at ${raceData.course_name}.
+CRITICAL CONTEXT: This horse has been flagged as a VALUE BET by our ML system. The ML models believe it has a HIGHER true chance of winning than the betting market implies. Your job is to analyze WHY this horse represents value and how to play it, NOT to dismiss it.
 
 ${valueBetBlocks}
 
-Here are ALL the other runners in this race:
+Other runners in the field:
 ${otherHorsesText}
 
-${favorite ? `The current market favorite is ${favorite.horse_name} at ${favorite.current_odds} odds with Ensemble ${favorite.ensemble_proba}%, Benter ${favorite.benter_proba}% ML probabilities.` : ''}
+${favorite ? `Market favorite: ${favorite.horse_name} at ${favorite.current_odds} (ML Win%: ${favorite.avgWinPct.toFixed(1)}%, Value Edge: ${favorite.valueEdge.toFixed(1)}x)` : ''}
 
-Evaluate the true betting worthiness considering:
-1. **Value Assessment**: Does the ML probability justify the odds? Is the edge genuine?
-2. **Field Strength**: How does this horse compare to the competition, especially the favorite?
-3. **Market Efficiency**: Is the horse underpriced due to market oversight or correctly priced?
-4. **Risk vs Reward**: What are the realistic winning chances against this specific field?
-5. **Betting Recommendation**: Should this be backed, and if so, with what confidence level?
-
-Provide a comprehensive analysis with a clear recommendation.`;
+Analyze:
+1. **Why the ML models rate this horse higher than the market** — what might the market be missing?
+2. **Upset potential** — form, trainer intent, conditions, anything supporting the value edge
+3. **Key risks** — what needs to go right for this horse to hit
+4. **Betting recommendation** — stake level (small/medium) and confidence. This IS a value bet — recommend how to play it.`;
 
     // Call OpenAI API via model fallback helper — increase max_tokens for multi-horse analysis
     const maxTokens = isMultiple ? 1500 : 1000;
@@ -178,7 +188,7 @@ Provide a comprehensive analysis with a clear recommendation.`;
     const openaiData = await callOpenAI(openaiApiKey, [
       {
         role: 'system',
-        content: 'You are an expert horse racing analyst and professional bettor specializing in value bet identification. Provide detailed, practical analysis focusing on genuine betting value and market efficiency. When multiple value bet candidates are presented, you MUST analyze each one and provide a clear comparative ranking.'
+        content: 'You are a professional value bettor and horse racing analyst. You understand that value betting means backing horses where the true probability of winning is HIGHER than what the market odds imply — the market is underrating them. All ML probabilities shown are NORMALIZED win percentages that sum to 100% across the field. A "value edge" of 2.0x means the ML models think the horse is twice as likely to win as the odds suggest. Your job is to explain WHY a value bet is worth backing, identify what the market is missing, and recommend which bet to place. You should NEVER dismiss a confirmed value bet — instead, rank them and recommend the best play with appropriate stake sizing.'
       },
       {
         role: 'user',
