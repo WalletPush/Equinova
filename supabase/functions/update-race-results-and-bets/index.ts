@@ -56,8 +56,8 @@ Deno.serve(async (req)=>{
       });
     }
     const raceResult = raceResults[0];
-    // Step 2: Get race runners (horse results)
-    const runnersResponse = await fetch(`${supabaseUrl}/rest/v1/race_runners?race_result_id=eq.${raceResult.id}&select=*&order=position.asc`, {
+    // Step 2: Get race runners (horse results) - query by race_id
+    const runnersResponse = await fetch(`${supabaseUrl}/rest/v1/race_runners?race_id=eq.${race_id}&select=*&order=position.asc`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${supabaseKey}`,

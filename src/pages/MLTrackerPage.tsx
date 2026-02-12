@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useQuery } from '@tanstack/react-query'
 import { ShortlistButton } from '@/components/ShortlistButton'
 import { getUKDate, getUKTime, raceTimeToMinutes, formatTime, compareRaceTimes } from '@/lib/dateUtils'
+import { formatOdds } from '@/lib/odds'
 import {
   Brain,
   TrendingUp,
@@ -375,7 +376,7 @@ export function MLTrackerPage() {
           if (topEntry && topProba > 0) {
             nextRunner = {
               horse_name: topEntry.horse_name || 'Unknown',
-              odds: topEntry.current_odds ? `${topEntry.current_odds}/1` : 'N/A',
+              odds: formatOdds(topEntry.current_odds),
               trainer: topEntry.trainer_name || 'N/A',
               jockey: topEntry.jockey_name || 'N/A',
               confidence: topProba * 100,

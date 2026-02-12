@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { X, TrendingUp, TrendingDown, Minus, Star, Bot, Trophy, Clock, Target, Info, Heart, Check, Loader2 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RaceEntry, supabase, callSupabaseFunction } from '@/lib/supabase'
+import { formatOdds } from '@/lib/odds'
 import { useAuth } from '@/contexts/AuthContext'
 import { OverviewTab, FormTab } from './HorseDetailTabs'
 import { ConnectionsTab, PredictionsTab } from './HorseDetailTabsExtra'
@@ -280,7 +281,7 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
                 <h2 className="text-2xl font-bold text-white">{entry.horse_name}</h2>
                 {entry.current_odds && (
                   <span className="text-xl font-bold text-yellow-400">
-                    {entry.current_odds}/1
+                    {formatOdds(entry.current_odds)}
                   </span>
                 )}
               </div>

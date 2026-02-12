@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
@@ -6,6 +6,8 @@ import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, Race } from '@/lib/supabase'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
+import { formatOdds } from '@/lib/odds'
+import { fetchFromSupabaseFunction } from '@/lib/api'
 import { compareRaceTimes, raceTimeToMinutes, formatTime, isRaceCompleted } from '@/lib/dateUtils'
 import { 
   Clock, 
@@ -242,6 +244,26 @@ export function TodaysRacesPage() {
     return results
   }, [races])
 
+  // Background enrichment: trigger per-horse odds refresh for value bets
+  const enrichmentRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (valueBets.length === 0) return
+    const horsesToEnrich: { race_id: string; horse_id: string }[] = []
+    for (const vb of valueBets) {
+      const key = `${vb.race_id}::${vb.horse_id}`
+      if (!enrichmentRef.current.has(key)) {
+        horsesToEnrich.push({ race_id: vb.race_id, horse_id: vb.horse_id })
+        enrichmentRef.current.add(key)
+      }
+    }
+    if (horsesToEnrich.length > 0) {
+      fetchFromSupabaseFunction('enrich-horse-odds', {
+        method: 'POST',
+        body: JSON.stringify({ horses: horsesToEnrich.slice(0, 20) })
+      }).catch(err => console.warn('[enrichment] background call failed:', err))
+    }
+  }, [valueBets])
+
   // Force refresh function
   const handleRefresh = async () => {
     setIsRefreshing(true)
@@ -432,7 +454,7 @@ export function TodaysRacesPage() {
                           {/* Odds */}
                           <div className="text-right">
                             <div className="text-white font-mono font-bold text-sm">
-                              {vb.current_odds}/1
+                              {formatOdds(vb.current_odds)}
                             </div>
                           </div>
 
@@ -723,7 +745,7 @@ export function TodaysRacesPage() {
                                       entry.odds_movement === 'drifting' ? 'text-red-400' :
                                       'text-gray-300'
                                     }`}>
-                                      {entry.current_odds}
+                                      {formatOdds(entry.current_odds)}
                                     </div>
                                   </div>
                                 )}

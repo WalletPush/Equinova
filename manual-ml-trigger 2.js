@@ -2,7 +2,7 @@
 async function triggerMLPipeline() {
   console.log('🚀 Starting manual ML performance pipeline for September 5th...');
   
-  const SUPABASE_URL = 'https://zjqojacejstbqmxzstyk.supabase.co';
+  const SUPABASE_URL = 'https://nzabewdpotnlttftimej.supabase.co';
   // You'll need to replace this with your actual service role key
   const SERVICE_ROLE_KEY = 'YOUR_SERVICE_ROLE_KEY_HERE';
   

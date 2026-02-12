@@ -2,7 +2,7 @@ const https = require('https');
 
 // You'll need to replace this with your actual service role key
 const SERVICE_ROLE_KEY = 'YOUR_SERVICE_ROLE_KEY_HERE';
-const FUNCTION_URL = 'https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/populate-ml-performance-data';
+const FUNCTION_URL = 'https://nzabewdpotnlttftimej.supabase.co/functions/v1/populate-ml-performance-data';
 
 const options = {
   method: 'POST',

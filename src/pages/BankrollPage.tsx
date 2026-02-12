@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { callSupabaseFunction } from '@/lib/supabase'
+import { formatOdds } from '@/lib/odds'
 import {
   Wallet,
   Plus,
@@ -494,7 +495,7 @@ export function BankrollPage() {
                           </div>
                           <div className="space-y-1">
                             <span className="text-xs text-gray-500 uppercase tracking-wide">Odds</span>
-                            <div className="text-sm font-bold text-yellow-400">{bet.current_odds || 'TBC'}</div>
+                            <div className="text-sm font-bold text-yellow-400">{formatOdds(bet.current_odds)}</div>
                           </div>
                           <div className="space-y-1">
                             <span className="text-xs text-gray-500 uppercase tracking-wide">Potential Return</span>

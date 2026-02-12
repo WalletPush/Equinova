@@ -4,6 +4,7 @@ import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ShortlistButton } from '@/components/ShortlistButton'
 import { Race } from '@/lib/supabase'
+import { formatOdds } from '@/lib/odds'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { formatTime } from '@/lib/dateUtils'
 import { 
@@ -172,14 +173,14 @@ export function RaceCard({
                       {formatNormalized(normMap.get(String(topPrediction.horse_id)) ?? 0)} win prob
                     </div>
                     <div className="text-yellow-400 font-medium text-sm">
-                      {topPrediction.current_odds || 'TBC'}
+                      {formatOdds(topPrediction.current_odds)}
                     </div>
                   </div>
                   
                   <ShortlistButton
                     horseName={topPrediction.horse_name}
                     raceContext={raceContext}
-                    odds={topPrediction.current_odds}
+                    odds={formatOdds(topPrediction.current_odds)}
                     jockeyName={topPrediction.jockey_name}
                     trainerName={topPrediction.trainer_name}
                     isInShortlist={isHorseInShortlist(topPrediction.horse_name, race.course_name)}
@@ -215,7 +216,7 @@ export function RaceCard({
                     <div className="flex items-center space-x-3">
                       <div className="text-right">
                         <div className="text-yellow-400 font-medium text-sm">
-                          {entry.current_odds || 'TBC'}
+                          {formatOdds(entry.current_odds)}
                         </div>
                         {entry.ensemble_proba > 0 && (
                           <div className={`text-xs ${getNormalizedColor(normMap.get(String(entry.horse_id)) ?? 0)}`}>
@@ -227,7 +228,7 @@ export function RaceCard({
                       <ShortlistButton
                         horseName={entry.horse_name}
                         raceContext={raceContext}
-                        odds={entry.current_odds}
+                        odds={formatOdds(entry.current_odds)}
                         jockeyName={entry.jockey_name}
                         trainerName={entry.trainer_name}
                         isInShortlist={isHorseInShortlist(entry.horse_name, race.course_name)}

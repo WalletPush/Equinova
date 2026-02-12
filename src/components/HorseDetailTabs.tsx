@@ -1,6 +1,7 @@
 import React from 'react'
 import { TrendingUp, TrendingDown, Minus, Star, Bot, Trophy } from 'lucide-react'
 import { RaceEntry } from '@/lib/supabase'
+import { formatOdds } from '@/lib/odds'
 import type { SmartSignal, PatternAlert } from '@/types/signals'
 
 export interface TabContentProps {
@@ -74,7 +75,7 @@ export function OverviewTab({ entry }: TabContentProps) {
             <div className="flex justify-between items-center">
               <span className="text-gray-400">Current Odds</span>
               <span className="text-white font-bold font-mono text-lg">
-                {entry.current_odds ? `${entry.current_odds}/1` : 'N/A'}
+                {formatOdds(entry.current_odds)}
               </span>
             </div>
             <div className="flex justify-between items-center">

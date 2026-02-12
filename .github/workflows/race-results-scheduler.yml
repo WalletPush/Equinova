@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Trigger Race Results Scheduler
         run: |
-          curl -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/race-results-scheduler \
+          curl -X POST https://nzabewdpotnlttftimej.supabase.co/functions/v1/race-results-scheduler \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json"
         env:

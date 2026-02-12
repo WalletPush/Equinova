@@ -196,6 +196,29 @@ Deno.serve(async (req)=>{
       upserted += chunk.length;
       if (doLog) console.log(`[MM] upserted batch ${i + 1}-${i + chunk.length}`);
     }
+    // ---- 6) Sync latest prices back to race_entries.current_odds ----
+    // This ensures ALL UI displays (which read from race_entries) show fresh prices.
+    let reSynced = 0;
+    const RE_BATCH = 50;
+    for (let i = 0; i < rows.length; i += RE_BATCH) {
+      const chunk = rows.slice(i, i + RE_BATCH);
+      // Build individual updates; PostgREST doesn't support batch PATCH with different values
+      // so we fire them in parallel within each batch
+      const promises = chunk.map(async (r) => {
+        const patchUrl = `${SUPABASE_URL}/rest/v1/race_entries` +
+          `?race_id=eq.${encodeURIComponent(r.race_id)}` +
+          `&horse_id=eq.${encodeURIComponent(r.horse_id)}`;
+        try {
+          const pRes = await fetch(patchUrl, {
+            method: "PATCH",
+            headers: { ...restHeaders, Prefer: "return=minimal" },
+            body: JSON.stringify({ current_odds: r.decimal_odds }),
+          });
+          if (pRes.ok) reSynced++;
+        } catch { /* non-fatal */ }
+      });
+      await Promise.all(promises);
+    }
     return json({
       success: true,
       message: "horse_market_movement updated (bulk)",
@@ -203,7 +226,8 @@ Deno.serve(async (req)=>{
       batch_size: batchSize,
       bookmaker: BOOKMAKER_DB,
       horses_found: picks.length,
-      upserted
+      upserted,
+      race_entries_synced: reSynced
     });
   } catch (e) {
     console.error("racing-market-monitor-cron error:", e?.message ?? String(e));

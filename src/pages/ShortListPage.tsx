@@ -5,6 +5,7 @@ import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { callSupabaseFunction } from '@/lib/supabase'
 import { formatTime } from '@/lib/dateUtils'
+import { formatOdds } from '@/lib/odds'
 import { 
   List, 
   Star, 
@@ -416,7 +417,7 @@ export function ShortListPage() {
                                   />
                                 </div>
                                 <div className="text-right">
-                                  <div className="text-green-400 font-bold text-lg">{item.current_odds || 'TBC'}</div>
+                                  <div className="text-green-400 font-bold text-lg">{formatOdds(item.current_odds)}</div>
                                   <div className="text-gray-400 font-medium text-sm">
                                     Added {new Date(item.created_at).toLocaleDateString()}
                                   </div>
@@ -454,7 +455,7 @@ export function ShortListPage() {
                                       off_time: item.race_time,
                                       race_time: item.race_time
                                     }}
-                                    odds={item.current_odds}
+                                    odds={formatOdds(item.current_odds)}
                                     jockeyName={item.jockey_name}
                                     trainerName={item.trainer_name}
                                     size="normal"

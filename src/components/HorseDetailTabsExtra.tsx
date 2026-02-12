@@ -11,6 +11,7 @@ import {
   type ProbaField,
 } from '@/lib/normalize'
 import { formatTime } from '@/lib/dateUtils'
+import { formatOdds } from '@/lib/odds'
 
 const getPerformanceIndicator = (value: number | null | undefined, threshold: number = 50) => {
   if (!value) return <Minus className="w-4 h-4 text-gray-500" />
@@ -235,30 +236,25 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
     return smartSignals.find(s => String(s.horse_id) === String(entry.horse_id)) ?? null
   }, [smartSignals, entry.horse_id])
 
-  // Convert decimal odds to fractional display
-  const toFrac = (dec: string | number): string => {
-    const d = Number(dec)
-    if (!d || !Number.isFinite(d) || d <= 1) return 'EVS'
-    const profit = d - 1
-    const common: [number, string][] = [
-      [0.2,'1/5'],[0.25,'1/4'],[0.33,'1/3'],[0.4,'2/5'],[0.5,'1/2'],
-      [0.67,'2/3'],[0.8,'4/5'],[1,'EVS'],[1.1,'11/10'],[1.2,'6/5'],
-      [1.25,'5/4'],[1.5,'6/4'],[2,'2/1'],[2.5,'5/2'],[3,'3/1'],
-      [3.5,'7/2'],[4,'4/1'],[4.5,'9/2'],[5,'5/1'],[6,'6/1'],
-      [7,'7/1'],[8,'8/1'],[9,'9/1'],[10,'10/1'],[12,'12/1'],
-      [14,'14/1'],[16,'16/1'],[20,'20/1'],[25,'25/1'],[33,'33/1'],
-      [50,'50/1'],[66,'66/1'],[100,'100/1']
-    ]
-    let best = common[0]
-    let bestDiff = Math.abs(profit - best[0])
-    for (const c of common) {
-      const diff = Math.abs(profit - c[0])
-      if (diff < bestDiff) { best = c; bestDiff = diff }
-    }
-    if (bestDiff < 0.15) return best[1]
-    const rounded = Math.round(profit)
-    return rounded <= 0 ? 'EVS' : `${rounded}/1`
-  }
+  // Fetch price history for this horse (from enrichment)
+  const { data: priceHistory } = useQuery({
+    queryKey: ['price-history', raceId, entry.horse_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('horse_odds_history')
+        .select('bookmaker,decimal_odds,fractional_odds,recorded_at')
+        .eq('race_id', raceId!)
+        .eq('horse_id', String(entry.horse_id))
+        .order('recorded_at', { ascending: true })
+        .limit(50)
+      if (error) return []
+      return data ?? []
+    },
+    enabled: !!raceId && !!entry.horse_id,
+    staleTime: 60_000,
+  })
+
+  // Using shared formatOdds from @/lib/odds
 
   // ── No predictions fallback ────────────────────────────────────
   if (!entry.ensemble_proba || entry.ensemble_proba === 0) {
@@ -340,8 +336,8 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
 
           <p className="text-sm text-gray-300 leading-relaxed">
             {analysis.isValueBet
-              ? `Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} win probability, but the current odds of ${analysis.odds}/1 imply only ${formatNormalized(analysis.impliedProb)}. That's a ${(analysis.edge * 100).toFixed(1)}% edge — the market is undervaluing this horse.`
-              : `At ${analysis.odds}/1, the market implies a ${formatNormalized(analysis.impliedProb)} chance. Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} — there is no significant edge at current odds.`}
+              ? `Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} win probability, but the current odds of ${formatOdds(analysis.odds)} imply only ${formatNormalized(analysis.impliedProb)}. That's a ${(analysis.edge * 100).toFixed(1)}% edge — the market is undervaluing this horse.`
+              : `At ${formatOdds(analysis.odds)}, the market implies a ${formatNormalized(analysis.impliedProb)} chance. Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} — there is no significant edge at current odds.`}
           </p>
         </div>
       ) : (
@@ -455,7 +451,7 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
             <div className="bg-gray-800/60 rounded-lg p-3 mb-3">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-white font-mono font-bold text-lg">
-                  {toFrac(matchedSignal.initial_odds)}
+                  {formatOdds(matchedSignal.initial_odds)}
                 </span>
                 <ArrowRight className="w-4 h-4 text-gray-500" />
                 <span className={`font-mono font-bold text-lg ${
@@ -463,7 +459,7 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
                   entry.odds_movement === 'drifting' ? 'text-red-400' :
                   'text-white'
                 }`}>
-                  {toFrac(matchedSignal.current_odds)}
+                  {formatOdds(matchedSignal.current_odds)}
                 </span>
                 {matchedSignal.movement_pct && (
                   <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
@@ -538,6 +534,74 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Section 3b: PRICE HISTORY TIMELINE ─────────────────── */}
+      {priceHistory && priceHistory.length > 1 && (
+        <div className="bg-gray-700/50 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingUp className="w-5 h-5 text-blue-400" />
+            <h3 className="text-white font-semibold">Price History</h3>
+            <span className="text-xs text-gray-500 ml-auto">{priceHistory.length} snapshots</span>
+          </div>
+
+          {/* Compact price timeline */}
+          <div className="space-y-1">
+            {(() => {
+              // Deduplicate by bookmaker and show latest movements
+              const betfairPrices = priceHistory.filter((p: any) => /betfair/i.test(p.bookmaker))
+              const displayPrices = betfairPrices.length > 1 ? betfairPrices : priceHistory
+              // Show last 8 price points
+              const recent = displayPrices.slice(-8)
+              return recent.map((p: any, idx: number) => {
+                const prev = idx > 0 ? recent[idx - 1] : null
+                const isUp = prev ? p.decimal_odds > prev.decimal_odds : false
+                const isDown = prev ? p.decimal_odds < prev.decimal_odds : false
+                const time = new Date(p.recorded_at).toLocaleTimeString('en-GB', {
+                  hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London'
+                })
+                return (
+                  <div key={`${p.recorded_at}-${idx}`} className="flex items-center justify-between py-0.5">
+                    <span className="text-[10px] text-gray-500 w-12">{time}</span>
+                    <div className="flex-1 mx-2 h-px bg-gray-600/30" />
+                    <span className={`text-xs font-mono font-bold ${
+                      isDown ? 'text-green-400' : isUp ? 'text-red-400' : 'text-gray-300'
+                    }`}>
+                      {p.fractional_odds || formatOdds(p.decimal_odds)}
+                    </span>
+                    {isDown && <TrendingDown className="w-3 h-3 text-green-400 ml-1" />}
+                    {isUp && <TrendingUp className="w-3 h-3 text-red-400 ml-1" />}
+                    {!isDown && !isUp && <Minus className="w-3 h-3 text-gray-600 ml-1" />}
+                  </div>
+                )
+              })
+            })()}
+          </div>
+
+          {/* Bookmaker breakdown if multiple */}
+          {(() => {
+            const bookmakers = [...new Set(priceHistory.map((p: any) => p.bookmaker))]
+            if (bookmakers.length <= 1) return null
+            // Show latest price per bookmaker
+            const latestByBk: Record<string, any> = {}
+            for (const p of priceHistory) {
+              latestByBk[p.bookmaker] = p
+            }
+            return (
+              <div className="mt-3 pt-3 border-t border-gray-700/50">
+                <div className="text-[10px] text-gray-500 mb-1">Across bookmakers:</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(latestByBk).map(([bk, p]: [string, any]) => (
+                    <span key={bk} className="text-[10px] bg-gray-800 rounded px-2 py-0.5">
+                      <span className="text-gray-400">{bk}:</span>{' '}
+                      <span className="text-white font-mono font-bold">{p.fractional_odds || formatOdds(p.decimal_odds)}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -680,7 +744,7 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
                         {formatNormalized(comp.norm_ensemble)}
                       </div>
                       <div className="text-[10px] text-gray-500">
-                        {comp.current_odds ? `${comp.current_odds}/1` : '—'}
+                        {comp.current_odds ? formatOdds(comp.current_odds) : '—'}
                       </div>
                     </div>
                     {comp.norm_ensemble > analysis.normEnsemble ? (

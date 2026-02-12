@@ -7,6 +7,7 @@ import { fetchFromSupabaseFunction, createSupabaseClient } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { getUKDateTime, formatTime, getQueryDateKey, getDateStatusLabel, isRaceUpcoming, compareRaceTimes } from '@/lib/dateUtils'
 import { normalizeField, formatNormalized, getNormalizedColor } from '@/lib/normalize'
+import { formatOdds } from '@/lib/odds'
 import {
   Brain,
   Target,
@@ -385,6 +386,7 @@ export function AIInsiderPage() {
           bookmaker: m.bookmaker,
           initial_odds: m.initial_odds,
           current_odds: m.current_odds,
+          decimal_odds: m.decimal_odds,
           odds_movement: m.odds_movement,
           odds_movement_pct: m.odds_movement_pct,
           last_updated: m.last_updated,
@@ -550,6 +552,41 @@ export function AIInsiderPage() {
   })
 
   const topRatedMap = topRatedMapData || {}
+
+  // Background enrichment: when market movers or value bets load, trigger per-horse odds enrichment
+  const enrichmentRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const horsesToEnrich: { race_id: string; horse_id: string }[] = []
+
+    // Collect market movers
+    const movers = persistentMarketMoversData?.market_movers || []
+    for (const m of movers) {
+      const key = `${m.race_id}::${m.horse_id}`
+      if (m.race_id && m.horse_id && !enrichmentRef.current.has(key)) {
+        horsesToEnrich.push({ race_id: m.race_id, horse_id: m.horse_id })
+        enrichmentRef.current.add(key)
+      }
+    }
+
+    // Collect value bets
+    for (const race of mlValueBets) {
+      for (const bet of (race.top_value_bets || [])) {
+        const key = `${race.race_id}::${bet.horse_id}`
+        if (race.race_id && bet.horse_id && !enrichmentRef.current.has(key)) {
+          horsesToEnrich.push({ race_id: race.race_id, horse_id: bet.horse_id })
+          enrichmentRef.current.add(key)
+        }
+      }
+    }
+
+    if (horsesToEnrich.length > 0) {
+      // Fire and forget — don't block UI
+      fetchFromSupabaseFunction('enrich-horse-odds', {
+        method: 'POST',
+        body: JSON.stringify({ horses: horsesToEnrich.slice(0, 30) })
+      }).catch(err => console.warn('[enrichment] background call failed:', err))
+    }
+  }, [persistentMarketMoversData, mlValueBets])
 
   // Compute normalization sums per race for display
   const raceEnsembleSum = React.useMemo(() => {
@@ -1496,7 +1533,7 @@ export function AIInsiderPage() {
                                           <div className="text-sm text-gray-400 mt-1">{horse.trainer_name} • {horse.jockey_name}</div>
                                         </div>
                                         <div className="text-right">
-                                          <div className="text-green-400 font-bold text-lg">{horse.current_odds}</div>
+                                          <div className="text-green-400 font-bold text-lg">{formatOdds(horse.current_odds)}</div>
                                           <div className={`text-sm font-medium ${getConfidenceColor(horse.confidence_score)}`}>{capConfidence(horse.confidence_score)}% confidence</div>
                                         </div>
                                       </div>
@@ -1620,10 +1657,10 @@ export function AIInsiderPage() {
                                   </div>
                                   <div className="text-right">
                                     <div className="text-green-400 font-bold text-lg">
-                                      {mover.fractional_current || mover.current_odds}
+                                      {formatOdds(mover.decimal_odds || mover.current_odds)}
                                     </div>
                                     <div className="text-gray-400 text-xs">
-                                      was {mover.fractional_initial || mover.initial_odds}
+                                      was {formatOdds(mover.initial_odds)}
                                     </div>
                                     <div className="text-yellow-400 font-medium text-sm">
                                       {mover.odds_movement_pct > 0 ? '+' : ''}{typeof mover.odds_movement_pct === 'number' ? mover.odds_movement_pct.toFixed(1) : mover.odds_movement_pct}%
@@ -1657,7 +1694,7 @@ export function AIInsiderPage() {
                                     horseName={mover.horse_name}
                                     raceTime={mover.off_time}
                                     course={mover.course}
-                                    odds={mover.current_odds}
+                                    odds={formatOdds(mover.decimal_odds || mover.current_odds)}
                                     source="market_mover"
                                     jockeyName={mover.jockey_name}
                                     trainerName={mover.trainer_name}
@@ -1780,7 +1817,7 @@ export function AIInsiderPage() {
                                         />
                                       </div>
                                       <div className="text-right">
-                                        <div className="text-green-400 font-bold text-lg">{pick.current_odds || 'TBC'}</div>
+                                        <div className="text-green-400 font-bold text-lg">{formatOdds(pick.current_odds)}</div>
                                         <div className={`font-medium text-sm ${(() => {
                                           const rawEns = pick.horse_id && topRatedMap[race.race_id]?.ensembleMap?.[String(pick.horse_id)]
                                           const rawVal = rawEns || pick.ensemble_proba || pick.max_probability || 0
@@ -1811,7 +1848,7 @@ export function AIInsiderPage() {
                                         horseName={pick.horse_name}
                                         raceTime={pick.off_time}
                                         course={pick.course_name}
-                                        odds={pick.current_odds ? `${pick.current_odds}/1` : undefined}
+                                        odds={formatOdds(pick.current_odds)}
                                         source="ai_top_picks"
                                         jockeyName={pick.jockey_name}
                                         trainerName={pick.trainer_name}
@@ -1890,7 +1927,7 @@ export function AIInsiderPage() {
                                             <div className="text-sm text-gray-400 mt-1">{horse.trainer_name} • {horse.jockey_name}</div>
                                           </div>
                                           <div className="text-right">
-                                            <div className="text-green-400 font-bold text-lg">{horse.current_odds}</div>
+                                            <div className="text-green-400 font-bold text-lg">{formatOdds(horse.current_odds)}</div>
                                             <div className={`text-sm font-medium ${getConfidenceColor(horse.confidence_score)}`}>{capConfidence(horse.confidence_score)}% confidence</div>
                                           </div>
                                         </div>
@@ -2020,7 +2057,7 @@ export function AIInsiderPage() {
                                       />
                                     </div>
                                     <div className="text-right">
-                                      <div className="text-green-400 font-bold text-lg">{bet.current_odds}/1</div>
+                                      <div className="text-green-400 font-bold text-lg">{formatOdds(bet.current_odds)}</div>
                                       <div className={`font-medium text-sm ${getNormalizedColor(normalizeProba(bet.ensemble_proba, race.race_id))}`} title="Normalized win probability">
                                         {(normalizeProba(bet.ensemble_proba, race.race_id) * 100).toFixed(1)}%
                                       </div>
@@ -2039,7 +2076,7 @@ export function AIInsiderPage() {
                                       horseName={bet.horse_name}
                                       raceTime={race.off_time}
                                       course={race.course_name}
-                                      odds={`${bet.current_odds}/1`}
+                                      odds={formatOdds(bet.current_odds)}
                                       source="value_bet"
                                       jockeyName={bet.jockey_name}
                                       trainerName={bet.trainer_name}
@@ -2260,7 +2297,7 @@ export function AIInsiderPage() {
                                           {!topRatedLoading && topRated ? renderModelBadges(matchedModels) : null}
                                         </div>
                                         <div className="text-right">
-                                          <div className="text-green-400 font-bold text-lg">{intent.current_odds || 'TBC'}</div>
+                                          <div className="text-green-400 font-bold text-lg">{formatOdds(intent.current_odds)}</div>
                                           <div className="text-yellow-400 font-medium text-sm">
                                             {capConfidence(intent.confidence_score)}%
                                           </div>
@@ -2293,7 +2330,7 @@ export function AIInsiderPage() {
                                           horseName={intent.horse_name}
                                           raceTime={intent.off_time || 'TBC'}
                                           course={intent.course}
-                                          odds={intent.current_odds}
+                                          odds={formatOdds(intent.current_odds)}
                                           source="trainer_intent"
                                           jockeyName={intent.jockey_name}
                                           trainerName={intent.trainer_name}

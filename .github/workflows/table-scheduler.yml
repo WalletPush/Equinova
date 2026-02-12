@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Trigger Table Scheduler
         run: |
-          curl -X POST https://zjqojacejstbqmxzstyk.supabase.co/functions/v1/table-scheduler \
+          curl -X POST https://nzabewdpotnlttftimej.supabase.co/functions/v1/table-scheduler \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json"
 
