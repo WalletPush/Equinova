@@ -5,6 +5,7 @@ import { RaceEntry, supabase, callSupabaseFunction } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { OverviewTab, FormTab } from './HorseDetailTabs'
 import { ConnectionsTab, PredictionsTab } from './HorseDetailTabsExtra'
+import type { SmartSignal, PatternAlert } from '@/types/signals'
 
 interface RaceContext {
   course_name?: string
@@ -15,6 +16,8 @@ interface RaceContext {
 interface HorseDetailModalProps {
   entry: RaceEntry
   raceContext?: RaceContext | null
+  patternAlerts?: PatternAlert[]
+  smartSignals?: SmartSignal[]
   isOpen: boolean
   onClose: () => void
 }
@@ -32,7 +35,7 @@ const tabs: TabConfig[] = [
   { id: 'predictions', label: 'AI Analysis', icon: Bot }
 ]
 
-export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseDetailModalProps) {
+export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSignals, isOpen, onClose }: HorseDetailModalProps) {
   const [activeTab, setActiveTab] = useState('overview')
   const [shortlistOperations, setShortlistOperations] = useState<Record<string, boolean>>({})
   const { user } = useAuth()
@@ -355,7 +358,7 @@ export function HorseDetailModal({ entry, raceContext, isOpen, onClose }: HorseD
           {activeTab === 'overview' && <OverviewTab entry={entry} />}
           {activeTab === 'form' && <FormTab entry={entry} />}
           {activeTab === 'connections' && <ConnectionsTab entry={entry} />}
-          {activeTab === 'predictions' && <PredictionsTab entry={entry} raceId={raceContext?.race_id || entry.race_id} />}
+          {activeTab === 'predictions' && <PredictionsTab entry={entry} raceId={raceContext?.race_id || entry.race_id} patternAlerts={patternAlerts} smartSignals={smartSignals} />}
         </div>
       </div>
     </div>

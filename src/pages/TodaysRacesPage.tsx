@@ -1,13 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
-import { ShortlistButton } from '@/components/ShortlistButton'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
-import { supabase, Race, callSupabaseFunction } from '@/lib/supabase'
+import { supabase, Race } from '@/lib/supabase'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
-import { compareRaceTimes, raceTimeToMinutes, formatTime } from '@/lib/dateUtils'
+import { compareRaceTimes, raceTimeToMinutes, formatTime, isRaceCompleted } from '@/lib/dateUtils'
 import { 
   Clock, 
   MapPin, 
@@ -16,41 +15,14 @@ import {
   TrendingUp, 
   Star,
   Calendar,
-  ChevronRight,
   ChevronDown,
-  ChevronUp,
   Bot,
   RefreshCw,
   X,
   Zap,
-  Brain,
-  UserCheck,
   Search,
-  CheckCircle2,
 } from 'lucide-react'
-
-/* ─── Smart Signal type ─────────────────────────────────────────── */
-interface SmartSignal {
-  horse_name: string
-  horse_id: string
-  race_id: string
-  course_name: string
-  off_time: string
-  current_odds: string
-  initial_odds: string
-  movement_pct: number
-  is_ml_top_pick: boolean
-  ml_models_agreeing: string[]
-  ml_top_probability: number
-  is_single_trainer_entry: boolean
-  trainer_name: string
-  jockey_name: string
-  signal_strength: 'strong' | 'medium'
-  silk_url: string
-  number: number | null
-  change_count: number
-  last_updated: string
-}
+import type { SmartSignal, PatternAlert } from '@/types/signals'
 
 export function TodaysRacesPage() {
   // Use UK timezone for proper date detection
@@ -60,7 +32,6 @@ export function TodaysRacesPage() {
   })
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [expandedRace, setExpandedRace] = useState<string | null>(null)
-  const queryClient = useQueryClient()
   const { openHorseDetail } = useHorseDetail()
 
   const { data: racesData, isLoading, error, refetch, isFetching } = useQuery({
@@ -118,26 +89,7 @@ export function TodaysRacesPage() {
     enabled: selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) // Only fetch for today
   })
 
-  // Fetch user's shortlist
-  const { data: userShortlist, refetch: refetchShortlist } = useQuery({
-    queryKey: ['userShortlist'],
-    queryFn: async () => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError || !user) {
-        console.log('No authenticated user for shortlist')
-        return []
-      }
-
-      const data = await callSupabaseFunction('get-shortlist', {});
-      
-      return data?.data || []
-    },
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    retry: 1
-  })
-
   // Smart signals query - polls every 30 seconds
-  const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
   const isToday = selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
 
   const { data: smartSignalsData } = useQuery({
@@ -156,8 +108,29 @@ export function TodaysRacesPage() {
     retry: 1,
   })
 
-  // Filter signals: remove dismissed and past races
-  const activeSignals = useMemo(() => {
+  // Pattern alerts query - checks for profitable historical patterns
+  const { data: patternAlertsData } = useQuery({
+    queryKey: ['pattern-alerts'],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke('pattern-alerts')
+      if (error) {
+        console.error('Pattern alerts error:', error)
+        return { alerts: [] }
+      }
+      return data
+    },
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    enabled: isToday,
+    retry: 1,
+  })
+
+  const allPatternAlerts = useMemo<PatternAlert[]>(() => {
+    return patternAlertsData?.alerts ?? []
+  }, [patternAlertsData])
+
+  // Filter signals: remove past races only
+  const allSmartSignals = useMemo<SmartSignal[]>(() => {
     const signals: SmartSignal[] = smartSignalsData?.signals ?? []
     if (!signals.length) return []
 
@@ -172,10 +145,6 @@ export function TodaysRacesPage() {
     const nowMinutes = nowH * 60 + nowM
 
     return signals.filter((s) => {
-      // Remove dismissed
-      const key = `${s.race_id}::${s.horse_id}`
-      if (dismissedSignals.has(key)) return false
-
       // Remove past races (convert stored AM times to real PM)
       if (s.off_time) {
         const raceMinutes = raceTimeToMinutes(s.off_time)
@@ -183,25 +152,28 @@ export function TodaysRacesPage() {
       }
       return true
     })
-  }, [smartSignalsData, dismissedSignals, selectedDate])
+  }, [smartSignalsData, selectedDate])
 
-  // Build a set of horse_ids that have active smart signals (for pulsing dot)
+  // Build a set of horse_ids that have active smart signals or pattern alerts (for pulsing dot)
   const signalHorseIds = useMemo(() => {
     const set = new Set<string>()
-    for (const s of activeSignals) {
-      set.add(s.horse_id)
-    }
+    for (const s of allSmartSignals) set.add(s.horse_id)
+    for (const a of allPatternAlerts) set.add(a.horse_id)
     return set
-  }, [activeSignals])
-
-  const dismissSignal = (raceId: string, horseId: string) => {
-    setDismissedSignals((prev) => new Set(prev).add(`${raceId}::${horseId}`))
-  }
+  }, [allSmartSignals, allPatternAlerts])
 
   const races = useMemo(() => {
-    const raw = (racesData as any)?.races || []
-    return [...raw].sort((a: Race, b: Race) => compareRaceTimes(a.off_time, b.off_time))
-  }, [racesData])
+    const raw: Race[] = (racesData as any)?.races || []
+    const sorted = [...raw].sort((a, b) => compareRaceTimes(a.off_time, b.off_time))
+
+    // When viewing today, filter out races that have likely finished
+    // isRaceCompleted uses a 120min buffer by default, but we'll use a shorter
+    // buffer (15 min) so races disappear shortly after the off time
+    if (isToday) {
+      return sorted.filter((race) => !isRaceCompleted(race.off_time, 15))
+    }
+    return sorted
+  }, [racesData, isToday])
 
   // ── Value Bet Scanner ──────────────────────────────────────────────
   const [showValueScan, setShowValueScan] = useState(false)
@@ -269,14 +241,6 @@ export function TodaysRacesPage() {
 
     return results
   }, [races])
-
-  // Helper function to check if horse is in shortlist
-  const isHorseInShortlist = (horseName: string, course: string): boolean => {
-    if (!userShortlist || !Array.isArray(userShortlist)) return false
-    return userShortlist.some(item => 
-      item.horse_name === horseName && item.course === course
-    )
-  }
 
   // Force refresh function
   const handleRefresh = async () => {
@@ -432,6 +396,9 @@ export function TodaysRacesPage() {
                                   course_name: vb.course_name,
                                   off_time: vb.off_time,
                                   race_id: vb.race_id,
+                                }, {
+                                  patternAlerts: allPatternAlerts,
+                                  smartSignals: allSmartSignals,
                                 })}
                                 horseEntry={vb.entry}
                               />
@@ -482,6 +449,9 @@ export function TodaysRacesPage() {
                                 course_name: vb.course_name,
                                 off_time: vb.off_time,
                                 race_id: vb.race_id,
+                              }, {
+                                patternAlerts: allPatternAlerts,
+                                smartSignals: allSmartSignals,
                               })}
                               className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
                             >
@@ -505,104 +475,18 @@ export function TodaysRacesPage() {
               </p>
             </div>
           )}
-        </div>
 
-        {/* Smart Signal Alerts */}
-        {activeSignals.length > 0 && (
-          <div className="sticky top-[61px] z-40 -mx-4 px-4">
-            <div className="space-y-1.5 py-2">
-              {activeSignals.slice(0, 4).map((signal) => (
-                <Link
-                  key={`${signal.race_id}::${signal.horse_id}`}
-                  to={`/race/${signal.race_id}`}
-                  className={`block rounded-lg px-3 py-2.5 transition-all duration-200 hover:scale-[1.01] ${
-                    signal.signal_strength === 'strong'
-                      ? 'bg-yellow-500/10 border border-yellow-500/30 border-l-4 border-l-yellow-400'
-                      : 'bg-gray-800/90 border border-gray-700 border-l-4 border-l-gray-500'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      {/* Pulsing dot */}
-                      <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                          signal.signal_strength === 'strong' ? 'bg-yellow-400' : 'bg-gray-400'
-                        }`} />
-                        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                          signal.signal_strength === 'strong' ? 'bg-yellow-400' : 'bg-gray-400'
-                        }`} />
-                      </span>
-
-                      {/* Horse + Course + Time */}
-                      <span className="text-white font-semibold text-sm truncate">
-                        {signal.horse_name}
-                      </span>
-                      <span className="text-gray-400 text-xs flex-shrink-0">
-                        {formatTime(signal.off_time)} {signal.course_name}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {/* Movement badge */}
-                      <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                        {signal.movement_pct.toFixed(1)}%
-                      </span>
-
-                      {/* ML Top Pick badge */}
-                      {signal.is_ml_top_pick && (
-                        <span className="bg-purple-500/20 text-purple-400 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                          <Brain className="w-2.5 h-2.5" />
-                          ML{signal.ml_models_agreeing.length > 1 ? ` ${signal.ml_models_agreeing.length}` : ''}
-                        </span>
-                      )}
-
-                      {/* Trainer intent badge */}
-                      {signal.is_single_trainer_entry && (
-                        <span className="bg-green-500/20 text-green-400 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                          <UserCheck className="w-2.5 h-2.5" />
-                          Solo
-                        </span>
-                      )}
-
-                      {/* Dismiss button */}
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          dismissSignal(signal.race_id, signal.horse_id)
-                        }}
-                        className="text-gray-500 hover:text-gray-300 transition-colors p-0.5"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Second line - trainer info for strong signals */}
-                  {signal.signal_strength === 'strong' && (
-                    <div className="mt-1 ml-[18px] text-[11px] text-gray-400">
-                      {signal.is_single_trainer_entry && signal.trainer_name
-                        ? `Only runner from ${signal.trainer_name} at this meeting`
-                        : signal.is_ml_top_pick
-                          ? `Top pick across ${signal.ml_models_agreeing.length} ML model${signal.ml_models_agreeing.length > 1 ? 's' : ''} (${(signal.ml_top_probability * 100).toFixed(0)}% confidence)`
-                          : `Significant market movement detected`
-                      }
-                      {signal.is_single_trainer_entry && signal.is_ml_top_pick && (
-                        <span className="text-yellow-400 font-medium"> + ML Top Pick ({signal.ml_models_agreeing.length})</span>
-                      )}
-                    </div>
-                  )}
-                </Link>
-              ))}
-
-              {activeSignals.length > 4 && (
-                <div className="text-center text-xs text-gray-500 py-1">
-                  +{activeSignals.length - 4} more signal{activeSignals.length - 4 > 1 ? 's' : ''}
-                </div>
-              )}
+          {/* Abandoned Meeting Banner */}
+          {(racesData as any)?.abandoned_count > 0 && (
+            <div className="bg-red-500/10 rounded-lg px-4 py-3 border border-red-500/30 flex items-center space-x-3">
+              <span className="text-red-400 text-lg flex-shrink-0">&#x26A0;</span>
+              <p className="text-sm">
+                <span className="text-red-400 font-semibold">Meeting Abandoned</span>
+                <span className="text-gray-400"> — {(racesData as any).abandoned_courses?.join(', ')} ({(racesData as any).abandoned_count} race{(racesData as any).abandoned_count > 1 ? 's' : ''} removed)</span>
+              </p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Loading */}
         {(isLoading || isRefreshing || isFetching) && (
@@ -650,7 +534,8 @@ export function TodaysRacesPage() {
             return (
               <div
                 key={race.race_id}
-                className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 hover:border-yellow-400/30 rounded-lg transition-all duration-200"
+                id={`race-${race.race_id}`}
+                className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 hover:border-yellow-400/30 rounded-lg transition-all duration-200 scroll-mt-[200px]"
               >
                 {/* Compact Race Header */}
                 <div className="p-4">
@@ -745,10 +630,13 @@ export function TodaysRacesPage() {
                               showNumber={true}
                               number={topPrediction.number}
                               clickable={true}
-                              onHorseClick={(entry) => openHorseDetail(entry, {
+                              onHorseClick={() => openHorseDetail(topPrediction, {
                                 course_name: race.course_name,
                                 off_time: race.off_time,
                                 race_id: race.race_id
+                              }, {
+                                patternAlerts: allPatternAlerts,
+                                smartSignals: allSmartSignals,
                               })}
                               horseEntry={topPrediction}
                             />
@@ -768,19 +656,22 @@ export function TodaysRacesPage() {
                       </div>
                     )}
 
-                    {/* Complete Runners List - ORIGINAL DISPLAY RESTORED */}
+                    {/* Complete Runners List */}
                     {race.topEntries && race.topEntries.length > 0 && (
                       <div className="space-y-3">
-                        <h4 className="text-sm font-medium text-gray-300">All Runners</h4>
-                        <div className="space-y-2">
-                          {race.topEntries.map((entry, index) => {
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-medium text-gray-300">All Runners</h4>
+                          <span className="text-[10px] text-gray-500 italic">Tap horse name to explore form</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {race.topEntries.map((entry) => {
                             const hasSignal = signalHorseIds.has(entry.horse_id)
                             return (
-                            <div key={entry.id} className={`flex items-center justify-between py-2 px-3 rounded-lg ${
+                            <div key={entry.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg ${
                               hasSignal ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-gray-700/30'
                             }`}>
-                              <div className="flex items-center space-x-3">
-                                <div className="relative">
+                              <div className="flex items-center space-x-3 min-w-0 flex-1">
+                                <div className="relative flex-shrink-0">
                                   <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
                                     {entry.number}
                                   </div>
@@ -791,57 +682,64 @@ export function TodaysRacesPage() {
                                     </span>
                                   )}
                                 </div>
-                                <div>
+                                <div className="min-w-0">
                                   <HorseNameWithSilk 
                                     horseName={entry.horse_name}
                                     silkUrl={entry.silk_url}
                                     className="text-white text-sm font-medium"
                                     clickable={true}
-                                    onHorseClick={(entry) => openHorseDetail(entry, {
+                                    onHorseClick={() => openHorseDetail(entry, {
                                       course_name: race.course_name,
                                       off_time: race.off_time,
                                       race_id: race.race_id
+                                    }, {
+                                      patternAlerts: allPatternAlerts,
+                                      smartSignals: allSmartSignals,
                                     })}
                                     horseEntry={entry}
                                   />
-                                  <div className="text-xs text-gray-400 mt-1">
+                                  <div className="text-xs text-gray-400 mt-0.5">
                                     {entry.jockey_name}
                                   </div>
                                 </div>
                               </div>
                               
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2.5 flex-shrink-0">
                                 {entry.ensemble_proba > 0 && (
                                   <div className={`text-sm font-medium ${getNormalizedColor(normMap.get(String(entry.horse_id)) ?? 0)}`}>
                                     {formatNormalized(normMap.get(String(entry.horse_id)) ?? 0)}
                                   </div>
                                 )}
                                 {entry.current_odds && (
-                                  <div className="text-sm text-gray-300 font-mono">
-                                    {entry.current_odds}/1
+                                  <div className="flex items-center gap-1">
+                                    {entry.odds_movement === 'steaming' && (
+                                      <TrendingUp className="w-3 h-3 text-green-400" />
+                                    )}
+                                    {entry.odds_movement === 'drifting' && (
+                                      <ChevronDown className="w-3 h-3 text-red-400" />
+                                    )}
+                                    <div className={`text-sm font-mono font-medium ${
+                                      entry.odds_movement === 'steaming' ? 'text-green-400' :
+                                      entry.odds_movement === 'drifting' ? 'text-red-400' :
+                                      'text-gray-300'
+                                    }`}>
+                                      {entry.current_odds}
+                                    </div>
                                   </div>
                                 )}
-                                <div className="flex flex-col items-center gap-1">
-                                  <button
-                                    onClick={() => openHorseDetail(entry, {
-                                      course_name: race.course_name,
-                                      off_time: race.off_time,
-                                      race_id: race.race_id
-                                    })}
-                                    className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-2 py-0.5 rounded text-[10px] font-semibold transition-colors leading-tight"
-                                  >
-                                    Form
-                                  </button>
-                                  <ShortlistButton 
-                                    horseName={entry.horse_name}
-                                    raceContext={raceContext}
-                                    odds={entry.current_odds ? String(entry.current_odds) : undefined}
-                                    jockeyName={entry.jockey_name}
-                                    trainerName={entry.trainer_name}
-                                    isInShortlist={isHorseInShortlist(entry.horse_name, race.course_name)}
-                                    size="small"
-                                  />
-                                </div>
+                                <button
+                                  onClick={() => openHorseDetail(entry, {
+                                    course_name: race.course_name,
+                                    off_time: race.off_time,
+                                    race_id: race.race_id
+                                  }, {
+                                    patternAlerts: allPatternAlerts,
+                                    smartSignals: allSmartSignals,
+                                  })}
+                                  className="bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                                >
+                                  Form
+                                </button>
                               </div>
                             </div>
                             )

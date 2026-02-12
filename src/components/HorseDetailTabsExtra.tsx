@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { TrendingUp, TrendingDown, Minus, Star, Bot, CheckCircle2, XCircle, Trophy, Target, Users, Zap } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Star, Bot, CheckCircle2, XCircle, Trophy, Target, Users, Zap, ArrowRight } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { RaceEntry, supabase } from '@/lib/supabase'
 import { TabContentProps } from './HorseDetailTabs'
@@ -10,6 +10,7 @@ import {
   formatNormalized,
   type ProbaField,
 } from '@/lib/normalize'
+import { formatTime } from '@/lib/dateUtils'
 
 const getPerformanceIndicator = (value: number | null | undefined, threshold: number = 50) => {
   if (!value) return <Minus className="w-4 h-4 text-gray-500" />
@@ -105,7 +106,7 @@ export function ConnectionsTab({ entry }: TabContentProps) {
   )
 }
 
-export function PredictionsTab({ entry, raceId }: TabContentProps) {
+export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: TabContentProps) {
   // Fetch all runners in this race for comparative analysis
   const { data: allEntries, isLoading: loadingEntries } = useQuery({
     queryKey: ['race-entries-analysis', raceId],
@@ -223,6 +224,42 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
     }
   }, [allEntries, entry])
 
+  // ── Match this horse to any pattern alerts / smart signals ─────
+  const matchedPattern = useMemo(() => {
+    if (!patternAlerts?.length) return null
+    return patternAlerts.find(a => String(a.horse_id) === String(entry.horse_id)) ?? null
+  }, [patternAlerts, entry.horse_id])
+
+  const matchedSignal = useMemo(() => {
+    if (!smartSignals?.length) return null
+    return smartSignals.find(s => String(s.horse_id) === String(entry.horse_id)) ?? null
+  }, [smartSignals, entry.horse_id])
+
+  // Convert decimal odds to fractional display
+  const toFrac = (dec: string | number): string => {
+    const d = Number(dec)
+    if (!d || !Number.isFinite(d) || d <= 1) return 'EVS'
+    const profit = d - 1
+    const common: [number, string][] = [
+      [0.2,'1/5'],[0.25,'1/4'],[0.33,'1/3'],[0.4,'2/5'],[0.5,'1/2'],
+      [0.67,'2/3'],[0.8,'4/5'],[1,'EVS'],[1.1,'11/10'],[1.2,'6/5'],
+      [1.25,'5/4'],[1.5,'6/4'],[2,'2/1'],[2.5,'5/2'],[3,'3/1'],
+      [3.5,'7/2'],[4,'4/1'],[4.5,'9/2'],[5,'5/1'],[6,'6/1'],
+      [7,'7/1'],[8,'8/1'],[9,'9/1'],[10,'10/1'],[12,'12/1'],
+      [14,'14/1'],[16,'16/1'],[20,'20/1'],[25,'25/1'],[33,'33/1'],
+      [50,'50/1'],[66,'66/1'],[100,'100/1']
+    ]
+    let best = common[0]
+    let bestDiff = Math.abs(profit - best[0])
+    for (const c of common) {
+      const diff = Math.abs(profit - c[0])
+      if (diff < bestDiff) { best = c; bestDiff = diff }
+    }
+    if (bestDiff < 0.15) return best[1]
+    const rounded = Math.round(profit)
+    return rounded <= 0 ? 'EVS' : `${rounded}/1`
+  }
+
   // ── No predictions fallback ────────────────────────────────────
   if (!entry.ensemble_proba || entry.ensemble_proba === 0) {
     return (
@@ -337,7 +374,174 @@ export function PredictionsTab({ entry, raceId }: TabContentProps) {
         </div>
       )}
 
-      {/* ── Section 2: FIELD POSITION ────────────────────────── */}
+      {/* ── Section 2: PROFITABLE PATTERN ALERT ─────────────── */}
+      {matchedPattern && (
+        <div className="bg-green-500/5 border border-green-500/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Target className="w-5 h-5 text-green-400" />
+            <h3 className="text-green-400 font-bold">Profitable Pattern Match</h3>
+          </div>
+
+          {/* Best pattern */}
+          <div className="bg-gray-800/60 rounded-lg p-3 mb-3">
+            <div className="text-sm font-semibold text-green-300 mb-1">
+              {matchedPattern.best_pattern.label}
+            </div>
+            {matchedPattern.reasons.length > 0 && (
+              <p className="text-xs text-gray-400 mb-2">
+                {matchedPattern.reasons.join(' + ')}
+              </p>
+            )}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold px-2 py-1 rounded bg-green-500/20 text-green-400">
+                +{matchedPattern.best_pattern.roi_pct}% ROI
+              </span>
+              <span className="text-xs font-medium px-2 py-1 rounded bg-green-500/10 text-green-500/80">
+                {matchedPattern.best_pattern.win_rate}% Win Rate
+              </span>
+              <span className="text-[10px] text-gray-500">
+                {matchedPattern.best_pattern.occurrences} samples
+              </span>
+            </div>
+          </div>
+
+          {/* Additional matched patterns */}
+          {matchedPattern.matched_patterns.length > 1 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-gray-400 font-medium">Also matches:</div>
+              {matchedPattern.matched_patterns.slice(1).map((p, idx) => (
+                <div key={idx} className="flex items-center justify-between bg-gray-800/40 rounded-lg px-3 py-2">
+                  <span className="text-xs text-gray-300">{p.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-green-400">+{p.roi_pct}% ROI</span>
+                    <span className="text-[10px] text-gray-500">{p.win_rate}% WR</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Section 3: MARKET MOVEMENT ────────────────────────── */}
+      {(matchedSignal || entry.odds_movement === 'steaming' || entry.odds_movement === 'drifting') && (
+        <div className={`rounded-xl p-4 border ${
+          (matchedSignal || entry.odds_movement === 'steaming')
+            ? 'bg-yellow-500/5 border-yellow-500/30'
+            : 'bg-red-500/5 border-red-500/30'
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Zap className={`w-5 h-5 ${entry.odds_movement === 'drifting' ? 'text-red-400' : 'text-yellow-400'}`} />
+              <h3 className={`font-bold ${entry.odds_movement === 'drifting' ? 'text-red-400' : 'text-yellow-400'}`}>
+                Market Movement
+              </h3>
+            </div>
+            {matchedSignal && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                matchedSignal.signal_strength === 'strong'
+                  ? (matchedSignal.is_single_trainer_entry && matchedSignal.is_ml_top_pick ? 'bg-yellow-500/30 text-yellow-300' : 'bg-green-500/20 text-green-400')
+                  : 'bg-gray-600/40 text-gray-300'
+              }`}>
+                {matchedSignal.signal_strength === 'strong'
+                  ? (matchedSignal.is_single_trainer_entry && matchedSignal.is_ml_top_pick ? 'Very High' : 'High')
+                  : 'Medium'}
+              </span>
+            )}
+          </div>
+
+          {/* Odds movement display */}
+          {matchedSignal && (
+            <div className="bg-gray-800/60 rounded-lg p-3 mb-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-white font-mono font-bold text-lg">
+                  {toFrac(matchedSignal.initial_odds)}
+                </span>
+                <ArrowRight className="w-4 h-4 text-gray-500" />
+                <span className={`font-mono font-bold text-lg ${
+                  entry.odds_movement === 'steaming' ? 'text-green-400' :
+                  entry.odds_movement === 'drifting' ? 'text-red-400' :
+                  'text-white'
+                }`}>
+                  {toFrac(matchedSignal.current_odds)}
+                </span>
+                {matchedSignal.movement_pct && (
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                    matchedSignal.movement_pct < 0
+                      ? 'bg-green-500/20 text-green-400'
+                      : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    {matchedSignal.movement_pct > 0 ? '+' : ''}{matchedSignal.movement_pct.toFixed(1)}%
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-gray-500">
+                {matchedSignal.change_count} price change{matchedSignal.change_count !== 1 ? 's' : ''} detected
+              </div>
+            </div>
+          )}
+
+          {/* Fallback for entry-level movement without full signal data */}
+          {!matchedSignal && entry.odds_movement && (
+            <div className="bg-gray-800/60 rounded-lg p-3 mb-3">
+              <div className="flex items-center gap-2">
+                {entry.odds_movement === 'steaming' ? (
+                  <TrendingUp className="w-4 h-4 text-green-400" />
+                ) : (
+                  <TrendingDown className="w-4 h-4 text-red-400" />
+                )}
+                <span className={`text-sm font-semibold ${
+                  entry.odds_movement === 'steaming' ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {entry.odds_movement === 'steaming' ? 'Steaming' : 'Drifting'}
+                </span>
+                {entry.odds_movement_pct && (
+                  <span className="text-xs text-gray-400">
+                    ({entry.odds_movement_pct > 0 ? '+' : ''}{entry.odds_movement_pct.toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Signal reasons */}
+          {matchedSignal && (
+            <div className="space-y-1.5">
+              {matchedSignal.is_ml_top_pick && (
+                <div className="flex items-center gap-2 text-xs">
+                  <Bot className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
+                  <span className="text-gray-300">
+                    AI top pick — {matchedSignal.ml_models_agreeing.length} model{matchedSignal.ml_models_agreeing.length > 1 ? 's' : ''} agree ({(matchedSignal.ml_top_probability * 100).toFixed(0)}%)
+                  </span>
+                </div>
+              )}
+              {matchedSignal.is_single_trainer_entry && matchedSignal.trainer_name && (
+                <div className="flex items-center gap-2 text-xs">
+                  <Trophy className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                  <span className="text-gray-300">Only runner for {matchedSignal.trainer_name}</span>
+                </div>
+              )}
+              {matchedSignal.is_top_rpr && (
+                <div className="flex items-center gap-2 text-xs">
+                  <Star className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                  <span className="text-gray-300">Top RPR in field</span>
+                </div>
+              )}
+              {matchedSignal.historical_pattern && (
+                <div className="flex items-center gap-2 text-xs mt-2 pt-2 border-t border-gray-700/50">
+                  <Target className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+                  <span className="text-yellow-500/80 font-medium">
+                    {matchedSignal.historical_pattern.historical_win_rate}% historical win rate
+                  </span>
+                  <span className="text-gray-600">({matchedSignal.historical_pattern.occurrences} samples)</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Section 4: FIELD POSITION ────────────────────────── */}
       {analysis && (
         <div className="bg-gray-700/50 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">

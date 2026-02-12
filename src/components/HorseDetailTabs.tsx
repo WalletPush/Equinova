@@ -1,10 +1,13 @@
 import React from 'react'
 import { TrendingUp, TrendingDown, Minus, Star, Bot, Trophy } from 'lucide-react'
 import { RaceEntry } from '@/lib/supabase'
+import type { SmartSignal, PatternAlert } from '@/types/signals'
 
 export interface TabContentProps {
   entry: RaceEntry
   raceId?: string
+  patternAlerts?: PatternAlert[]
+  smartSignals?: SmartSignal[]
 }
 
 const getConfidenceColor = (proba: number) => {

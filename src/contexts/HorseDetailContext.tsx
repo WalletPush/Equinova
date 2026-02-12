@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState } from 'react'
 import { RaceEntry } from '@/lib/supabase'
 import { HorseDetailModal } from '@/components/HorseDetailModal'
+import type { SmartSignal, PatternAlert } from '@/types/signals'
 
 interface RaceContext {
   course_name?: string
@@ -8,11 +9,16 @@ interface RaceContext {
   race_id?: string
 }
 
+interface SignalData {
+  patternAlerts?: PatternAlert[]
+  smartSignals?: SmartSignal[]
+}
+
 interface HorseDetailContextType {
   selectedHorse: RaceEntry | null
   raceContext: RaceContext | null
   isModalOpen: boolean
-  openHorseDetail: (entry: RaceEntry, raceContext?: RaceContext) => void
+  openHorseDetail: (entry: RaceEntry, raceContext?: RaceContext, signals?: SignalData) => void
   closeHorseDetail: () => void
 }
 
@@ -21,11 +27,13 @@ const HorseDetailContext = createContext<HorseDetailContextType | undefined>(und
 export function HorseDetailProvider({ children }: { children: React.ReactNode }) {
   const [selectedHorse, setSelectedHorse] = useState<RaceEntry | null>(null)
   const [raceContext, setRaceContext] = useState<RaceContext | null>(null)
+  const [signalData, setSignalData] = useState<SignalData>({})
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  const openHorseDetail = (entry: RaceEntry, raceCtx?: RaceContext) => {
+  const openHorseDetail = (entry: RaceEntry, raceCtx?: RaceContext, signals?: SignalData) => {
     setSelectedHorse(entry)
     setRaceContext(raceCtx || null)
+    setSignalData(signals || {})
     setIsModalOpen(true)
   }
 
@@ -35,6 +43,7 @@ export function HorseDetailProvider({ children }: { children: React.ReactNode })
     setTimeout(() => {
       setSelectedHorse(null)
       setRaceContext(null)
+      setSignalData({})
     }, 300)
   }
 
@@ -51,6 +60,8 @@ export function HorseDetailProvider({ children }: { children: React.ReactNode })
         <HorseDetailModal
           entry={selectedHorse}
           raceContext={raceContext}
+          patternAlerts={signalData.patternAlerts}
+          smartSignals={signalData.smartSignals}
           isOpen={isModalOpen}
           onClose={closeHorseDetail}
         />
