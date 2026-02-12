@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { 
@@ -13,7 +13,8 @@ import {
   X,
   List,
   Wallet,
-  BarChart3
+  BarChart3,
+  Clock
 } from 'lucide-react'
 
 interface AppLayoutProps {
@@ -24,6 +25,17 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { user, profile, signOut } = useAuth()
   const navigate = useNavigate()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+
+  // Live UK clock - ticks every second
+  const [ukTime, setUkTime] = useState(() =>
+    new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  )
+  useEffect(() => {
+    const id = setInterval(() => {
+      setUkTime(new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
 
   const handleSignOut = async () => {
     await signOut()
@@ -51,6 +63,13 @@ export function AppLayout({ children }: AppLayoutProps) {
               className="h-9 w-auto brightness-200"
             />
           </NavLink>
+
+          {/* Live UK Clock */}
+          <div className="flex items-center gap-1.5 bg-gray-700/50 px-3 py-1.5 rounded-lg">
+            <Clock className="w-3.5 h-3.5 text-yellow-400" />
+            <span className="text-white text-sm font-mono font-medium tabular-nums">{ukTime}</span>
+            <span className="text-gray-400 text-[10px] font-medium">UK</span>
+          </div>
           
           {/* Hamburger Menu */}
           <div className="relative">
