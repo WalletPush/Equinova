@@ -664,13 +664,12 @@ export function AIInsiderPage() {
 
       const finalInsightKey = raceId
 
-      // Send ALL value bet horse IDs for comparative analysis
+      // Send ALL value bet horse IDs for comparative analysis (API key stays server-side)
       const response = await fetchFromSupabaseFunction('enhanced-value-bet-analysis', {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseIds: horsesData.map((h: any) => h.id.toString()),
-          openaiApiKey: profile?.openai_api_key
+          horseIds: horsesData.map((h: any) => h.id.toString())
         })
       })
 
