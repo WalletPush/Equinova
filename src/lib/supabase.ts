@@ -114,6 +114,11 @@ export interface RaceEntry {
   finishing_position?: number
   result_updated_at?: string
   created_at: string
+  // Live market data (overlaid by race-data from horse_market_movement)
+  opening_odds?: number
+  odds_movement?: 'steaming' | 'drifting' | 'stable' | null
+  odds_movement_pct?: number | null
+  market_last_updated?: string | null
 }
 
 export interface Race {
