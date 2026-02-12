@@ -146,6 +146,8 @@ interface UpcomingRacesResponse {
     total_races_today: number
     races_completed: number
     races_remaining: number
+    abandoned_courses?: string[]
+    abandoned_count?: number
   }
 }
 
@@ -305,7 +307,7 @@ export function AIInsiderPage() {
     s => s.confidence_score >= confidenceFilter
   ) || []
   const trainerIntents = trainerIntentResponse?.data?.trainer_intent_signals || []
-  // Fetch market movers directly from `horse_market_movement` (only steaming horses,
+  // Fetch market movers directly from `horse_market_movement` (only backed/shortening horses,
   // using `odds_movement_pct` filter as requested)
   const { data: persistentMarketMoversData, isLoading: persistentMarketMoversLoading } = useQuery({
     queryKey: ['market-movers'],
@@ -670,7 +672,8 @@ export function AIInsiderPage() {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseId: horseData.id.toString()
+          horseId: horseData.id.toString(),
+          openaiApiKey: profile?.openai_api_key
         })
       })
 
@@ -747,7 +750,8 @@ export function AIInsiderPage() {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          horseId: horseData.id.toString()
+          horseId: horseData.id.toString(),
+          openaiApiKey: profile?.openai_api_key
         })
       })
 
@@ -840,7 +844,7 @@ export function AIInsiderPage() {
         method: 'POST',
         body: JSON.stringify({
           raceId: raceId,
-          openaiApiKey: profile.openai_api_key
+          openaiApiKey: profile?.openai_api_key
         })
       })
 
@@ -1324,6 +1328,17 @@ export function AIInsiderPage() {
             </div>
           )}
 
+          {/* Abandoned Meeting Banner */}
+          {upcomingRacesResponse?.data?.abandoned_count > 0 && (
+            <div className="bg-red-500/10 rounded-lg px-4 py-3 border border-red-500/30 flex items-center space-x-3 mb-4">
+              <span className="text-red-400 text-lg flex-shrink-0">&#x26A0;</span>
+              <p className="text-sm">
+                <span className="text-red-400 font-semibold">Meeting Abandoned</span>
+                <span className="text-gray-400"> — {upcomingRacesResponse.data.abandoned_courses?.join(', ')} ({upcomingRacesResponse.data.abandoned_count} race{upcomingRacesResponse.data.abandoned_count > 1 ? 's' : ''} excluded)</span>
+              </p>
+            </div>
+          )}
+
           {/* NEW: Upcoming Races Tab */}
           {activeTab === 'upcoming_races' && (
             <div className="space-y-4">
@@ -1634,7 +1649,7 @@ export function AIInsiderPage() {
                                       mover.odds_movement === 'drifting' ? 'bg-blue-600/20 text-blue-400 border-blue-600/30' : 
                                       'bg-gray-600/20 text-gray-400 border-gray-600/30'
                                     }`}>
-                                      {mover.odds_movement.charAt(0).toUpperCase() + mover.odds_movement.slice(1)}
+                                      {mover.odds_movement === 'steaming' ? 'Backed' : mover.odds_movement === 'drifting' ? 'Drifting' : 'Stable'}
                                     </span>
                                     {modelBadges && modelBadges.length > 0 && modelBadges.map((b) => (
                                       <span key={b} className="bg-green-600/20 text-green-400 border border-green-600/30 px-2 py-0.5 rounded text-xs font-medium">
@@ -1650,7 +1665,7 @@ export function AIInsiderPage() {
                                     source="market_mover"
                                     jockeyName={mover.jockey_name}
                                     trainerName={mover.trainer_name}
-                                    mlInfo={`Movement: ${mover.odds_movement} (${mover.odds_movement_pct > 0 ? '+' : ''}${mover.odds_movement_pct}%)`}
+                                    mlInfo={`Movement: ${mover.odds_movement === 'steaming' ? 'Backed' : mover.odds_movement === 'drifting' ? 'Drifting' : 'Stable'} (${mover.odds_movement_pct > 0 ? '+' : ''}${mover.odds_movement_pct}%)`}
                                     horseId={mover.horse_id}
                                     raceId={mover.race_id}
                                   />
@@ -2032,7 +2047,7 @@ export function AIInsiderPage() {
                                       source="value_bet"
                                       jockeyName={bet.jockey_name}
                                       trainerName={bet.trainer_name}
-                                      mlInfo={`ML: ${(normalizeProba(bet.ensemble_proba, race.race_id) * 100).toFixed(1)}% | Models: ${bet.top_in_models.join(', ')}`}
+                                      mlInfo={`ML: ${(normalizeProba(bet.ensemble_proba, race.race_id) * 100).toFixed(1)}% | Models: ${(bet.top_in_models ?? []).join(', ')}`}
                                       horseId={bet.horse_id}
                                       raceId={race.race_id}
                                     />
