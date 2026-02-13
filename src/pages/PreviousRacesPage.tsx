@@ -178,20 +178,26 @@ export function PreviousRacesPage() {
   }
 
   // ─── Find ML predicted winner for a race ────────────────────────
-  // If the top pick was a non-runner, fall through to the next best pick
+  // Only consider horses that actually FINISHED (position != null).
+  // This excludes non-runners, pulled-up, fell, etc.
   const getMlPredictedWinner = (race: ResultsRace) => {
     if (!race.topEntries || race.topEntries.length === 0) return null
-    // topEntries already sorted by ensemble_proba desc
-    // If we have runners (results), skip non-runners and pick the best horse that actually ran
+
+    // If we have results, only match against horses that finished (position is set)
     if (race.runners && race.runners.length > 0) {
-      const runnerNames = new Set(race.runners.map(r => bareHorseName(r.horse)))
+      const finisherNames = new Set(
+        race.runners
+          .filter(r => r.position != null && r.position > 0)
+          .map(r => bareHorseName(r.horse))
+      )
+
+      // Walk topEntries (sorted by ensemble_proba desc) — first finisher match wins
       for (const entry of race.topEntries) {
         const bareName = bareHorseName(entry.horse_name)
-        // Check exact match or fuzzy match (startsWith)
-        let found = runnerNames.has(bareName)
+        let found = finisherNames.has(bareName)
         if (!found) {
-          for (const rn of runnerNames) {
-            if (rn.startsWith(bareName) || bareName.startsWith(rn)) {
+          for (const fn of finisherNames) {
+            if (fn.startsWith(bareName) || bareName.startsWith(fn)) {
               found = true
               break
             }
@@ -199,8 +205,12 @@ export function PreviousRacesPage() {
         }
         if (found) return entry
       }
+
+      // No ML entry matched a finisher — return null (no valid pick for this race)
+      return null
     }
-    // No runners data yet (pre-race) or no match at all — return top pick
+
+    // Pre-race (no runners data yet) — return top ML pick
     return race.topEntries[0]
   }
 
@@ -670,11 +680,20 @@ export function PreviousRacesPage() {
                         ? <span className="ml-2 text-green-400 font-semibold">— Correct!</span>
                         : winner && <span className="ml-2">— Finished: {
                           (() => {
-                            const pos = runners.find(r => bareHorseName(r.horse) === bareHorseName(mlPick.horse_name))?.position
-                            return pos ? `${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}` : 'N/R'
+                            const matched = runners.find(r => bareHorseName(r.horse) === bareHorseName(mlPick.horse_name))
+                            const pos = matched?.position
+                            if (pos) return `${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}`
+                            return 'DNF'
                           })()
                         }</span>
                       }
+                    </div>
+                  )}
+                  {/* Show if original ML top pick was a non-runner */}
+                  {race.topEntries && race.topEntries.length > 0 && mlPick && 
+                   bareHorseName(race.topEntries[0].horse_name) !== bareHorseName(mlPick.horse_name) && (
+                    <div className="mx-4 mb-2 px-3 py-1 rounded text-[10px] text-gray-500 bg-gray-800/30">
+                      Original top pick {race.topEntries[0].horse_name} was N/R — pick moved to next best finisher
                     </div>
                   )}
 
