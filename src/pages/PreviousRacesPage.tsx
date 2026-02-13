@@ -41,6 +41,23 @@ interface RaceRunner {
   btn: number | null
   ovr_btn: number | null
   time: string | null
+  comment: string | null
+}
+
+// ─── Parse outcome from comment for horses that didn't finish ───────
+// Returns "Fell", "Pulled Up", "Unseated", "Brought Down", "Refused", or "DNF"
+function parseNonFinishOutcome(runner: RaceRunner | undefined): string {
+  if (!runner) return 'N/R'
+  const c = (runner.comment || '').toLowerCase()
+  if (c.includes('unseated')) return 'Unseated'
+  if (c.includes('fell')) return 'Fell'
+  if (c.includes('pulled up')) return 'Pulled Up'
+  if (c.includes('brought down')) return 'Brought Down'
+  if (c.includes('refused')) return 'Refused'
+  if (c.includes('slipped up')) return 'Slipped Up'
+  if (c.includes('carried out')) return 'Carried Out'
+  // If they're in race_runners but no position and no clear outcome, they started but didn't finish
+  return 'DNF'
 }
 
 // ─── Extended race type with runners ────────────────────────────────
@@ -683,17 +700,25 @@ export function PreviousRacesPage() {
                             const matched = runners.find(r => bareHorseName(r.horse) === bareHorseName(mlPick.horse_name))
                             const pos = matched?.position
                             if (pos) return `${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}`
-                            return 'DNF'
+                            return parseNonFinishOutcome(matched)
                           })()
                         }</span>
                       }
                     </div>
                   )}
-                  {/* Show if original ML top pick was a non-runner */}
+                  {/* Show if original ML top pick didn't finish */}
                   {race.topEntries && race.topEntries.length > 0 && mlPick && 
                    bareHorseName(race.topEntries[0].horse_name) !== bareHorseName(mlPick.horse_name) && (
                     <div className="mx-4 mb-2 px-3 py-1 rounded text-[10px] text-gray-500 bg-gray-800/30">
-                      Original top pick {race.topEntries[0].horse_name} was N/R — pick moved to next best finisher
+                      {(() => {
+                        const origName = race.topEntries[0].horse_name
+                        const origRunner = runners.find(r => bareHorseName(r.horse) === bareHorseName(origName))
+                        if (!origRunner) {
+                          return `Original top pick ${origName} was N/R — pick moved to next best finisher`
+                        }
+                        const outcome = parseNonFinishOutcome(origRunner)
+                        return `Original top pick ${origName} — ${outcome} — pick moved to next best finisher`
+                      })()}
                     </div>
                   )}
 
