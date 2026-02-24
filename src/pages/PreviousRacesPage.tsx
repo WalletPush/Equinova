@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { supabase, Race } from '@/lib/supabase'
-import { normalizeField, formatNormalized } from '@/lib/normalize'
 import { formatTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
 import { 
   Calendar,
@@ -77,6 +76,62 @@ function positionBadge(pos: number | null) {
   if (pos === 3) return { bg: 'bg-amber-600', text: 'text-white', label: '3rd' }
   if (pos) return { bg: 'bg-gray-600', text: 'text-white', label: `${pos}th` }
   return { bg: 'bg-gray-700', text: 'text-gray-400', label: '-' }
+}
+
+// ─── ML Model definitions ──────────────────────────────────────────
+const MODEL_DEFS = [
+  { key: 'mlp', field: 'mlp_proba' as const, label: 'MLP', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  { key: 'rf', field: 'rf_proba' as const, label: 'RF', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  { key: 'xgboost', field: 'xgboost_proba' as const, label: 'XGB', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+  { key: 'benter', field: 'benter_proba' as const, label: 'LGBM', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  { key: 'ensemble', field: 'ensemble_proba' as const, label: 'ENS', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+] as const
+
+/**
+ * For each model, find its top pick among horses that actually ran.
+ * Returns a map: horseName (bare) → list of model labels that picked it.
+ */
+function getModelPicksMap(
+  entries: import('@/lib/supabase').RaceEntry[] | undefined,
+  runners: RaceRunner[] | undefined
+): Map<string, { label: string; color: string }[]> {
+  const map = new Map<string, { label: string; color: string }[]>()
+  if (!entries || entries.length === 0) return map
+
+  const ranNames = runners && runners.length > 0
+    ? new Set(runners.map(r => bareHorseName(r.horse)))
+    : null
+
+  for (const model of MODEL_DEFS) {
+    const sorted = [...entries]
+      .filter(e => (e[model.field] as number) > 0)
+      .sort((a, b) => (b[model.field] as number) - (a[model.field] as number))
+
+    let pick: typeof entries[0] | null = null
+    if (ranNames) {
+      for (const entry of sorted) {
+        const bn = bareHorseName(entry.horse_name)
+        let found = ranNames.has(bn)
+        if (!found) {
+          for (const rn of ranNames) {
+            if (rn.startsWith(bn) || bn.startsWith(rn)) { found = true; break }
+          }
+        }
+        if (found) { pick = entry; break }
+      }
+    } else {
+      pick = sorted[0] || null
+    }
+
+    if (pick) {
+      const bn = bareHorseName(pick.horse_name)
+      const existing = map.get(bn) || []
+      existing.push({ label: model.label, color: model.color })
+      map.set(bn, existing)
+    }
+  }
+
+  return map
 }
 
 export function PreviousRacesPage() {
@@ -604,9 +659,8 @@ export function PreviousRacesPage() {
               const mlPick = getMlPredictedWinner(race)
               const winner = runners.find(r => r.position === 1)
 
-              // Check if ML predicted the winner
-              const mlGotItRight = mlPick && winner &&
-                bareHorseName(mlPick.horse_name) === bareHorseName(winner.horse)
+              // Build map of which models picked each horse
+              const modelPicksMap = getModelPicksMap(race.topEntries, race.runners)
 
               return (
                 <div key={race.race_id} className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl overflow-hidden">
@@ -634,32 +688,38 @@ export function PreviousRacesPage() {
                   <div className="px-4 pb-2 space-y-1.5">
                     {top3.map(runner => {
                       const badge = positionBadge(runner.position)
-                      const isMlPick = mlPick && bareHorseName(mlPick.horse_name) === bareHorseName(runner.horse)
+                      const bn = bareHorseName(runner.horse)
+                      const modelPicks = modelPicksMap.get(bn) || []
                       return (
                         <div key={runner.id} className="flex items-center justify-between py-1.5 px-3 bg-gray-700/30 rounded-lg">
-                          <div className="flex items-center space-x-3">
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${badge.bg} ${badge.text}`}>
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.bg} ${badge.text}`}>
                               {runner.position}
                             </div>
                             {runner.number > 0 && (
-                              <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
+                              <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
                                 {runner.number}
                               </div>
                             )}
-                            <div>
-                              <div className="text-white text-sm font-medium flex items-center gap-2">
-                                {runner.horse}
-                                {isMlPick && (
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                                    runner.position === 1 ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/15 text-yellow-500'
-                                  }`}>
-                                    {runner.position === 1 ? 'ML Winner ✓' : 'ML Pick'}
+                            <div className="min-w-0">
+                              <div className="text-white text-sm font-medium flex items-center gap-1.5 flex-wrap">
+                                <span className="truncate">{runner.horse}</span>
+                                {modelPicks.length > 0 && (
+                                  <span className="flex items-center gap-1 flex-shrink-0">
+                                    {modelPicks.map(mp => (
+                                      <span
+                                        key={mp.label}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${mp.color}`}
+                                      >
+                                        {mp.label} {runner.position === 1 ? '✓' : ''}
+                                      </span>
+                                    ))}
                                   </span>
                                 )}
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center space-x-4 text-right">
+                          <div className="flex items-center space-x-4 text-right flex-shrink-0">
                             {runner.btn != null && runner.position !== 1 && (
                               <span className="text-xs text-gray-400">{runner.btn} len</span>
                             )}
@@ -672,44 +732,41 @@ export function PreviousRacesPage() {
                     })}
                   </div>
 
-                  {/* ML prediction callout */}
-                  {mlPick && (
-                    <div className={`mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs ${
-                      mlGotItRight
-                        ? 'bg-green-500/10 border border-green-500/20 text-green-400'
-                        : 'bg-gray-700/40 text-gray-400'
-                    }`}>
-                      <span className="font-medium">ML Pick:</span>{' '}
-                      {mlPick.horse_name}
-                      {mlPick.ensemble_proba != null && (
-                        <span className="text-gray-500 ml-1">
-                          ({(() => {
-                            const normMap = normalizeField(race.topEntries || [], 'ensemble_proba', 'horse_id')
-                            const norm = normMap.get(String(mlPick.horse_id))
-                            return norm != null ? formatNormalized(norm) : `${(mlPick.ensemble_proba * 100).toFixed(1)}%`
-                          })()})
-                        </span>
-                      )}
-                      {mlGotItRight
-                        ? <span className="ml-2 text-green-400 font-semibold">— Correct!</span>
-                        : winner && <span className="ml-2">— {
-                          (() => {
-                            const matched = runners.find(r => bareHorseName(r.horse) === bareHorseName(mlPick.horse_name))
-                            const pos = matched?.position
-                            if (pos) return `Finished: ${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}`
-                            return parseNonFinishOutcome(matched)
-                          })()
-                        }</span>
-                      }
-                    </div>
-                  )}
-                  {/* Show if original ML top pick was a non-runner */}
-                  {race.topEntries && race.topEntries.length > 0 && mlPick && 
-                   bareHorseName(race.topEntries[0].horse_name) !== bareHorseName(mlPick.horse_name) && (
-                    <div className="mx-4 mb-2 px-3 py-1 rounded text-[10px] text-gray-500 bg-gray-800/30">
-                      Original top pick {race.topEntries[0].horse_name} was N/R — pick moved to next best runner
-                    </div>
-                  )}
+                  {/* ML models summary callout */}
+                  {race.topEntries && race.topEntries.length > 0 && (() => {
+                    const winnerBn = winner ? bareHorseName(winner.horse) : null
+                    const winnerModels = winnerBn ? (modelPicksMap.get(winnerBn) || []) : []
+                    const anyModelCorrect = winnerModels.length > 0
+
+                    if (!anyModelCorrect && mlPick) {
+                      const matched = runners.find(r => bareHorseName(r.horse) === bareHorseName(mlPick.horse_name))
+                      const pos = matched?.position
+                      const outcome = pos
+                        ? `Finished: ${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}`
+                        : parseNonFinishOutcome(matched)
+                      return (
+                        <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs bg-gray-700/40 text-gray-400">
+                          <span className="font-medium">No model predicted the winner</span>
+                          <span className="ml-1">— Ensemble pick {mlPick.horse_name} {outcome}</span>
+                        </div>
+                      )
+                    }
+
+                    if (anyModelCorrect) {
+                      return (
+                        <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs bg-green-500/10 border border-green-500/20 text-green-400">
+                          <span className="font-medium">
+                            {winnerModels.length === 5 ? 'All models' : winnerModels.map(m => m.label).join(', ')}
+                          </span>
+                          {' '}predicted the winner {winner!.horse}
+                          {winner!.sp && <span className="text-gray-500 ml-1">({winner!.sp})</span>}
+                          <span className="ml-1 font-semibold">✓</span>
+                        </div>
+                      )
+                    }
+
+                    return null
+                  })()}
 
                   {/* Expand button for full finishing order */}
                   {rest.length > 0 && (
