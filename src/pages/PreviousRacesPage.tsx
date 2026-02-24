@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
+import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
 import { supabase, Race } from '@/lib/supabase'
 import { formatTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
 import { 
@@ -78,15 +79,6 @@ function positionBadge(pos: number | null) {
   return { bg: 'bg-gray-700', text: 'text-gray-400', label: '-' }
 }
 
-// ─── ML Model definitions ──────────────────────────────────────────
-const MODEL_DEFS = [
-  { key: 'mlp', field: 'mlp_proba' as const, label: 'MLP', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  { key: 'rf', field: 'rf_proba' as const, label: 'RF', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-  { key: 'xgboost', field: 'xgboost_proba' as const, label: 'XGB', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-  { key: 'benter', field: 'benter_proba' as const, label: 'LGBM', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-  { key: 'ensemble', field: 'ensemble_proba' as const, label: 'ENS', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
-] as const
-
 /**
  * For each model, find its top pick among horses that actually ran.
  * Returns a map: horseName (bare) → list of model labels that picked it.
@@ -103,9 +95,10 @@ function getModelPicksMap(
     : null
 
   for (const model of MODEL_DEFS) {
+    const f = model.field as keyof typeof entries[0]
     const sorted = [...entries]
-      .filter(e => (e[model.field] as number) > 0)
-      .sort((a, b) => (b[model.field] as number) - (a[model.field] as number))
+      .filter(e => (e[f] as number) > 0)
+      .sort((a, b) => (b[f] as number) - (a[f] as number))
 
     let pick: typeof entries[0] | null = null
     if (ranNames) {
@@ -707,12 +700,12 @@ export function PreviousRacesPage() {
                                 {modelPicks.length > 0 && (
                                   <span className="flex items-center gap-1 flex-shrink-0">
                                     {modelPicks.map(mp => (
-                                      <span
+                                      <ModelBadge
                                         key={mp.label}
-                                        className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${mp.color}`}
-                                      >
-                                        {mp.label} {runner.position === 1 ? '✓' : ''}
-                                      </span>
+                                        label={mp.label}
+                                        color={mp.color}
+                                        showCheck={runner.position === 1}
+                                      />
                                     ))}
                                   </span>
                                 )}
