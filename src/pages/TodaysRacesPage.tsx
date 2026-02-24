@@ -25,6 +25,44 @@ import {
   Search,
 } from 'lucide-react'
 import type { SmartSignal, PatternAlert } from '@/types/signals'
+import type { RaceEntry } from '@/lib/supabase'
+
+// ─── ML Model definitions (shared with PreviousRacesPage) ──────────
+const MODEL_DEFS = [
+  { key: 'mlp', field: 'mlp_proba' as const, label: 'MLP', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  { key: 'rf', field: 'rf_proba' as const, label: 'RF', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  { key: 'xgboost', field: 'xgboost_proba' as const, label: 'XGB', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+  { key: 'benter', field: 'benter_proba' as const, label: 'LGBM', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  { key: 'ensemble', field: 'ensemble_proba' as const, label: 'ENS', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+] as const
+
+/**
+ * For each model, find its top-picked horse from the entries.
+ * Returns a map: horse_id → list of model badges that picked it.
+ */
+function getModelPicksByHorseId(
+  entries: RaceEntry[] | undefined
+): Map<string, { label: string; color: string }[]> {
+  const map = new Map<string, { label: string; color: string }[]>()
+  if (!entries || entries.length === 0) return map
+
+  for (const model of MODEL_DEFS) {
+    let bestEntry: RaceEntry | null = null
+    let bestProba = 0
+    for (const entry of entries) {
+      const p = entry[model.field] as number
+      if (p > bestProba) { bestProba = p; bestEntry = entry }
+    }
+    if (bestEntry) {
+      const id = bestEntry.horse_id
+      const existing = map.get(id) || []
+      existing.push({ label: model.label, color: model.color })
+      map.set(id, existing)
+    }
+  }
+
+  return map
+}
 
 export function TodaysRacesPage() {
   // Use UK timezone for proper date detection
@@ -545,6 +583,9 @@ export function TodaysRacesPage() {
             const topPrediction = aiPredictions.length > 0 ? aiPredictions[0] : null
             const hasAI = topPrediction && topPrediction.ensemble_proba > 0
             
+            // Build map of which models picked each horse
+            const modelPicksMap = getModelPicksByHorseId(race.topEntries)
+            
             // Create race context for buttons
             const raceContext = {
               race_id: race.race_id,
@@ -688,6 +729,7 @@ export function TodaysRacesPage() {
                         <div className="space-y-1.5">
                           {race.topEntries.map((entry) => {
                             const hasSignal = signalHorseIds.has(entry.horse_id)
+                            const entryModelPicks = modelPicksMap.get(entry.horse_id) || []
                             return (
                             <div key={entry.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg ${
                               hasSignal ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-gray-700/30'
@@ -705,21 +747,35 @@ export function TodaysRacesPage() {
                                   )}
                                 </div>
                                 <div className="min-w-0">
-                                  <HorseNameWithSilk 
-                                    horseName={entry.horse_name}
-                                    silkUrl={entry.silk_url}
-                                    className="text-white text-sm font-medium"
-                                    clickable={true}
-                                    onHorseClick={() => openHorseDetail(entry, {
-                                      course_name: race.course_name,
-                                      off_time: race.off_time,
-                                      race_id: race.race_id
-                                    }, {
-                                      patternAlerts: allPatternAlerts,
-                                      smartSignals: allSmartSignals,
-                                    })}
-                                    horseEntry={entry}
-                                  />
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <HorseNameWithSilk 
+                                      horseName={entry.horse_name}
+                                      silkUrl={entry.silk_url}
+                                      className="text-white text-sm font-medium"
+                                      clickable={true}
+                                      onHorseClick={() => openHorseDetail(entry, {
+                                        course_name: race.course_name,
+                                        off_time: race.off_time,
+                                        race_id: race.race_id
+                                      }, {
+                                        patternAlerts: allPatternAlerts,
+                                        smartSignals: allSmartSignals,
+                                      })}
+                                      horseEntry={entry}
+                                    />
+                                    {entryModelPicks.length > 0 && (
+                                      <span className="flex items-center gap-1 flex-shrink-0">
+                                        {entryModelPicks.map(mp => (
+                                          <span
+                                            key={mp.label}
+                                            className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${mp.color}`}
+                                          >
+                                            {mp.label}
+                                          </span>
+                                        ))}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-xs text-gray-400 mt-0.5">
                                     {entry.jockey_name}
                                   </div>
