@@ -175,10 +175,9 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
 
   // Flatten, classify, and sort: smart money first, then agree, then market leading
   const classified = raceGroups.flatMap(group => {
-    const entries = raceEntriesMap[group.movers[0]?.race_id] || []
-    const modelPicks = modelPicksMap[group.movers[0]?.race_id] || new Map()
-
     return group.movers.map(mover => {
+      const entries = raceEntriesMap[mover.race_id] || []
+      const modelPicks = modelPicksMap[mover.race_id] || new Map()
       const raceEntry = entries.find(e => e.horse_id === mover.horse_id)
       const isTopPick = modelPicks.has(mover.horse_id) && (modelPicks.get(mover.horse_id)?.length || 0) >= 2
       const normalizedEnsemble = raceEntry
@@ -186,7 +185,16 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
         : 0
       const agreement = classifyMarketMl(mover.odds_movement, mover.odds_movement_pct, isTopPick)
 
-      return { mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges: modelPicks.get(mover.horse_id) || [], agreement }
+      // Enrich mover with race entry data when market data is incomplete
+      const enrichedMover = {
+        ...mover,
+        horse_name: (mover.horse_name && mover.horse_name !== 'Unknown') ? mover.horse_name : raceEntry?.horse_name || mover.horse_name,
+        silk_url: mover.silk_url || raceEntry?.silk_url || null,
+        jockey_name: mover.jockey_name || raceEntry?.jockey_name || null,
+        trainer_name: mover.trainer_name || raceEntry?.trainer_name || null,
+      }
+
+      return { mover: enrichedMover, raceEntry, isTopPick, normalizedEnsemble, modelBadges: modelPicks.get(mover.horse_id) || [], agreement }
     })
   })
 
