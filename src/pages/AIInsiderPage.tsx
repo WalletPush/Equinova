@@ -385,6 +385,17 @@ export function AIInsiderPage() {
 
   const marketRaceGroups = marketMoversData?.raceGroups || []
 
+  // Build a flat horse_id → Equinova Score map for market intel
+  const equinovaScoreMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const scored of Object.values(allScoredByRace)) {
+      for (const s of scored) {
+        map[s.horseId] = s.score
+      }
+    }
+    return map
+  }, [allScoredByRace])
+
   // ─── Horse click handler ─────────────────────────────────────────
 
   const handleHorseClick = (entry: RaceEntry) => {
@@ -436,13 +447,13 @@ export function AIInsiderPage() {
             <div className="max-w-4xl mx-auto flex items-center gap-4 text-xs">
               <span className="text-gray-500">{raceVerdicts.length} races analyzed</span>
               {strongCount > 0 && (
-                <span className="text-green-400 font-medium">{strongCount} strong {strongCount === 1 ? 'play' : 'plays'}</span>
+                <span className="text-green-400 font-medium">{strongCount} top {strongCount === 1 ? 'pick' : 'picks'}</span>
               )}
               {leanCount > 0 && (
-                <span className="text-amber-400">{leanCount} lean</span>
+                <span className="text-amber-400">{leanCount} worth a look</span>
               )}
               {spotlightPicks.length > 0 && (
-                <span className="text-yellow-400">{spotlightPicks.length} spotlight {spotlightPicks.length === 1 ? 'pick' : 'picks'}</span>
+                <span className="text-yellow-400">{spotlightPicks.length} best {spotlightPicks.length === 1 ? 'pick' : 'picks'}</span>
               )}
               {(marketMoversData?.movers?.length || 0) > 0 && (
                 <span className="text-cyan-400">{marketMoversData?.movers?.length} market movers</span>
@@ -453,12 +464,27 @@ export function AIInsiderPage() {
 
         {/* Main content */}
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+          {/* Page intro */}
+          {!isLoading && upcomingEntries.length > 0 && (
+            <div className="bg-gradient-to-r from-yellow-500/5 to-amber-500/5 border border-yellow-500/20 rounded-xl p-4 sm:p-5">
+              <h2 className="text-sm font-bold text-yellow-400 mb-1.5">How the Equinova Score works</h2>
+              <p className="text-xs text-gray-300 leading-relaxed mb-2">
+                Every horse gets a score from 0 to 100. We combine <strong className="text-white">5 AI models</strong>, <strong className="text-white">live odds movement</strong>, <strong className="text-white">speed figures</strong>, <strong className="text-white">course & trainer form</strong> into one number that tells you how strong the case is for each horse.
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
+                <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1.5" />65+ = <strong className="text-green-400">Top Pick</strong> — strong across the board</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5" />45-64 = <strong className="text-amber-400">Worth a Look</strong> — some positive signals</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5" />Under 45 = <strong className="text-red-400">Risky</strong> — limited data support</span>
+              </div>
+            </div>
+          )}
+
           {/* Loading state */}
           {isLoading && (
             <div className="flex flex-col items-center justify-center py-20">
               <Loader2 className="w-8 h-8 text-yellow-400 animate-spin mb-3" />
               <p className="text-gray-400 text-sm">Analyzing today's races...</p>
-              <p className="text-gray-600 text-xs mt-1">Building confluence scores across all signals</p>
+              <p className="text-gray-600 text-xs mt-1">Calculating Equinova Scores across all data</p>
             </div>
           )}
 
@@ -520,6 +546,7 @@ export function AIInsiderPage() {
               raceGroups={marketRaceGroups as any}
               raceEntriesMap={raceEntriesMap}
               modelPicksMap={modelPicksMap}
+              equinovaScoreMap={equinovaScoreMap}
               onHorseClick={handleHorseClick}
             />
           )}

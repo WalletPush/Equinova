@@ -33,9 +33,32 @@ interface MarketIntelCardProps {
   isTopMlPick: boolean
   normalizedEnsemble: number
   modelBadges: { label: string; color: string }[]
+  equinovaScore: number | null
   onHorseClick?: (entry: RaceEntry) => void
   raceEntry?: RaceEntry
-  hideRaceContext?: boolean
+}
+
+function getScoreComment(score: number, isTopPick: boolean, pct: number): string {
+  if (score >= 65 && isTopPick) return 'AI rates highly & market agrees — standout'
+  if (score >= 65) return 'AI rates this horse very highly'
+  if (score >= 45 && isTopPick) return 'AI models like this one, market backing it too'
+  if (score >= 45) return 'Above average — some positive signals'
+  if (isTopPick) return 'AI models rate it but score is mixed'
+  if (pct >= 15) return 'Big market move but AI is less convinced'
+  if (pct >= 8) return 'Notable odds movement, worth monitoring'
+  return 'Minor market interest'
+}
+
+function MoverScoreBadge({ score }: { score: number }) {
+  const color = score >= 65 ? 'text-green-400 border-green-500/40 bg-green-500/10'
+    : score >= 45 ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+    : 'text-red-400 border-red-500/40 bg-red-500/10'
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <span className={`text-lg font-bold px-2.5 py-0.5 rounded border ${color} tabular-nums leading-tight`}>{score}</span>
+      <span className="text-[8px] text-gray-500 uppercase tracking-wider">Equinova</span>
+    </div>
+  )
 }
 
 export function MarketIntelCard({
@@ -43,43 +66,57 @@ export function MarketIntelCard({
   isTopMlPick,
   normalizedEnsemble,
   modelBadges,
+  equinovaScore,
   onHorseClick,
   raceEntry,
-  hideRaceContext = false,
 }: MarketIntelCardProps) {
   const agreement = classifyMarketMl(mover.odds_movement, mover.odds_movement_pct, isTopMlPick)
   const mlConfig = getMarketMlConfig(agreement)
   const pct = Math.abs(mover.odds_movement_pct || 0)
   const isSteaming = mover.odds_movement === 'steaming'
   const isDrifting = mover.odds_movement === 'drifting'
+  const comment = equinovaScore != null ? getScoreComment(equinovaScore, isTopMlPick, pct) : null
 
   return (
     <div className="p-3 sm:p-4">
-      {/* Agreement badge */}
-      <div className="flex items-center justify-between mb-2">
-        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${mlConfig.bg} ${mlConfig.border} ${mlConfig.color}`}>
-          {mlConfig.label}
-        </span>
-      </div>
-
-      {/* Horse info */}
-      <div className="flex items-center justify-between mb-2">
+      {/* Top row: badge + score */}
+      <div className="flex items-start justify-between mb-2">
         <div className="flex-1 min-w-0">
-          <HorseNameWithSilk
-            horseName={mover.horse_name}
-            silkUrl={mover.silk_url || undefined}
-            className="text-white font-medium text-sm"
-            clickable={!!onHorseClick && !!raceEntry}
-            onHorseClick={onHorseClick}
-            horseEntry={raceEntry}
-          />
-          <div className="text-[11px] text-gray-500 mt-0.5">
-            {mover.jockey_name && <span>J: {mover.jockey_name}</span>}
-            {mover.jockey_name && mover.trainer_name && <span> · </span>}
-            {mover.trainer_name && <span>T: {mover.trainer_name}</span>}
+          {/* Agreement badge */}
+          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${mlConfig.bg} ${mlConfig.border} ${mlConfig.color}`}>
+            {mlConfig.label}
+          </span>
+
+          {/* Horse info */}
+          <div className="mt-2">
+            <HorseNameWithSilk
+              horseName={mover.horse_name}
+              silkUrl={mover.silk_url || undefined}
+              className="text-white font-medium text-sm"
+              clickable={!!onHorseClick && !!raceEntry}
+              onHorseClick={onHorseClick}
+              horseEntry={raceEntry}
+            />
+            <div className="text-[11px] text-gray-500 mt-0.5">
+              {mover.jockey_name && <span>J: {mover.jockey_name}</span>}
+              {mover.jockey_name && mover.trainer_name && <span> · </span>}
+              {mover.trainer_name && <span>T: {mover.trainer_name}</span>}
+            </div>
           </div>
         </div>
+
+        {/* Equinova Score - prominent on the right */}
+        {equinovaScore != null && (
+          <div className="flex-shrink-0 ml-3">
+            <MoverScoreBadge score={equinovaScore} />
+          </div>
+        )}
       </div>
+
+      {/* AI Comment */}
+      {comment && (
+        <p className="text-[11px] text-gray-400 italic mb-2 pl-0.5">{comment}</p>
+      )}
 
       {/* Odds movement visual */}
       <div className="flex items-center gap-3 mb-2 bg-gray-800/50 rounded-lg px-3 py-2">
@@ -154,10 +191,11 @@ interface MarketIntelSectionProps {
   raceGroups: MarketIntelRaceGroup[]
   raceEntriesMap: Record<string, RaceEntry[]>
   modelPicksMap: Record<string, Map<string, { label: string; color: string }[]>>
+  equinovaScoreMap: Record<string, number>
   onHorseClick?: (entry: RaceEntry) => void
 }
 
-export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, onHorseClick }: MarketIntelSectionProps) {
+export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, equinovaScoreMap, onHorseClick }: MarketIntelSectionProps) {
   const totalMovers = raceGroups.reduce((sum, g) => sum + g.movers.length, 0)
 
   if (totalMovers === 0) {
@@ -170,7 +208,7 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
     )
   }
 
-  // Build classified movers grouped by race
+  // Build classified movers grouped by race, sorted by Equinova Score
   const classifiedByRace = raceGroups.map(group => {
     const movers = group.movers.map(mover => {
       const entries = raceEntriesMap[mover.race_id] || []
@@ -180,6 +218,7 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
       const normalizedEnsemble = raceEntry
         ? (raceEntry.ensemble_proba || 0) / entries.reduce((s, e) => s + (e.ensemble_proba || 0), 0) || 0
         : 0
+      const equinovaScore = equinovaScoreMap[mover.horse_id] ?? null
 
       const enrichedMover = {
         ...mover,
@@ -189,11 +228,10 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
         trainer_name: mover.trainer_name || raceEntry?.trainer_name || null,
       }
 
-      return { mover: enrichedMover, raceEntry, isTopPick, normalizedEnsemble, modelBadges: modelPicks.get(mover.horse_id) || [], pct: Math.abs(mover.odds_movement_pct || 0) }
+      return { mover: enrichedMover, raceEntry, isTopPick, normalizedEnsemble, modelBadges: modelPicks.get(mover.horse_id) || [], equinovaScore }
     })
 
-    // Sort within race by movement magnitude (biggest mover first)
-    movers.sort((a, b) => b.pct - a.pct)
+    movers.sort((a, b) => (b.equinovaScore ?? 0) - (a.equinovaScore ?? 0))
 
     return { group, movers }
   })
@@ -203,8 +241,8 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-5 h-5 text-cyan-400" />
-          <h2 className="text-lg font-bold text-white">Market Intelligence</h2>
-          <span className="text-xs text-gray-500 ml-1">Odds movement + ML cross-reference</span>
+          <h2 className="text-lg font-bold text-white">Market Movers</h2>
+          <span className="text-xs text-gray-500 ml-1">Horses with shortening odds, ranked by Equinova Score</span>
         </div>
         <span className="text-xs text-gray-500">{totalMovers} movers across {raceGroups.length} races</span>
       </div>
@@ -224,16 +262,16 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
 
             {/* Movers within this race */}
             <div className="divide-y divide-gray-800/60">
-              {movers.map(({ mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges }) => (
+              {movers.map(({ mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges, equinovaScore }) => (
                 <MarketIntelCard
                   key={`${mover.horse_id}-${mover.bookmaker}`}
                   mover={mover}
                   isTopMlPick={isTopPick}
                   normalizedEnsemble={normalizedEnsemble}
                   modelBadges={modelBadges}
+                  equinovaScore={equinovaScore}
                   onHorseClick={onHorseClick}
                   raceEntry={raceEntry}
-                  hideRaceContext
                 />
               ))}
             </div>

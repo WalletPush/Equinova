@@ -21,15 +21,15 @@ interface SpotlightCardProps {
 }
 
 const SIGNAL_CONFIG: { key: keyof SignalBreakdown; label: string; icon: React.ElementType; color: string }[] = [
-  { key: 'mlConsensus', label: 'ML Consensus', icon: Brain, color: 'text-blue-400' },
-  { key: 'valueEdge', label: 'Value Edge', icon: Target, color: 'text-green-400' },
-  { key: 'marketMomentum', label: 'Market', icon: TrendingUp, color: 'text-cyan-400' },
-  { key: 'formFigures', label: 'Speed Figs', icon: Timer, color: 'text-orange-400' },
-  { key: 'specialist', label: 'Specialist', icon: Target, color: 'text-purple-400' },
-  { key: 'trainerIntent', label: 'Trainer', icon: Users, color: 'text-yellow-400' },
+  { key: 'mlConsensus', label: 'AI Models', icon: Brain, color: 'text-blue-400' },
+  { key: 'valueEdge', label: 'Value', icon: Target, color: 'text-green-400' },
+  { key: 'marketMomentum', label: 'Market Move', icon: TrendingUp, color: 'text-cyan-400' },
+  { key: 'formFigures', label: 'Speed', icon: Timer, color: 'text-orange-400' },
+  { key: 'specialist', label: 'Track Form', icon: Target, color: 'text-purple-400' },
+  { key: 'trainerIntent', label: 'Trainer Form', icon: Users, color: 'text-yellow-400' },
 ]
 
-function ConfluenceGauge({ score }: { score: number }) {
+function EquinovaGauge({ score }: { score: number }) {
   const radius = 40
   const stroke = 6
   const circumference = 2 * Math.PI * radius
@@ -58,7 +58,7 @@ function ConfluenceGauge({ score }: { score: number }) {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-2xl font-bold text-white">{score}</span>
-        <span className="text-[10px] text-gray-400 uppercase tracking-wider">Score</span>
+        <span className="text-[9px] text-gray-400 uppercase tracking-wider">Equinova</span>
       </div>
     </div>
   )
@@ -86,20 +86,20 @@ function getAngleSummary(signals: SignalBreakdown, entry: RaceEntry): string {
 
   if (signals.mlConsensus >= 60) {
     const topCount = Math.round((signals.mlConsensus / 70) * 5)
-    parts.push(`${Math.min(5, topCount)}/5 ML models`)
+    parts.push(`${Math.min(5, topCount)}/5 AI models agree`)
   }
 
   if (signals.marketMomentum >= 40 && entry.odds_movement === 'steaming') {
-    parts.push(`steaming ${Math.abs(entry.odds_movement_pct || 0).toFixed(0)}%`)
+    parts.push(`odds shortening ${Math.abs(entry.odds_movement_pct || 0).toFixed(0)}%`)
   }
 
-  if (signals.valueEdge >= 40) parts.push('value edge')
-  if (signals.specialist >= 60) parts.push('course specialist')
-  if (signals.formFigures >= 65) parts.push('top speed figures')
-  if (signals.trainerIntent >= 50) parts.push('trainer intent')
+  if (signals.valueEdge >= 40) parts.push('priced higher than AI thinks')
+  if (signals.specialist >= 60) parts.push('proven at this course')
+  if (signals.formFigures >= 65) parts.push('fastest in the field')
+  if (signals.trainerIntent >= 50) parts.push('trainer in strong form')
 
-  if (parts.length === 0) return 'Marginal edge across signals'
-  return parts.join(' + ')
+  if (parts.length === 0) return 'Small edge across multiple factors'
+  return parts.join(' · ')
 }
 
 export function SpotlightCard({ result, rank, courseName, offTime, raceClass, distance, modelPicks, onHorseClick }: SpotlightCardProps) {
@@ -141,7 +141,7 @@ export function SpotlightCard({ result, rank, courseName, offTime, raceClass, di
       <div className="flex gap-4">
         {/* Left: Gauge */}
         <div className="flex-shrink-0">
-          <ConfluenceGauge score={score} />
+          <EquinovaGauge score={score} />
         </div>
 
         {/* Right: Horse info */}
@@ -235,8 +235,8 @@ export function SpotlightSection({ spotlightPicks, raceMap, modelPicksMap, onHor
     return (
       <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-6 text-center">
         <Brain className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-        <h3 className="text-lg font-bold text-gray-400 mb-1">No Standout Plays Today</h3>
-        <p className="text-sm text-gray-500">No horse currently meets the 60+ confluence threshold. Proceed with caution or check back later as market data updates.</p>
+        <h3 className="text-lg font-bold text-gray-400 mb-1">No Standout Picks Today</h3>
+        <p className="text-sm text-gray-500">No horse currently scores 60+ on the Equinova Scale. Proceed with caution or check back closer to race time as odds update.</p>
       </div>
     )
   }
@@ -245,8 +245,8 @@ export function SpotlightSection({ spotlightPicks, raceMap, modelPicksMap, onHor
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-1">
         <Zap className="w-5 h-5 text-yellow-400" />
-        <h2 className="text-lg font-bold text-white">AI Spotlight</h2>
-        <span className="text-xs text-gray-500 ml-1">Highest confluence plays of the day</span>
+        <h2 className="text-lg font-bold text-white">Today's Best Picks</h2>
+        <span className="text-xs text-gray-500 ml-1">Highest rated horses across all races</span>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

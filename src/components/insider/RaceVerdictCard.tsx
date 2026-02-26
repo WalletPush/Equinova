@@ -10,6 +10,18 @@ import { getVerdictConfig } from '@/lib/confluenceScore'
 import type { RaceVerdict, ConfluenceResult } from '@/lib/confluenceScore'
 import type { RaceEntry } from '@/lib/supabase'
 
+function ScoreBadge({ score, size = 'sm' }: { score: number; size?: 'sm' | 'md' }) {
+  const color = score >= 65 ? 'text-green-400 border-green-500/40 bg-green-500/10'
+    : score >= 45 ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+    : 'text-red-400 border-red-500/40 bg-red-500/10'
+  const sizeClass = size === 'md'
+    ? 'text-base font-bold px-2.5 py-1'
+    : 'text-xs font-bold px-1.5 py-0.5'
+  return (
+    <span className={`${sizeClass} rounded border ${color} tabular-nums`}>{score}</span>
+  )
+}
+
 interface RaceVerdictCardProps {
   verdict: RaceVerdict
   modelPicks: Map<string, { label: string; color: string }[]>
@@ -49,7 +61,7 @@ function CompactHorse({
           {formatOdds(entry.current_odds)}
         </span>
         <span className="text-xs text-green-400">{formatNormalized(normalizedEnsemble)}</span>
-        <span className="text-[10px] text-gray-500 font-mono w-6 text-right">{score}</span>
+        <ScoreBadge score={score} />
       </div>
     </div>
   )
@@ -97,7 +109,7 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
           <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
             <span className="text-xs text-gray-400 truncate max-w-[120px]">{verdict.topSelection.entry.horse_name}</span>
             <span className="text-xs font-bold text-white">{formatOdds(verdict.topSelection.entry.current_odds)}</span>
-            <span className="text-xs text-gray-500 font-mono">{verdict.topSelection.score}</span>
+            <ScoreBadge score={verdict.topSelection.score} />
           </div>
         )}
 
@@ -159,10 +171,11 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
               <div>
-                <span className="text-[11px] text-amber-400 font-medium">Danger: </span>
+                <span className="text-[11px] text-amber-400 font-medium">One to watch: </span>
                 <span className="text-[11px] text-gray-300">
-                  {verdict.dangerHorse.entry.horse_name} ({formatOdds(verdict.dangerHorse.entry.current_odds)}, score {verdict.dangerHorse.score})
+                  {verdict.dangerHorse.entry.horse_name} ({formatOdds(verdict.dangerHorse.entry.current_odds)})
                 </span>
+                <ScoreBadge score={verdict.dangerHorse.score} />
               </div>
             </div>
           )}
@@ -190,7 +203,7 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                     </div>
                     <span className="text-gray-400 font-medium">{formatOdds(r.entry.current_odds)}</span>
                     <span className="text-green-400/70 w-12 text-right">{formatNormalized(r.normalizedEnsemble)}</span>
-                    <span className="text-gray-600 font-mono w-6 text-right">{r.score}</span>
+                    <ScoreBadge score={r.score} />
                   </div>
                 </div>
               ))}
@@ -222,15 +235,15 @@ export function RaceVerdictsSection({ verdicts, modelPicksMap, onHorseClick }: R
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Trophy className="w-5 h-5 text-amber-400" />
-          <h2 className="text-lg font-bold text-white">Race Verdicts</h2>
-          <span className="text-xs text-gray-500 ml-1">Every race, one verdict</span>
+          <h2 className="text-lg font-bold text-white">Race by Race</h2>
+          <span className="text-xs text-gray-500 ml-1">Our pick for every race</span>
         </div>
         <div className="flex items-center gap-3 text-xs">
           {strongCount > 0 && (
-            <span className="text-green-400">{strongCount} strong</span>
+            <span className="text-green-400">{strongCount} top {strongCount === 1 ? 'pick' : 'picks'}</span>
           )}
           {leanCount > 0 && (
-            <span className="text-amber-400">{leanCount} lean</span>
+            <span className="text-amber-400">{leanCount} worth a look</span>
           )}
           <span className="text-gray-600">{verdicts.length} races</span>
         </div>

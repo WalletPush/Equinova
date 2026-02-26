@@ -1,14 +1,14 @@
 /**
- * Confluence Score — a composite metric that combines multiple independent
- * signals into a single 0-100 score for each horse.
+ * Equinova Score — a composite 0-100 rating that combines multiple data
+ * signals to rate every horse in every race.
  *
  * Weights:
- *   ML Consensus  25%  — How many of 5 models rank this horse #1 or #2
- *   Value Edge    20%  — Gap between normalized ML prob and market implied prob
- *   Market Momentum 20% — Steaming direction + magnitude
- *   Form Figures  15%  — Speed figures relative to the field
- *   Specialist    10%  — Trainer/jockey/horse win% at course/distance
- *   Trainer Intent 10% — Single runner + recent trainer form
+ *   AI Models     35%  — How many of 5 ML models rank this horse top
+ *   Value         13%  — Gap between AI win probability and bookmaker odds
+ *   Market Move   12%  — Whether the horse is being backed (odds shortening)
+ *   Speed         15%  — Speed figures relative to the field
+ *   Track Form    10%  — Trainer/jockey/horse win% at this course & distance
+ *   Trainer Form  10%  — Single runner intent + recent trainer form
  */
 
 import type { RaceEntry } from '@/lib/supabase'
@@ -282,7 +282,7 @@ export function getVerdictConfig(verdict: Verdict) {
   switch (verdict) {
     case 'strong':
       return {
-        label: 'Strong Play',
+        label: 'Top Pick',
         bg: 'bg-green-500/15',
         border: 'border-green-500/40',
         text: 'text-green-400',
@@ -290,7 +290,7 @@ export function getVerdictConfig(verdict: Verdict) {
       }
     case 'lean':
       return {
-        label: 'Lean',
+        label: 'Worth a Look',
         bg: 'bg-amber-500/15',
         border: 'border-amber-500/40',
         text: 'text-amber-400',
@@ -298,7 +298,7 @@ export function getVerdictConfig(verdict: Verdict) {
       }
     case 'skip':
       return {
-        label: 'Skip',
+        label: 'Risky',
         bg: 'bg-red-500/15',
         border: 'border-red-500/40',
         text: 'text-red-400',
@@ -330,15 +330,15 @@ export function classifyMarketMl(
 export function getMarketMlConfig(agreement: MarketMlAgreement) {
   switch (agreement) {
     case 'smart_money':
-      return { label: 'Smart Money', color: 'text-cyan-400', bg: 'bg-cyan-500/15', border: 'border-cyan-500/40' }
+      return { label: 'AI & Market Agree', color: 'text-cyan-400', bg: 'bg-cyan-500/15', border: 'border-cyan-500/40' }
     case 'agree':
-      return { label: 'ML + Market Agree', color: 'text-green-400', bg: 'bg-green-500/15', border: 'border-green-500/40' }
+      return { label: 'AI & Market Agree', color: 'text-green-400', bg: 'bg-green-500/15', border: 'border-green-500/40' }
     case 'market_leading':
-      return { label: 'Market Leading', color: 'text-amber-400', bg: 'bg-amber-500/15', border: 'border-amber-500/40' }
+      return { label: 'Market Backed', color: 'text-amber-400', bg: 'bg-amber-500/15', border: 'border-amber-500/40' }
     case 'false_move':
-      return { label: 'Potential Value', color: 'text-purple-400', bg: 'bg-purple-500/15', border: 'border-purple-500/40' }
+      return { label: 'AI Says Value', color: 'text-purple-400', bg: 'bg-purple-500/15', border: 'border-purple-500/40' }
     case 'neutral':
-      return { label: 'Neutral', color: 'text-gray-400', bg: 'bg-gray-500/15', border: 'border-gray-500/40' }
+      return { label: 'Drifting', color: 'text-gray-400', bg: 'bg-gray-500/15', border: 'border-gray-500/40' }
   }
 }
 
