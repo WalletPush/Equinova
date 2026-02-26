@@ -139,7 +139,7 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
     'Clear standout'
 
   return (
-    <div className={`bg-gray-900/60 border border-gray-800 rounded-xl overflow-hidden transition-all duration-200 ${
+    <div className={`bg-gray-900/60 border border-gray-800 rounded-xl transition-all duration-200 ${
       expanded ? 'ring-1 ring-gray-700' : ''
     }`}>
       {/* Compact header — always visible */}

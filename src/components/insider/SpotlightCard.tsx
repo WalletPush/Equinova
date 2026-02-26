@@ -115,7 +115,7 @@ export function SpotlightCard({ result, rank, courseName, offTime, raceClass, di
       : 'border-gray-700'
 
   return (
-    <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl p-4 sm:p-5 relative overflow-hidden`}>
+    <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl p-4 sm:p-5 relative`}>
       {/* Rank badge */}
       <div className="absolute top-3 right-3">
         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${

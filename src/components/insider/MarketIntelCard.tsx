@@ -249,7 +249,7 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
 
       <div className="space-y-3">
         {classifiedByRace.map(({ group, movers }) => (
-          <div key={`${group.course_name}_${group.off_time}`} className="bg-gray-900/60 border border-gray-800 rounded-xl overflow-hidden">
+          <div key={`${group.course_name}_${group.off_time}`} className="bg-gray-900/60 border border-gray-800 rounded-xl">
             {/* Race header */}
             <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-gray-800/40 border-b border-gray-800">
               <div className="flex items-center gap-2">
