@@ -1,5 +1,5 @@
 import React from 'react'
-import { TrendingUp, TrendingDown, ArrowRight, Minus } from 'lucide-react'
+import { TrendingUp, TrendingDown, ArrowRight, Minus, MapPin } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
@@ -35,6 +35,7 @@ interface MarketIntelCardProps {
   modelBadges: { label: string; color: string }[]
   onHorseClick?: (entry: RaceEntry) => void
   raceEntry?: RaceEntry
+  hideRaceContext?: boolean
 }
 
 export function MarketIntelCard({
@@ -44,25 +45,21 @@ export function MarketIntelCard({
   modelBadges,
   onHorseClick,
   raceEntry,
+  hideRaceContext = false,
 }: MarketIntelCardProps) {
   const agreement = classifyMarketMl(mover.odds_movement, mover.odds_movement_pct, isTopMlPick)
   const mlConfig = getMarketMlConfig(agreement)
-  const displayTime = formatTime(mover.off_time)
   const pct = Math.abs(mover.odds_movement_pct || 0)
   const isSteaming = mover.odds_movement === 'steaming'
   const isDrifting = mover.odds_movement === 'drifting'
 
   return (
-    <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-3 sm:p-4">
-      {/* Top row: agreement badge + race context */}
+    <div className="p-3 sm:p-4">
+      {/* Agreement badge */}
       <div className="flex items-center justify-between mb-2">
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${mlConfig.bg} ${mlConfig.border} ${mlConfig.color}`}>
           {mlConfig.label}
         </span>
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span>{mover.course}</span>
-          <span>{displayTime}</span>
-        </div>
       </div>
 
       {/* Horse info */}
@@ -173,9 +170,9 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
     )
   }
 
-  // Flatten, classify, and sort: smart money first, then agree, then market leading
-  const classified = raceGroups.flatMap(group => {
-    return group.movers.map(mover => {
+  // Build classified movers grouped by race
+  const classifiedByRace = raceGroups.map(group => {
+    const movers = group.movers.map(mover => {
       const entries = raceEntriesMap[mover.race_id] || []
       const modelPicks = modelPicksMap[mover.race_id] || new Map()
       const raceEntry = entries.find(e => e.horse_id === mover.horse_id)
@@ -183,9 +180,7 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
       const normalizedEnsemble = raceEntry
         ? (raceEntry.ensemble_proba || 0) / entries.reduce((s, e) => s + (e.ensemble_proba || 0), 0) || 0
         : 0
-      const agreement = classifyMarketMl(mover.odds_movement, mover.odds_movement_pct, isTopPick)
 
-      // Enrich mover with race entry data when market data is incomplete
       const enrichedMover = {
         ...mover,
         horse_name: (mover.horse_name && mover.horse_name !== 'Unknown') ? mover.horse_name : raceEntry?.horse_name || mover.horse_name,
@@ -194,16 +189,13 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
         trainer_name: mover.trainer_name || raceEntry?.trainer_name || null,
       }
 
-      return { mover: enrichedMover, raceEntry, isTopPick, normalizedEnsemble, modelBadges: modelPicks.get(mover.horse_id) || [], agreement }
+      return { mover: enrichedMover, raceEntry, isTopPick, normalizedEnsemble, modelBadges: modelPicks.get(mover.horse_id) || [], pct: Math.abs(mover.odds_movement_pct || 0) }
     })
-  })
 
-  const priority: Record<string, number> = { smart_money: 0, agree: 1, market_leading: 2, false_move: 3, neutral: 4 }
-  classified.sort((a, b) => {
-    const pa = priority[a.agreement] ?? 5
-    const pb = priority[b.agreement] ?? 5
-    if (pa !== pb) return pa - pb
-    return Math.abs(b.mover.odds_movement_pct || 0) - Math.abs(a.mover.odds_movement_pct || 0)
+    // Sort within race by movement magnitude (biggest mover first)
+    movers.sort((a, b) => b.pct - a.pct)
+
+    return { group, movers }
   })
 
   return (
@@ -217,17 +209,35 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
         <span className="text-xs text-gray-500">{totalMovers} movers across {raceGroups.length} races</span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {classified.map(({ mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges }) => (
-          <MarketIntelCard
-            key={`${mover.horse_id}-${mover.bookmaker}`}
-            mover={mover}
-            isTopMlPick={isTopPick}
-            normalizedEnsemble={normalizedEnsemble}
-            modelBadges={modelBadges}
-            onHorseClick={onHorseClick}
-            raceEntry={raceEntry}
-          />
+      <div className="space-y-3">
+        {classifiedByRace.map(({ group, movers }) => (
+          <div key={`${group.course_name}_${group.off_time}`} className="bg-gray-900/60 border border-gray-800 rounded-xl overflow-hidden">
+            {/* Race header */}
+            <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-gray-800/40 border-b border-gray-800">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-3.5 h-3.5 text-gray-500" />
+                <span className="text-sm font-medium text-white">{group.course_name}</span>
+                <span className="text-xs text-gray-500">{formatTime(group.off_time)}</span>
+              </div>
+              <span className="text-[10px] text-gray-500">{movers.length} {movers.length === 1 ? 'mover' : 'movers'}</span>
+            </div>
+
+            {/* Movers within this race */}
+            <div className="divide-y divide-gray-800/60">
+              {movers.map(({ mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges }) => (
+                <MarketIntelCard
+                  key={`${mover.horse_id}-${mover.bookmaker}`}
+                  mover={mover}
+                  isTopMlPick={isTopPick}
+                  normalizedEnsemble={normalizedEnsemble}
+                  modelBadges={modelBadges}
+                  onHorseClick={onHorseClick}
+                  raceEntry={raceEntry}
+                  hideRaceContext
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </div>
