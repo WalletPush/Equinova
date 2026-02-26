@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronUp, MapPin, Clock, Users, Trophy, AlertTriangle, Shield } from 'lucide-react'
+import { ChevronDown, ChevronUp, MapPin, Clock, Users, Trophy, AlertTriangle, Shield, Zap } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
@@ -7,7 +7,7 @@ import { formatOdds } from '@/lib/odds'
 import { formatTime } from '@/lib/dateUtils'
 import { formatNormalized } from '@/lib/normalize'
 import { getVerdictConfig } from '@/lib/confluenceScore'
-import type { RaceVerdict, ConfluenceResult } from '@/lib/confluenceScore'
+import type { RaceVerdict, ConfluenceResult, ProfitableSignal } from '@/lib/confluenceScore'
 import type { RaceEntry } from '@/lib/supabase'
 
 function ScoreBadge({ score, size = 'sm' }: { score: number; size?: 'sm' | 'md' }) {
@@ -107,6 +107,12 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
         {/* Top pick preview */}
         {verdict.topSelection && (
           <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+            {verdict.topPickSignals.length > 0 && (
+              <span className="text-[9px] font-bold text-yellow-400 bg-yellow-500/15 border border-yellow-500/30 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                <Zap className="w-2.5 h-2.5" />
+                {verdict.topPickSignals.length}
+              </span>
+            )}
             <span className="text-xs text-gray-400 truncate max-w-[120px]">{verdict.topSelection.entry.horse_name}</span>
             <span className="text-xs font-bold text-white">{formatOdds(verdict.topSelection.entry.current_odds)}</span>
             <ScoreBadge score={verdict.topSelection.score} />
@@ -153,6 +159,27 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                   J: {verdict.topSelection.entry.jockey_name} · T: {verdict.topSelection.entry.trainer_name}
                 </span>
               </div>
+
+              {/* Profitable signal tags */}
+              {verdict.topPickSignals.length > 0 && (
+                <div className="ml-14 space-y-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Zap className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
+                    {verdict.topPickSignals.slice(0, 3).map(sig => (
+                      <span
+                        key={sig.key}
+                        className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${sig.color}`}
+                      >
+                        {sig.label} ({sig.winRate} win)
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-green-400/90 italic">
+                    Matches {verdict.topPickSignals.length === 1 ? 'a historically profitable pattern' : `${verdict.topPickSignals.length} historically profitable patterns`}
+                  </p>
+                </div>
+              )}
+
               <div className="ml-14">
                 <ShortlistButton
                   horseName={verdict.topSelection.entry.horse_name}

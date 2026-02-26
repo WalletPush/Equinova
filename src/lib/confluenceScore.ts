@@ -54,6 +54,7 @@ export interface RaceVerdict {
   competitiveness: number
   allScored: ConfluenceResult[]
   entries: RaceEntry[]
+  topPickSignals: ProfitableSignal[]
 }
 
 // ─── ML Consensus (0-100) ──────────────────────────────────────────
@@ -452,6 +453,93 @@ export function findCourseDistanceSpecialists(allEntries: RaceEntry[]): CourseDi
   }
 
   return specialists.sort((a, b) => b.combinedScore - a.combinedScore)
+}
+
+// ─── Profitable Signal Detection ─────────────────────────────────
+
+export interface ProfitableSignal {
+  key: string
+  label: string
+  winRate: string
+  color: string
+}
+
+const SIGNAL_REGISTRY: { key: string; label: string; winRate: string }[] = [
+  { key: 'triple_signal', label: 'Triple Signal', winRate: '75%' },
+  { key: 'steamer_ml_pick', label: 'Backed + ML Pick', winRate: '60%' },
+  { key: 'course_specialist', label: 'Course Specialist', winRate: '50%' },
+  { key: 'ml_pick_top_rpr', label: 'ML Pick + Top RPR', winRate: '50%' },
+  { key: 'ml_ratings_consensus', label: 'ML + RPR + TS', winRate: '50%' },
+  { key: 'ml_pick_course_specialist', label: 'ML + Course Specialist', winRate: '45%' },
+  { key: 'ml_pick_trainer_form', label: 'ML + Trainer Form', winRate: '40%' },
+  { key: 'ratings_consensus', label: 'RPR + TS Consensus', winRate: '27%' },
+  { key: 'steamer_single_trainer', label: 'Backed + Single Trainer', winRate: '20%' },
+  { key: 'single_trainer_in_form', label: 'Single Trainer in Form', winRate: '20%' },
+]
+
+export function detectProfitableSignals(
+  entry: RaceEntry,
+  raceEntries: RaceEntry[],
+  modelBadges: { label: string; color: string }[],
+  trainerIntent?: TrainerIntentData,
+): ProfitableSignal[] {
+  const isMLTopPick = modelBadges.length >= 1
+  const isSteaming = entry.odds_movement === 'steaming'
+  const isSingleTrainer = trainerIntent?.isSingleRunner || false
+
+  // Top RPR in race
+  const rprs = raceEntries.map(e => e.rpr || 0).filter(v => v > 0)
+  const isTopRpr = rprs.length > 0 && (entry.rpr || 0) > 0 && (entry.rpr || 0) >= Math.max(...rprs)
+
+  // Top Topspeed in race
+  const tss = raceEntries.map(e => e.ts || 0).filter(v => v > 0)
+  const isTopTs = tss.length > 0 && (entry.ts || 0) > 0 && (entry.ts || 0) >= Math.max(...tss)
+
+  // Course/distance specialist
+  const horseWinDist = entry.horse_win_percentage_at_distance || 0
+  const trainerWinCourse = entry.trainer_win_percentage_at_course || 0
+  const isCourseSpec = horseWinDist >= 20 || (horseWinDist >= 10 && trainerWinCourse >= 15)
+
+  // Trainer in form (21 day)
+  const t21 = entry.trainer_21_days_win_percentage || 0
+  const isTrainerForm = t21 >= 15
+
+  // Speed figure standout
+  const fieldFigs = raceEntries
+    .map(e => e.best_speed_figure_at_distance || e.last_speed_figure || e.mean_speed_figure || 0)
+    .filter(v => v > 0)
+  const fieldAvg = fieldFigs.length > 0 ? fieldFigs.reduce((a, b) => a + b, 0) / fieldFigs.length : 0
+  const bestFig = entry.best_speed_figure_on_course_going_distance
+    || entry.best_speed_figure_at_distance
+    || entry.best_speed_figure_at_track
+    || 0
+  const isSpeedStandout = fieldAvg > 0 && bestFig > 0 && ((bestFig - fieldAvg) / fieldAvg) * 100 >= 5
+
+  const flags: Record<string, boolean> = {
+    triple_signal: isSteaming && isMLTopPick && (isTopRpr || isTopTs),
+    steamer_ml_pick: isSteaming && isMLTopPick,
+    course_specialist: isCourseSpec,
+    ml_pick_top_rpr: isMLTopPick && isTopRpr,
+    ml_ratings_consensus: isMLTopPick && isTopRpr && isTopTs,
+    ml_pick_course_specialist: isMLTopPick && isCourseSpec,
+    ml_pick_trainer_form: isMLTopPick && isTrainerForm,
+    ratings_consensus: isTopRpr && isTopTs,
+    steamer_single_trainer: isSteaming && isSingleTrainer,
+    single_trainer_in_form: isSingleTrainer && isTrainerForm,
+  }
+
+  const matched: ProfitableSignal[] = []
+  for (const sig of SIGNAL_REGISTRY) {
+    if (flags[sig.key]) {
+      const pct = parseInt(sig.winRate)
+      const color = pct >= 50 ? 'text-green-400 bg-green-500/15 border-green-500/40'
+        : pct >= 30 ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'
+        : 'text-gray-300 bg-gray-500/15 border-gray-500/40'
+      matched.push({ ...sig, color })
+    }
+  }
+
+  return matched
 }
 
 // ─── Utility ────────────────────────────────────────────────────────

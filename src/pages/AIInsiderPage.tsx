@@ -15,6 +15,7 @@ import {
 import {
   calculateConfluenceScores,
   deriveVerdict,
+  detectProfitableSignals,
   groupByRace,
   findSpeedStandouts,
   findCourseDistanceSpecialists,
@@ -344,6 +345,17 @@ export function AIInsiderPage() {
         ? scored[0].score - scored[Math.min(2, scored.length - 1)].score
         : 999
 
+      // Detect profitable signals for the top pick
+      const topPick = scored[0] || null
+      const topPickSignals = topPick
+        ? detectProfitableSignals(
+            topPick.entry,
+            entries,
+            (modelPicksMap[raceId] || new Map()).get(topPick.horseId) || [],
+            trainerIntentMap.get(topPick.horseId),
+          )
+        : []
+
       verdicts.push({
         raceId,
         courseName: meta.course_name,
@@ -356,11 +368,12 @@ export function AIInsiderPage() {
         prize: meta.prize,
         type: meta.type,
         verdict: deriveVerdict(scored),
-        topSelection: scored[0] || null,
+        topSelection: topPick,
         dangerHorse: scored[1] || null,
         competitiveness: top3Spread,
         allScored: scored,
         entries,
+        topPickSignals,
       })
     }
 
@@ -372,7 +385,7 @@ export function AIInsiderPage() {
       if (va !== vb) return va - vb
       return compareRaceTimes(a.offTime, b.offTime)
     })
-  }, [allScoredByRace, raceMetaMap, entriesByRace])
+  }, [allScoredByRace, raceMetaMap, entriesByRace, modelPicksMap, trainerIntentMap])
 
   // ─── Data Angles ─────────────────────────────────────────────────
 
