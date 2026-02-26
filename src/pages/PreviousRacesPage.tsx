@@ -359,7 +359,7 @@ export function PreviousRacesPage() {
                 )}
               </button>
             ) : (
-              <div className="bg-gray-800/90 border border-yellow-500/30 rounded-xl overflow-hidden">
+              <div className="bg-gray-800/90 border border-yellow-500/30 rounded-xl">
                 {/* Header */}
                 <button
                   onClick={() => setAnalysisExpanded(!analysisExpanded)}
@@ -656,7 +656,7 @@ export function PreviousRacesPage() {
               const modelPicksMap = getModelPicksMap(race.topEntries, race.runners)
 
               return (
-                <div key={race.race_id} className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl overflow-hidden">
+                <div key={race.race_id} className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl">
                   {/* Race header */}
                   <Link to={`/race/${race.race_id}`} className="block p-4 hover:bg-gray-800/90 transition-colors">
                     <div className="flex items-start justify-between mb-2">

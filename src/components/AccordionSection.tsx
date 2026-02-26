@@ -29,7 +29,7 @@ export function AccordionSection({
   }
 
   return (
-    <div className={`bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-lg overflow-hidden transition-all duration-300 ${className} ${
+    <div className={`bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-lg transition-all duration-300 ${className} ${
       isOpen ? 'border-yellow-400/30' : 'hover:border-gray-600'
     }`}>
       <button

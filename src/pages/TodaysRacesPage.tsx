@@ -393,7 +393,7 @@ export function TodaysRacesPage() {
 
           {/* Value Bets Scanner Results */}
           {showValueScan && (
-            <div className="bg-gray-800/90 border border-green-500/30 rounded-xl overflow-hidden">
+            <div className="bg-gray-800/90 border border-green-500/30 rounded-xl">
               {/* Scanner header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
                 <div className="flex items-center gap-2">

@@ -21,7 +21,7 @@ function CollapsibleAngle({ title, icon: Icon, iconColor, count, children, defau
   const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <div className="bg-gray-900/60 border border-gray-800 rounded-xl overflow-hidden">
+    <div className="bg-gray-900/60 border border-gray-800 rounded-xl">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2 p-3 sm:p-4 text-left hover:bg-gray-800/30 transition-colors"

@@ -359,7 +359,7 @@ export function ShortListPage() {
                   .map((raceGroup) => (
                     <div
                       key={raceGroup.race_id}
-                      className="bg-gray-800/90 backdrop-blur-sm border border-gray-700 rounded-xl overflow-hidden"
+                      className="bg-gray-800/90 backdrop-blur-sm border border-gray-700 rounded-xl"
                     >
                       <div className="bg-gradient-to-r from-yellow-500/20 to-yellow-400/10 border-b border-gray-700 px-6 py-4">
                         <div className="flex items-center justify-between">
