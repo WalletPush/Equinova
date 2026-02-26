@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronUp, MapPin, Clock, Users, Trophy, AlertTriangle, Shield, Zap } from 'lucide-react'
+import { ChevronDown, ChevronUp, MapPin, Clock, Users, Trophy, AlertTriangle, Shield, Zap, MessageSquare } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
@@ -22,49 +22,109 @@ function ScoreBadge({ score, size = 'sm' }: { score: number; size?: 'sm' | 'md' 
   )
 }
 
+function buildDetailedComment(
+  entry: RaceEntry,
+  raceEntries: RaceEntry[],
+  badges: { label: string; color: string }[],
+  score: number,
+  normalizedEnsemble: number,
+  signals: ProfitableSignal[],
+): string {
+  const parts: string[] = []
+
+  // AI models
+  if (badges.length >= 3) {
+    parts.push(`${badges.length} out of 5 AI models pick this horse to win — that's very strong agreement`)
+  } else if (badges.length === 2) {
+    parts.push(`Picked by ${badges.length} AI models as the most likely winner`)
+  } else if (badges.length === 1) {
+    parts.push(`Selected as top pick by the ${badges.map(b => b.label).join(', ')} model`)
+  }
+
+  // RPR
+  const rprs = raceEntries.map(e => e.rpr || 0).filter(v => v > 0)
+  const maxRpr = rprs.length > 0 ? Math.max(...rprs) : 0
+  if ((entry.rpr || 0) > 0) {
+    if ((entry.rpr || 0) >= maxRpr && maxRpr > 0) {
+      parts.push(`Has the highest Racing Post Rating in the field (RPR ${entry.rpr})`)
+    } else if (maxRpr > 0) {
+      parts.push(`RPR of ${entry.rpr} (field best: ${maxRpr})`)
+    }
+  }
+
+  // Topspeed
+  const tss = raceEntries.map(e => e.ts || 0).filter(v => v > 0)
+  const maxTs = tss.length > 0 ? Math.max(...tss) : 0
+  if ((entry.ts || 0) > 0) {
+    if ((entry.ts || 0) >= maxTs && maxTs > 0) {
+      parts.push(`Top-rated on Topspeed (TS ${entry.ts})`)
+    } else if (maxTs > 0 && (entry.ts || 0) >= maxTs - 3) {
+      parts.push(`Close to the best Topspeed in the race (TS ${entry.ts} vs ${maxTs})`)
+    }
+  }
+
+  // Jockey
+  const jockeyWinDist = entry.jockey_win_percentage_at_distance || 0
+  if (jockeyWinDist >= 15) {
+    parts.push(`Jockey ${entry.jockey_name} has a ${jockeyWinDist.toFixed(0)}% win rate at this distance`)
+  }
+
+  // Trainer
+  const trainerCourse = entry.trainer_win_percentage_at_course || 0
+  const t21 = entry.trainer_21_days_win_percentage || 0
+  if (trainerCourse >= 15 && t21 >= 15) {
+    parts.push(`Trainer ${entry.trainer_name} is in strong recent form (${t21.toFixed(0)}% last 21 days) and has a ${trainerCourse.toFixed(0)}% strike rate at this course`)
+  } else if (trainerCourse >= 15) {
+    parts.push(`Trainer has a ${trainerCourse.toFixed(0)}% win rate at this course`)
+  } else if (t21 >= 15) {
+    parts.push(`Trainer is in good recent form (${t21.toFixed(0)}% win rate last 21 days)`)
+  }
+
+  // Speed figures
+  const speedFig = entry.best_speed_figure_at_distance || entry.last_speed_figure || 0
+  if (speedFig > 0) {
+    const fieldFigs = raceEntries
+      .map(e => e.best_speed_figure_at_distance || e.last_speed_figure || 0)
+      .filter(v => v > 0)
+    const fieldAvg = fieldFigs.length > 0 ? fieldFigs.reduce((a, b) => a + b, 0) / fieldFigs.length : 0
+    if (fieldAvg > 0 && speedFig > fieldAvg * 1.05) {
+      parts.push(`Speed figures are ${((speedFig / fieldAvg - 1) * 100).toFixed(0)}% above the field average`)
+    }
+  }
+
+  // Market movement
+  if (entry.odds_movement === 'steaming' && (entry.odds_movement_pct || 0) !== 0) {
+    parts.push(`Odds have shortened ${Math.abs(entry.odds_movement_pct || 0).toFixed(0)}% — money is coming for this horse`)
+  }
+
+  // Course/distance specialist
+  const horseWinDist = entry.horse_win_percentage_at_distance || 0
+  if (horseWinDist >= 20) {
+    parts.push(`Proven at this distance with a ${horseWinDist.toFixed(0)}% win rate`)
+  }
+
+  // Profitable signals summary
+  if (signals.length > 0) {
+    const topSig = signals[0]
+    const pct = parseInt(topSig.winRate)
+    if (signals.length >= 2) {
+      parts.push(`Matches ${signals.length} historically profitable patterns — the strongest being "${topSig.label}" which has a ${topSig.winRate} win rate`)
+    } else {
+      parts.push(`Matches the "${topSig.label}" pattern which historically wins ${topSig.winRate} of the time`)
+    }
+  }
+
+  if (parts.length === 0) {
+    return 'Limited data available for this runner. Score is based on the available signals.'
+  }
+
+  return parts.join('. ') + '.'
+}
+
 interface RaceVerdictCardProps {
   verdict: RaceVerdict
   modelPicks: Map<string, { label: string; color: string }[]>
   onHorseClick?: (entry: RaceEntry) => void
-}
-
-function CompactHorse({
-  result,
-  label,
-  badges,
-  onHorseClick,
-}: {
-  result: ConfluenceResult
-  label: string
-  badges: { label: string; color: string }[]
-  onHorseClick?: (entry: RaceEntry) => void
-}) {
-  const { entry, score, normalizedEnsemble } = result
-  return (
-    <div className="flex items-center gap-3">
-      <span className="text-[10px] text-gray-500 uppercase tracking-wider w-14 flex-shrink-0">{label}</span>
-      <HorseNameWithSilk
-        horseName={entry.horse_name}
-        silkUrl={entry.silk_url}
-        className="text-white font-medium text-sm"
-        clickable={!!onHorseClick}
-        onHorseClick={onHorseClick}
-        horseEntry={entry}
-      />
-      <div className="flex items-center gap-2 ml-auto flex-shrink-0">
-        <div className="flex items-center gap-1">
-          {badges.map((b, i) => (
-            <ModelBadge key={i} label={b.label} color={b.color} showCheck />
-          ))}
-        </div>
-        <span className="text-xs font-bold text-white bg-gray-800 px-1.5 py-0.5 rounded">
-          {formatOdds(entry.current_odds)}
-        </span>
-        <span className="text-xs text-green-400">{formatNormalized(normalizedEnsemble)}</span>
-        <ScoreBadge score={score} />
-      </div>
-    </div>
-  )
 }
 
 export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdictCardProps) {
@@ -146,23 +206,72 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
           </div>
 
           {/* Top selection */}
-          {verdict.topSelection && (
-            <div className="bg-gray-800/50 rounded-lg p-3 space-y-2">
-              <CompactHorse
-                result={verdict.topSelection}
-                label="Pick"
-                badges={modelPicks.get(verdict.topSelection.entry.horse_id) || []}
-                onHorseClick={onHorseClick}
-              />
-              <div className="flex items-center gap-2 ml-14">
-                <span className="text-[11px] text-gray-400">
-                  J: {verdict.topSelection.entry.jockey_name} · T: {verdict.topSelection.entry.trainer_name}
-                </span>
-              </div>
+          {verdict.topSelection && (() => {
+            const topEntry = verdict.topSelection.entry
+            const topBadges = modelPicks.get(topEntry.horse_id) || []
+            const topScore = verdict.topSelection.score
+            const topEnsemble = verdict.topSelection.normalizedEnsemble
+            const detailedComment = buildDetailedComment(
+              topEntry, verdict.entries, topBadges, topScore, topEnsemble, verdict.topPickSignals,
+            )
 
-              {/* Profitable signal tags */}
-              {verdict.topPickSignals.length > 0 && (
-                <div className="ml-14 space-y-1.5">
+            return (
+              <div className="bg-gray-800/50 rounded-lg p-3 sm:p-4 space-y-3">
+                {/* Horse name + score */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Our Pick</span>
+                    </div>
+                    <HorseNameWithSilk
+                      horseName={topEntry.horse_name}
+                      silkUrl={topEntry.silk_url}
+                      className="text-white font-bold text-base"
+                      clickable={!!onHorseClick}
+                      onHorseClick={onHorseClick}
+                      horseEntry={topEntry}
+                    />
+                    <div className="text-[11px] text-gray-400 mt-0.5">
+                      J: {topEntry.jockey_name} · T: {topEntry.trainer_name}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+                    <ScoreBadge score={topScore} size="md" />
+                    <span className="text-[8px] text-gray-500 uppercase tracking-wider">Equinova</span>
+                  </div>
+                </div>
+
+                {/* Key stats row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1">
+                    {topBadges.map((b, i) => (
+                      <ModelBadge key={i} label={b.label} color={b.color} showCheck />
+                    ))}
+                  </div>
+                  <span className="text-xs font-bold text-white bg-gray-700 px-1.5 py-0.5 rounded">
+                    {formatOdds(topEntry.current_odds)}
+                  </span>
+                  <span className="text-[10px] text-gray-500">odds</span>
+                  <span className="text-xs text-green-400 font-medium">
+                    {formatNormalized(topEnsemble)}
+                  </span>
+                  <span className="text-[10px] text-gray-500">AI win prob</span>
+                  {(topEntry.rpr || 0) > 0 && (
+                    <>
+                      <span className="text-xs text-gray-300">{topEntry.rpr}</span>
+                      <span className="text-[10px] text-gray-500">RPR</span>
+                    </>
+                  )}
+                  {(topEntry.ts || 0) > 0 && (
+                    <>
+                      <span className="text-xs text-gray-300">{topEntry.ts}</span>
+                      <span className="text-[10px] text-gray-500">TS</span>
+                    </>
+                  )}
+                </div>
+
+                {/* Profitable signal tags */}
+                {verdict.topPickSignals.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <Zap className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
                     {verdict.topPickSignals.slice(0, 3).map(sig => (
@@ -174,24 +283,27 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                       </span>
                     ))}
                   </div>
-                  <p className="text-[11px] text-green-400/90 italic">
-                    Matches {verdict.topPickSignals.length === 1 ? 'a historically profitable pattern' : `${verdict.topPickSignals.length} historically profitable patterns`}
-                  </p>
-                </div>
-              )}
+                )}
 
-              <div className="ml-14">
+                {/* Detailed AI comment */}
+                <div className="bg-gray-900/60 rounded-lg p-3 border border-gray-700/50">
+                  <div className="flex items-start gap-2">
+                    <MessageSquare className="w-3.5 h-3.5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-[11px] text-gray-300 leading-relaxed">{detailedComment}</p>
+                  </div>
+                </div>
+
                 <ShortlistButton
-                  horseName={verdict.topSelection.entry.horse_name}
+                  horseName={topEntry.horse_name}
                   raceContext={{ race_id: verdict.raceId, course_name: verdict.courseName, off_time: verdict.offTime }}
-                  odds={formatOdds(verdict.topSelection.entry.current_odds)}
-                  jockeyName={verdict.topSelection.entry.jockey_name}
-                  trainerName={verdict.topSelection.entry.trainer_name}
+                  odds={formatOdds(topEntry.current_odds)}
+                  jockeyName={topEntry.jockey_name}
+                  trainerName={topEntry.trainer_name}
                   size="small"
                 />
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Danger horse */}
           {verdict.dangerHorse && (
@@ -210,7 +322,14 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
           {/* Rest of field */}
           {verdict.allScored.length > 2 && (
             <div className="space-y-1.5 pt-2 border-t border-gray-800">
-              <span className="text-[10px] text-gray-600 uppercase tracking-wider">Full Rankings</span>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-600 uppercase tracking-wider">Full Rankings</span>
+                <div className="flex items-center gap-3 text-[9px] text-gray-600">
+                  <span>Odds</span>
+                  <span>Win Prob</span>
+                  <span>Score</span>
+                </div>
+              </div>
               {verdict.allScored.slice(0, 6).map((r, i) => (
                 <div key={r.horseId} className="flex items-center gap-2 text-xs">
                   <span className="text-gray-600 w-4 text-right font-mono">{i + 1}</span>
