@@ -66,7 +66,7 @@ const MODEL_FIELDS: ProbaField[] = [
   'xgboost_proba',
 ]
 
-function scoreMlConsensus(entry: RaceEntry, raceEntries: RaceEntry[]): number {
+function scoreMlConsensus(entry: RaceEntry, raceEntries: RaceEntry[], normalizedEnsemble: number): number {
   let topCount = 0
   let top2Count = 0
 
@@ -82,11 +82,20 @@ function scoreMlConsensus(entry: RaceEntry, raceEntries: RaceEntry[]): number {
     }
   }
 
-  // 5/5 models #1 → 100, 4/5 → 85, 3/5 → 70, etc.
-  // Being top-2 in remaining models gives partial credit
-  const topScore = (topCount / 5) * 70
-  const top2Bonus = ((top2Count - topCount) / 5) * 30
-  return Math.min(100, topScore + top2Bonus)
+  // Steep curve: model agreement is the strongest signal we have
+  // 5/5 → 100, 4/5 → 92, 3/5 → 82, 2/5 → 55, 1/5 → 30, 0/5 → 0
+  const TOP_SCORES = [0, 30, 55, 82, 92, 100]
+  const modelScore = TOP_SCORES[topCount] || 0
+
+  // Partial credit for being top-2 in models where not top-1
+  const extraTop2 = top2Count - topCount
+  const top2Bonus = extraTop2 * 4
+
+  // Blend in normalized ensemble probability as a floor
+  // so a horse the models rate highly can't score 0
+  const ensembleFloor = Math.min(40, normalizedEnsemble * 200)
+
+  return Math.min(100, Math.max(modelScore + top2Bonus, ensembleFloor))
 }
 
 // ─── Value Edge (0-100) ────────────────────────────────────────────
@@ -108,13 +117,14 @@ function scoreMarketMomentum(entry: RaceEntry): number {
   const pct = Math.abs(entry.odds_movement_pct || 0)
 
   if (movement === 'steaming') {
-    // 30%+ shortening → 100, 15% → 60, 5% → 25
-    return Math.min(100, pct * 3.3)
+    // Diminishing returns — big moves are notable but shouldn't dominate
+    // 30%+ → 85, 20% → 70, 10% → 45, 5% → 25
+    return Math.min(85, pct * 2.5 + 10)
   }
   if (movement === 'drifting') {
     return 0
   }
-  return 10 // stable gets a tiny baseline
+  return 5
 }
 
 // ─── Form Figures (0-100) ──────────────────────────────────────────
@@ -203,9 +213,9 @@ function scoreTrainerIntent(entry: RaceEntry, intentData?: TrainerIntentData): n
 // ─── Main Confluence Calculator ────────────────────────────────────
 
 const WEIGHTS = {
-  mlConsensus: 0.25,
-  valueEdge: 0.20,
-  marketMomentum: 0.20,
+  mlConsensus: 0.35,
+  valueEdge: 0.13,
+  marketMomentum: 0.12,
   formFigures: 0.15,
   specialist: 0.10,
   trainerIntent: 0.10,
@@ -224,7 +234,7 @@ export function calculateConfluenceScores(
     const intentData = trainerIntentMap?.get(entry.horse_id)
 
     const signals: SignalBreakdown = {
-      mlConsensus: scoreMlConsensus(entry, raceEntries),
+      mlConsensus: scoreMlConsensus(entry, raceEntries, normalizedEnsemble),
       valueEdge: scoreValueEdge(normalizedEnsemble, entry.current_odds),
       marketMomentum: scoreMarketMomentum(entry),
       formFigures: scoreFormFigures(entry, raceEntries),
