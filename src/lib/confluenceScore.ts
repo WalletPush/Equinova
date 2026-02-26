@@ -178,7 +178,7 @@ function scoreSpecialist(entry: RaceEntry): number {
 
 // ─── Trainer Intent (0-100) ────────────────────────────────────────
 
-interface TrainerIntentData {
+export interface TrainerIntentData {
   isSingleRunner: boolean
   trainer21DayWinPct: number
 }
