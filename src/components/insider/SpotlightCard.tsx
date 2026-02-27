@@ -157,8 +157,25 @@ export function SpotlightCard({ result, rank, courseName, offTime, raceClass, di
             />
           </div>
 
-          <div className="text-xs text-gray-400 mb-2">
-            {entry.jockey_name} · {entry.trainer_name}
+          <div className="text-xs text-gray-400 mb-2 space-y-0.5">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span>J: {entry.jockey_name}</span>
+              {(entry.jockey_win_percentage_at_distance || 0) > 0 && (
+                <span className="text-[10px] text-blue-400">({entry.jockey_win_percentage_at_distance?.toFixed(0)}% at dist)</span>
+              )}
+              {(entry.jockey_21_days_win_percentage || 0) >= 10 && (
+                <span className="text-[10px] text-green-400">({entry.jockey_21_days_win_percentage?.toFixed(0)}% last 21d)</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span>T: {entry.trainer_name}</span>
+              {(entry.trainer_win_percentage_at_course || 0) > 0 && (
+                <span className="text-[10px] text-purple-400">({entry.trainer_win_percentage_at_course?.toFixed(0)}% at course)</span>
+              )}
+              {(entry.trainer_21_days_win_percentage || 0) >= 10 && (
+                <span className="text-[10px] text-green-400">({entry.trainer_21_days_win_percentage?.toFixed(0)}% last 21d)</span>
+              )}
+            </div>
           </div>
 
           {/* Odds + Win Prob + Model badges row */}

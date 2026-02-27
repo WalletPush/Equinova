@@ -386,12 +386,17 @@ export function AIInsiderPage() {
     return allRaceVerdicts.slice(0, 4)
   }, [allRaceVerdicts])
 
-  // ─── Data Angles ─────────────────────────────────────────────────
+  // ─── Data Angles (scoped to the next 4 races only) ──────────────
 
-  const speedStandouts = useMemo(() => findSpeedStandouts(upcomingEntries), [upcomingEntries])
-  const specialists = useMemo(() => findCourseDistanceSpecialists(upcomingEntries), [upcomingEntries])
-  const trainerHotspots = useMemo(() => findTrainerHotspots(upcomingEntries, trainerIntentMap), [upcomingEntries, trainerIntentMap])
-  const returningImprovers = useMemo(() => findReturningImprovers(upcomingEntries), [upcomingEntries])
+  const next4Entries = useMemo(() => {
+    const next4RaceIds = new Set(raceVerdicts.map(v => v.raceId))
+    return upcomingEntries.filter(e => next4RaceIds.has(e.race_id))
+  }, [upcomingEntries, raceVerdicts])
+
+  const speedStandouts = useMemo(() => findSpeedStandouts(next4Entries), [next4Entries])
+  const specialists = useMemo(() => findCourseDistanceSpecialists(next4Entries), [next4Entries])
+  const trainerHotspots = useMemo(() => findTrainerHotspots(next4Entries, trainerIntentMap), [next4Entries, trainerIntentMap])
+  const returningImprovers = useMemo(() => findReturningImprovers(next4Entries), [next4Entries])
 
   // ─── Market Movers with race groups ──────────────────────────────
 
