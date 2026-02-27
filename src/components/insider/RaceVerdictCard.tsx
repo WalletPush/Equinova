@@ -11,8 +11,8 @@ import type { RaceVerdict, ConfluenceResult, ProfitableSignal } from '@/lib/conf
 import type { RaceEntry } from '@/lib/supabase'
 
 function ScoreBadge({ score, size = 'sm' }: { score: number; size?: 'sm' | 'md' }) {
-  const color = score >= 65 ? 'text-green-400 border-green-500/40 bg-green-500/10'
-    : score >= 45 ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+  const color = score >= 50 ? 'text-green-400 border-green-500/40 bg-green-500/10'
+    : score >= 35 ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
     : 'text-red-400 border-red-500/40 bg-red-500/10'
   const sizeClass = size === 'md'
     ? 'text-base font-bold px-2.5 py-1'
@@ -368,11 +368,12 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
 
 interface RaceVerdictsSectionProps {
   verdicts: RaceVerdict[]
+  totalRaces: number
   modelPicksMap: Record<string, Map<string, { label: string; color: string }[]>>
   onHorseClick?: (entry: RaceEntry) => void
 }
 
-export function RaceVerdictsSection({ verdicts, modelPicksMap, onHorseClick }: RaceVerdictsSectionProps) {
+export function RaceVerdictsSection({ verdicts, totalRaces, modelPicksMap, onHorseClick }: RaceVerdictsSectionProps) {
   const strongCount = verdicts.filter(v => v.verdict === 'strong').length
   const leanCount = verdicts.filter(v => v.verdict === 'lean').length
 
@@ -381,8 +382,8 @@ export function RaceVerdictsSection({ verdicts, modelPicksMap, onHorseClick }: R
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Trophy className="w-5 h-5 text-amber-400" />
-          <h2 className="text-lg font-bold text-white">Race by Race</h2>
-          <span className="text-xs text-gray-500 ml-1">Our pick for every race</span>
+          <h2 className="text-lg font-bold text-white">Next Races</h2>
+          <span className="text-xs text-gray-500 ml-1">Showing next {verdicts.length} of {totalRaces} upcoming</span>
         </div>
         <div className="flex items-center gap-3 text-xs">
           {strongCount > 0 && (
@@ -391,7 +392,6 @@ export function RaceVerdictsSection({ verdicts, modelPicksMap, onHorseClick }: R
           {leanCount > 0 && (
             <span className="text-amber-400">{leanCount} worth a look</span>
           )}
-          <span className="text-gray-600">{verdicts.length} races</span>
         </div>
       </div>
 

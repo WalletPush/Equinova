@@ -34,7 +34,7 @@ function EquinovaGauge({ score }: { score: number }) {
   const stroke = 6
   const circumference = 2 * Math.PI * radius
   const progress = (score / 100) * circumference
-  const color = score >= 75 ? '#22c55e' : score >= 55 ? '#f59e0b' : '#ef4444'
+  const color = score >= 60 ? '#22c55e' : score >= 45 ? '#f59e0b' : '#ef4444'
 
   return (
     <div className="relative flex items-center justify-center">
@@ -108,9 +108,9 @@ export function SpotlightCard({ result, rank, courseName, offTime, raceClass, di
   const displayTime = formatTime(offTime)
   const angleSummary = getAngleSummary(signals, entry)
 
-  const borderColor = score >= 75
+  const borderColor = score >= 60
     ? 'border-green-500/40'
-    : score >= 55
+    : score >= 45
       ? 'border-amber-500/40'
       : 'border-gray-700'
 
@@ -235,8 +235,8 @@ export function SpotlightSection({ spotlightPicks, raceMap, modelPicksMap, onHor
     return (
       <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-6 text-center">
         <Brain className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-        <h3 className="text-lg font-bold text-gray-400 mb-1">No Standout Picks Today</h3>
-        <p className="text-sm text-gray-500">No horse currently scores 60+ on the Equinova Scale. Proceed with caution or check back closer to race time as odds update.</p>
+        <h3 className="text-lg font-bold text-gray-400 mb-1">No Standout Picks Right Now</h3>
+        <p className="text-sm text-gray-500">No horse currently scores 50+ on the Equinova Scale. Check back closer to race time — scores update as odds and market data come in.</p>
       </div>
     )
   }

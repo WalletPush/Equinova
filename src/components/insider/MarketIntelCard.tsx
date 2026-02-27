@@ -39,10 +39,10 @@ interface MarketIntelCardProps {
 }
 
 function getScoreComment(score: number, isTopPick: boolean, pct: number): string {
-  if (score >= 65 && isTopPick) return 'AI rates highly & market agrees — standout'
-  if (score >= 65) return 'AI rates this horse very highly'
-  if (score >= 45 && isTopPick) return 'AI models like this one, market backing it too'
-  if (score >= 45) return 'Above average — some positive signals'
+  if (score >= 50 && isTopPick) return 'AI rates highly & market agrees — standout'
+  if (score >= 50) return 'AI rates this horse very highly'
+  if (score >= 35 && isTopPick) return 'AI models like this one, market backing it too'
+  if (score >= 35) return 'Above average — some positive signals'
   if (isTopPick) return 'AI models rate it but score is mixed'
   if (pct >= 15) return 'Big market move but AI is less convinced'
   if (pct >= 8) return 'Notable odds movement, worth monitoring'
@@ -50,8 +50,8 @@ function getScoreComment(score: number, isTopPick: boolean, pct: number): string
 }
 
 function MoverScoreBadge({ score }: { score: number }) {
-  const color = score >= 65 ? 'text-green-400 border-green-500/40 bg-green-500/10'
-    : score >= 45 ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+  const color = score >= 50 ? 'text-green-400 border-green-500/40 bg-green-500/10'
+    : score >= 35 ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
     : 'text-red-400 border-red-500/40 bg-red-500/10'
   return (
     <div className="flex flex-col items-center gap-0.5">

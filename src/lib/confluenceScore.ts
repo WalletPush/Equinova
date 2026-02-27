@@ -274,8 +274,8 @@ export function deriveVerdict(scored: ConfluenceResult[]): Verdict {
   const top3Scores = scored.slice(0, 3).map(s => s.score)
   const spread = top3Scores.length >= 2 ? top3Scores[0] - top3Scores[top3Scores.length - 1] : 999
 
-  if (top.score >= 65 && spread >= 8) return 'strong'
-  if (top.score >= 45) return 'lean'
+  if (top.score >= 50 && spread >= 8) return 'strong'
+  if (top.score >= 35) return 'lean'
   return 'skip'
 }
 

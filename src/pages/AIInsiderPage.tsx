@@ -322,19 +322,19 @@ export function AIInsiderPage() {
     return map
   }, [entriesByRace, trainerIntentMap])
 
-  // Spotlight picks: best across ALL races, 60+ score, max 3
+  // Spotlight picks: best across ALL upcoming races, 50+ score, max 5
   const spotlightPicks = useMemo(() => {
     const all: ConfluenceResult[] = []
     for (const scored of Object.values(allScoredByRace)) {
-      if (scored.length > 0 && scored[0].score >= 60) {
+      if (scored.length > 0 && scored[0].score >= 50) {
         all.push(scored[0])
       }
     }
-    return all.sort((a, b) => b.score - a.score).slice(0, 3)
+    return all.sort((a, b) => b.score - a.score).slice(0, 5)
   }, [allScoredByRace])
 
-  // Race verdicts: one per upcoming race
-  const raceVerdicts = useMemo(() => {
+  // Race verdicts: all upcoming races, sorted by time
+  const allRaceVerdicts = useMemo(() => {
     const verdicts: RaceVerdict[] = []
     for (const [raceId, scored] of Object.entries(allScoredByRace)) {
       const meta = raceMetaMap[raceId]
@@ -377,15 +377,14 @@ export function AIInsiderPage() {
       })
     }
 
-    // Sort: strong first, then lean, then skip, each group sorted by time
-    const verdictOrder: Record<string, number> = { strong: 0, lean: 1, skip: 2 }
-    return verdicts.sort((a, b) => {
-      const va = verdictOrder[a.verdict] ?? 3
-      const vb = verdictOrder[b.verdict] ?? 3
-      if (va !== vb) return va - vb
-      return compareRaceTimes(a.offTime, b.offTime)
-    })
+    // Always sort chronologically by race time
+    return verdicts.sort((a, b) => compareRaceTimes(a.offTime, b.offTime))
   }, [allScoredByRace, raceMetaMap, entriesByRace, modelPicksMap, trainerIntentMap])
+
+  // Show only the next 4 upcoming races in Race by Race
+  const raceVerdicts = useMemo(() => {
+    return allRaceVerdicts.slice(0, 4)
+  }, [allRaceVerdicts])
 
   // ─── Data Angles ─────────────────────────────────────────────────
 
@@ -425,8 +424,8 @@ export function AIInsiderPage() {
     await refetchRaces()
   }
 
-  const strongCount = raceVerdicts.filter(v => v.verdict === 'strong').length
-  const leanCount = raceVerdicts.filter(v => v.verdict === 'lean').length
+  const strongCount = allRaceVerdicts.filter(v => v.verdict === 'strong').length
+  const leanCount = allRaceVerdicts.filter(v => v.verdict === 'lean').length
 
   return (
     <AppLayout>
@@ -455,10 +454,10 @@ export function AIInsiderPage() {
         </div>
 
         {/* Quick stats bar */}
-        {!isLoading && raceVerdicts.length > 0 && (
+        {!isLoading && allRaceVerdicts.length > 0 && (
           <div className="px-4 py-2 border-b border-gray-800/50">
             <div className="max-w-4xl mx-auto flex items-center gap-4 text-xs">
-              <span className="text-gray-500">{raceVerdicts.length} races analyzed</span>
+              <span className="text-gray-500">{allRaceVerdicts.length} races today</span>
               {strongCount > 0 && (
                 <span className="text-green-400 font-medium">{strongCount} top {strongCount === 1 ? 'pick' : 'picks'}</span>
               )}
@@ -485,9 +484,9 @@ export function AIInsiderPage() {
                 Every horse gets a score from 0 to 100. We combine <strong className="text-white">5 AI models</strong>, <strong className="text-white">live odds movement</strong>, <strong className="text-white">speed figures</strong>, <strong className="text-white">course & trainer form</strong> into one number that tells you how strong the case is for each horse.
               </p>
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
-                <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1.5" />65+ = <strong className="text-green-400">Top Pick</strong> — strong across the board</span>
-                <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5" />45-64 = <strong className="text-amber-400">Worth a Look</strong> — some positive signals</span>
-                <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5" />Under 45 = <strong className="text-red-400">Risky</strong> — limited data support</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1.5" />50+ = <strong className="text-green-400">Top Pick</strong> — strong across the board</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5" />35-49 = <strong className="text-amber-400">Worth a Look</strong> — some positive signals</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5" />Under 35 = <strong className="text-red-400">Risky</strong> — limited data support</span>
               </div>
             </div>
           )}
@@ -544,10 +543,11 @@ export function AIInsiderPage() {
             />
           )}
 
-          {/* SECTION 2: Race Verdicts */}
+          {/* SECTION 2: Next Races (max 4) */}
           {!isLoading && raceVerdicts.length > 0 && (
             <RaceVerdictsSection
               verdicts={raceVerdicts}
+              totalRaces={allRaceVerdicts.length}
               modelPicksMap={modelPicksMap}
               onHorseClick={handleHorseClick}
             />
