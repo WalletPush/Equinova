@@ -249,7 +249,7 @@ export function SpotlightSection({ spotlightPicks, raceMap, modelPicksMap, onHor
         <span className="text-xs text-gray-500 ml-1">Highest rated horses across all races</span>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {spotlightPicks.map((pick, i) => {
           const race = raceMap[pick.raceId] || { course_name: '', off_time: '', race_class: '', distance: '' }
           return (
