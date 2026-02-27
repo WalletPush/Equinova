@@ -467,7 +467,7 @@ export function AIInsiderPage() {
       <div className="min-h-screen bg-gray-950 pb-24">
         {/* Header */}
         <div className="sticky top-0 z-30 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800 px-4 py-3">
-          <div className="flex items-center justify-between max-w-4xl mx-auto">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Brain className="w-5 h-5 text-yellow-400" />
               <h1 className="text-lg font-bold text-white">AI Insider</h1>
@@ -491,7 +491,7 @@ export function AIInsiderPage() {
         {/* Quick stats bar */}
         {!isLoading && allRaceVerdicts.length > 0 && (
           <div className="px-4 py-2 border-b border-gray-800/50">
-            <div className="max-w-4xl mx-auto flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-4 text-xs">
               <span className="text-gray-500">{allRaceVerdicts.length} races today</span>
               {strongCount > 0 && (
                 <span className="text-green-400 font-medium">{strongCount} top {strongCount === 1 ? 'pick' : 'picks'}</span>
@@ -510,7 +510,7 @@ export function AIInsiderPage() {
         )}
 
         {/* Main content */}
-        <div className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+        <div className="p-4 space-y-8">
           {/* Welcome section */}
           {!isLoading && upcomingEntries.length > 0 && (
             <div className="space-y-4">
