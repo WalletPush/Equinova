@@ -376,10 +376,10 @@ export function findSpeedStandouts(allEntries: RaceEntry[]): SpeedStandout[] {
       const advantage = ((best - fieldAvg) / fieldAvg) * 100
       if (advantage >= 5) {
         const figureType = entry.best_speed_figure_on_course_going_distance
-          ? 'Course/Going/Distance'
+          ? 'Best speed at this course, going & distance'
           : entry.best_speed_figure_at_distance
-            ? 'At Distance'
-            : 'At Track'
+            ? 'Best speed at this distance'
+            : 'Best speed at this track'
         standouts.push({ entry, raceId, bestFigure: best, fieldAvg, advantage, figureType })
       }
     }

@@ -10,6 +10,7 @@ import type { RaceEntry } from '@/lib/supabase'
 
 interface CollapsibleAngleProps {
   title: string
+  subtitle?: string
   icon: React.ElementType
   iconColor: string
   count: number
@@ -17,7 +18,7 @@ interface CollapsibleAngleProps {
   defaultOpen?: boolean
 }
 
-function CollapsibleAngle({ title, icon: Icon, iconColor, count, children, defaultOpen = false }: CollapsibleAngleProps) {
+function CollapsibleAngle({ title, subtitle, icon: Icon, iconColor, count, children, defaultOpen = false }: CollapsibleAngleProps) {
   const [open, setOpen] = useState(defaultOpen)
 
   return (
@@ -27,8 +28,13 @@ function CollapsibleAngle({ title, icon: Icon, iconColor, count, children, defau
         className="w-full flex items-center gap-2 p-3 sm:p-4 text-left hover:bg-gray-800/30 transition-colors"
       >
         <Icon className={`w-4 h-4 ${iconColor} flex-shrink-0`} />
-        <span className="text-sm font-medium text-white">{title}</span>
-        <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded-full">{count}</span>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-white">{title}</span>
+            <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded-full">{count}</span>
+          </div>
+          {subtitle && <span className="text-[10px] text-gray-500 mt-0.5">{subtitle}</span>}
+        </div>
         <div className="ml-auto text-gray-500">
           {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </div>
@@ -43,7 +49,7 @@ function CollapsibleAngle({ title, icon: Icon, iconColor, count, children, defau
   )
 }
 
-// ─── Speed Standouts ────────────────────────────────────────────────
+// ─── Fastest In The Field ────────────────────────────────────────────
 
 interface SpeedStandoutsProps {
   standouts: SpeedStandout[]
@@ -54,7 +60,7 @@ interface SpeedStandoutsProps {
 
 function SpeedStandoutsList({ standouts, raceMap, modelPicksMap, onHorseClick }: SpeedStandoutsProps) {
   if (standouts.length === 0) {
-    return <p className="text-xs text-gray-500">No speed figure standouts found in today's races.</p>
+    return <p className="text-xs text-gray-500">No horses with a clear speed advantage found in these races.</p>
   }
 
   return (
@@ -115,7 +121,7 @@ function SpeedStandoutsList({ standouts, raceMap, modelPicksMap, onHorseClick }:
   )
 }
 
-// ─── Course & Distance Specialists ──────────────────────────────────
+// ─── Proven At This Track ──────────────────────────────────────────
 
 interface SpecialistsProps {
   specialists: CourseDistanceSpecialist[]
@@ -126,7 +132,7 @@ interface SpecialistsProps {
 
 function SpecialistsList({ specialists, raceMap, modelPicksMap, onHorseClick }: SpecialistsProps) {
   if (specialists.length === 0) {
-    return <p className="text-xs text-gray-500">No course/distance specialists found in today's races.</p>
+    return <p className="text-xs text-gray-500">No horses with a strong winning record at this course and distance.</p>
   }
 
   return (
@@ -160,11 +166,11 @@ function SpecialistsList({ specialists, raceMap, modelPicksMap, onHorseClick }: 
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
               <div className="text-right">
-                <span className="text-xs text-purple-400 font-medium">{s.horseWinPctAtDistance.toFixed(0)}% at dist</span>
+                <span className="text-xs text-purple-400 font-medium">{s.horseWinPctAtDistance.toFixed(0)}% win at distance</span>
               </div>
               {s.trainerWinPctAtCourse > 0 && (
                 <div className="text-right">
-                  <span className="text-xs text-blue-400">{s.trainerWinPctAtCourse.toFixed(0)}% T@C</span>
+                  <span className="text-xs text-blue-400">{s.trainerWinPctAtCourse.toFixed(0)}% trainer wins here</span>
                 </div>
               )}
               <span className="text-xs font-medium text-white bg-gray-800 px-1.5 py-0.5 rounded">
@@ -186,7 +192,7 @@ function SpecialistsList({ specialists, raceMap, modelPicksMap, onHorseClick }: 
   )
 }
 
-// ─── Trainer Hotspots ───────────────────────────────────────────────
+// ─── Trainers In Form ───────────────────────────────────────────────
 
 interface TrainerHotspotsProps {
   hotspots: TrainerHotspot[]
@@ -197,7 +203,7 @@ interface TrainerHotspotsProps {
 
 function TrainerHotspotsList({ hotspots, raceMap, modelPicksMap, onHorseClick }: TrainerHotspotsProps) {
   if (hotspots.length === 0) {
-    return <p className="text-xs text-gray-500">No trainer hotspots found in today's races.</p>
+    return <p className="text-xs text-gray-500">No trainers with a strong recent record found in these races.</p>
   }
 
   return (
@@ -219,7 +225,7 @@ function TrainerHotspotsList({ hotspots, raceMap, modelPicksMap, onHorseClick }:
                 />
                 {h.isSingleRunner && (
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-yellow-500/15 text-yellow-400 border-yellow-500/30">
-                    SINGLE ENTRY
+                    ONLY RUNNER
                   </span>
                 )}
                 <div className="flex gap-0.5">
@@ -237,12 +243,12 @@ function TrainerHotspotsList({ hotspots, raceMap, modelPicksMap, onHorseClick }:
             <div className="flex items-center gap-3 flex-shrink-0">
               {h.courseWinPct > 0 && (
                 <div className="text-right">
-                  <span className="text-xs text-green-400 font-medium">{h.courseWinPct.toFixed(0)}% at course</span>
+                  <span className="text-xs text-green-400 font-medium">{h.courseWinPct.toFixed(0)}% wins at course</span>
                 </div>
               )}
               {h.trainer21DayPct > 0 && (
                 <div className="text-right">
-                  <span className="text-xs text-blue-400">{h.trainer21DayPct.toFixed(0)}% 21d</span>
+                  <span className="text-xs text-blue-400">{h.trainer21DayPct.toFixed(0)}% last 3 weeks</span>
                 </div>
               )}
               <span className="text-xs font-medium text-white bg-gray-800 px-1.5 py-0.5 rounded">
@@ -264,7 +270,7 @@ function TrainerHotspotsList({ hotspots, raceMap, modelPicksMap, onHorseClick }:
   )
 }
 
-// ─── Returning Improvers ────────────────────────────────────────────
+// ─── Fresh & In Form ────────────────────────────────────────────────
 
 interface ReturningImprover {
   entry: RaceEntry
@@ -315,7 +321,7 @@ interface ReturningImproversProps {
 
 function ReturningImproversList({ improvers, raceMap, modelPicksMap, onHorseClick }: ReturningImproversProps) {
   if (improvers.length === 0) {
-    return <p className="text-xs text-gray-500">No returning improvers found in today's races.</p>
+    return <p className="text-xs text-gray-500">No horses found that are fresh and running near their best.</p>
   }
 
   return (
@@ -338,7 +344,7 @@ function ReturningImproversList({ improvers, raceMap, modelPicksMap, onHorseClic
                 />
                 {imp.improving && (
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-green-500/15 text-green-400 border-green-500/30">
-                    NEAR PEAK
+                    TOP FORM
                   </span>
                 )}
                 <div className="flex gap-0.5">
@@ -358,7 +364,7 @@ function ReturningImproversList({ improvers, raceMap, modelPicksMap, onHorseClic
                 <span className="text-xs text-orange-400 font-medium">
                   {imp.lastSpeedFig.toFixed(0)} / {imp.bestSpeedFig.toFixed(0)}
                 </span>
-                <span className="text-[10px] text-gray-500 block">{ratio}% of best</span>
+                <span className="text-[10px] text-gray-500 block">{ratio}% of personal best</span>
               </div>
               <span className="text-xs font-medium text-white bg-gray-800 px-1.5 py-0.5 rounded">
                 {formatOdds(imp.entry.current_odds)}
@@ -407,15 +413,16 @@ export function DataAnglesSection({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Gauge className="w-5 h-5 text-orange-400" />
-          <h2 className="text-lg font-bold text-white">Data Angles</h2>
-          <span className="text-xs text-gray-500 ml-1">Statistical edges from the data</span>
+          <h2 className="text-lg font-bold text-white">Key Stats</h2>
+          <span className="text-xs text-gray-500 ml-1">Patterns worth knowing about</span>
         </div>
-        <span className="text-xs text-gray-500">{totalAngles} angles found</span>
+        <span className="text-xs text-gray-500">{totalAngles} insights found</span>
       </div>
 
       <div className="space-y-2">
         <CollapsibleAngle
-          title="Speed Figure Standouts"
+          title="Fastest In The Field"
+          subtitle="Horses with the best speed figures compared to the rest of the field"
           icon={Gauge}
           iconColor="text-orange-400"
           count={speedStandouts.length}
@@ -430,7 +437,8 @@ export function DataAnglesSection({
         </CollapsibleAngle>
 
         <CollapsibleAngle
-          title="Course & Distance Specialists"
+          title="Proven At This Track"
+          subtitle="Horses or trainers with a strong winning record at today's course and distance"
           icon={MapPin}
           iconColor="text-purple-400"
           count={specialists.length}
@@ -444,7 +452,8 @@ export function DataAnglesSection({
         </CollapsibleAngle>
 
         <CollapsibleAngle
-          title="Trainer Hotspots"
+          title="Trainers In Form"
+          subtitle="Trainers winning regularly right now, especially those with a single runner at the meeting"
           icon={Users}
           iconColor="text-green-400"
           count={trainerHotspots.length}
@@ -458,7 +467,8 @@ export function DataAnglesSection({
         </CollapsibleAngle>
 
         <CollapsibleAngle
-          title="Returning Improvers"
+          title="Fresh & In Form"
+          subtitle="Horses that ran close to their personal best recently and are back after a short rest"
           icon={RotateCcw}
           iconColor="text-blue-400"
           count={returningImprovers.length}
