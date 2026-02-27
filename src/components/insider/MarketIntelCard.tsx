@@ -223,7 +223,7 @@ interface CollapsibleRaceGroupProps {
 }
 
 function CollapsibleRaceGroup({ courseName, offTime, moverCount, hasWarning, topMoverName, topMoverPct, children }: CollapsibleRaceGroupProps) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
 
   return (
     <div className="bg-gray-900/60 border border-gray-800 rounded-xl">

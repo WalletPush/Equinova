@@ -506,7 +506,7 @@ export function DataAnglesSection({
           icon={TrendingUp}
           iconColor="text-emerald-400"
           count={valueBets.length}
-          defaultOpen={valueBets.length > 0 && valueBets.length <= 6}
+          defaultOpen={false}
         >
           <ValueBetsList
             valueBets={valueBets}
@@ -521,7 +521,7 @@ export function DataAnglesSection({
           icon={Gauge}
           iconColor="text-orange-400"
           count={speedStandouts.length}
-          defaultOpen={speedStandouts.length > 0 && speedStandouts.length <= 5}
+          defaultOpen={false}
         >
           <SpeedStandoutsList
             standouts={speedStandouts}
