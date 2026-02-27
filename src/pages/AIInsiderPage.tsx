@@ -403,11 +403,8 @@ export function AIInsiderPage() {
 
   const valueBets = useMemo<ValueBetInsider[]>(() => {
     const results: ValueBetInsider[] = []
-    const next4RaceIds = new Set(raceVerdicts.map(v => v.raceId))
 
     for (const [raceId, entries] of Object.entries(entriesByRace)) {
-      if (!next4RaceIds.has(raceId)) continue
-
       const normMap = normalizeField(entries, 'ensemble_proba', 'horse_id')
       const picks = modelPicksMap[raceId] || new Map()
 
@@ -422,14 +419,14 @@ export function AIInsiderPage() {
         const impliedProb = 1 / (odds + 1)
         const edge = normProb - impliedProb
 
-        if (edge > 0.05) {
+        if (edge > 0.02) {
           results.push({ entry, raceId, normProb, impliedProb, edge, modelBadges: badges })
         }
       }
     }
 
     return results.sort((a, b) => b.edge - a.edge)
-  }, [entriesByRace, raceVerdicts, modelPicksMap])
+  }, [entriesByRace, modelPicksMap])
 
   // ─── Market Movers with race groups ──────────────────────────────
 
