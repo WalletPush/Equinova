@@ -519,6 +519,9 @@ export function AIInsiderPage() {
                 <p className="text-xs text-gray-300 leading-relaxed mb-3">
                   This is your daily briefing. We crunch <strong className="text-white">5 AI models</strong>, <strong className="text-white">live market odds</strong>, <strong className="text-white">speed figures</strong>, <strong className="text-white">course form</strong>, and <strong className="text-white">trainer data</strong> to surface the horses worth your attention. Everything on this page updates automatically as races approach.
                 </p>
+                <p className="text-xs text-gray-400 leading-relaxed mb-3">
+                  <strong className="text-gray-300">Tip:</strong> Tap or click any <strong className="text-white">horse name</strong> to see their full form, detailed stats, and deeper AI analysis. Hover or tap the <strong className="text-white">coloured model badges</strong> (MLP, RF, XGB, etc.) to learn what each AI model does.
+                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                   <div className="bg-gray-800/40 rounded-lg p-3">
