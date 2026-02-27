@@ -1,8 +1,9 @@
-import React from 'react'
-import { TrendingUp, TrendingDown, ArrowRight, Minus, MapPin } from 'lucide-react'
+import React, { useState } from 'react'
+import { TrendingUp, TrendingDown, ArrowRight, Minus, MapPin, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
+import { MarketMovementBadge } from '@/components/MarketMovement'
 import { formatOdds } from '@/lib/odds'
 import { formatTime } from '@/lib/dateUtils'
 import { formatNormalized } from '@/lib/normalize'
@@ -38,12 +39,14 @@ interface MarketIntelCardProps {
   raceEntry?: RaceEntry
 }
 
-function getScoreComment(score: number, isTopPick: boolean, pct: number): string {
+function getScoreComment(score: number, isTopPick: boolean, pct: number, modelCount: number): string {
   if (score >= 50 && isTopPick) return 'AI rates highly & market agrees — standout'
   if (score >= 50) return 'AI rates this horse very highly'
-  if (score >= 35 && isTopPick) return 'AI models like this one, market backing it too'
+  if (score >= 35 && isTopPick) return 'AI models like this one, market is backing it too'
   if (score >= 35) return 'Above average — some positive signals'
-  if (isTopPick) return 'AI models rate it but score is mixed'
+  if (isTopPick) return 'AI models rate it but overall score is mixed'
+  if (modelCount === 0 && pct >= 15) return 'Heavy money coming but NO AI models pick this horse — the market knows something or it\'s hype'
+  if (modelCount === 0 && pct >= 8) return 'Being backed but none of our AI models pick this horse — proceed with caution'
   if (pct >= 15) return 'Big market move but AI is less convinced'
   if (pct >= 8) return 'Notable odds movement, worth monitoring'
   return 'Minor market interest'
@@ -75,17 +78,38 @@ export function MarketIntelCard({
   const pct = Math.abs(mover.odds_movement_pct || 0)
   const isSteaming = mover.odds_movement === 'steaming'
   const isDrifting = mover.odds_movement === 'drifting'
-  const comment = equinovaScore != null ? getScoreComment(equinovaScore, isTopMlPick, pct) : null
+  const comment = equinovaScore != null ? getScoreComment(equinovaScore, isTopMlPick, pct, modelBadges.length) : null
+  const isNonMlBacked = modelBadges.length === 0 && isSteaming && pct >= 8
 
   return (
     <div className="p-3 sm:p-4">
-      {/* Top row: badge + score */}
+      {/* Warning banner for non-ML horses being backed */}
+      {isNonMlBacked && (
+        <div className={`flex items-start gap-2 rounded-lg px-3 py-2 mb-2.5 ${
+          pct >= 15
+            ? 'bg-orange-500/15 border border-orange-500/30'
+            : 'bg-amber-500/10 border border-amber-500/20'
+        }`}>
+          <AlertTriangle className={`w-3.5 h-3.5 flex-shrink-0 mt-0.5 ${pct >= 15 ? 'text-orange-400' : 'text-amber-400'}`} />
+          <p className={`text-[11px] leading-relaxed ${pct >= 15 ? 'text-orange-300' : 'text-amber-300'}`}>
+            {pct >= 15
+              ? `Heavily backed (${pct.toFixed(0)}% in) but not picked by any AI model. The market sees something our models don't — or this is hype. Worth investigating.`
+              : `Being backed (${pct.toFixed(0)}% in) but not an AI pick. Market interest without AI support — keep an eye on it.`
+            }
+          </p>
+        </div>
+      )}
+
+      {/* Top row: badge + movement pill + score */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1 min-w-0">
-          {/* Agreement badge */}
-          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${mlConfig.bg} ${mlConfig.border} ${mlConfig.color}`}>
-            {mlConfig.label}
-          </span>
+          {/* Agreement badge + movement badge */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${mlConfig.bg} ${mlConfig.border} ${mlConfig.color}`}>
+              {mlConfig.label}
+            </span>
+            <MarketMovementBadge movement={mover.odds_movement} pct={mover.odds_movement_pct} size="md" />
+          </div>
 
           {/* Horse info */}
           <div className="mt-2">
@@ -115,7 +139,7 @@ export function MarketIntelCard({
 
       {/* AI Comment */}
       {comment && (
-        <p className="text-[11px] text-gray-400 italic mb-2 pl-0.5">{comment}</p>
+        <p className={`text-[11px] italic mb-2 pl-0.5 ${isNonMlBacked ? 'text-amber-400/80' : 'text-gray-400'}`}>{comment}</p>
       )}
 
       {/* Odds movement visual */}
@@ -150,13 +174,19 @@ export function MarketIntelCard({
       {/* ML data + badges row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1">
-            {modelBadges.map((b, i) => (
-              <ModelBadge key={i} label={b.label} color={b.color} showCheck />
-            ))}
-          </div>
-          {normalizedEnsemble > 0 && (
-            <span className="text-xs text-green-400/80">{formatNormalized(normalizedEnsemble)}</span>
+          {modelBadges.length > 0 ? (
+            <>
+              <div className="flex items-center gap-1">
+                {modelBadges.map((b, i) => (
+                  <ModelBadge key={i} label={b.label} color={b.color} showCheck />
+                ))}
+              </div>
+              {normalizedEnsemble > 0 && (
+                <span className="text-xs text-green-400/80">{formatNormalized(normalizedEnsemble)}</span>
+              )}
+            </>
+          ) : (
+            <span className="text-[10px] text-gray-600 italic">No AI models pick this horse</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -176,6 +206,56 @@ export function MarketIntelCard({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Collapsible race group ─────────────────────────────────────────
+
+interface CollapsibleRaceGroupProps {
+  courseName: string
+  offTime: string
+  moverCount: number
+  hasWarning: boolean
+  topMoverName?: string
+  topMoverPct?: number
+  children: React.ReactNode
+}
+
+function CollapsibleRaceGroup({ courseName, offTime, moverCount, hasWarning, topMoverName, topMoverPct, children }: CollapsibleRaceGroupProps) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div className="bg-gray-900/60 border border-gray-800 rounded-xl">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 sm:px-4 py-2.5 bg-gray-800/40 text-left hover:bg-gray-800/60 transition-colors rounded-t-xl"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <MapPin className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+          <span className="text-sm font-medium text-white">{courseName}</span>
+          <span className="text-xs text-gray-500">{formatTime(offTime)}</span>
+          {hasWarning && (
+            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-orange-400 bg-orange-500/15 border border-orange-500/30 px-1.5 py-0.5 rounded-full">
+              <AlertTriangle className="w-2.5 h-2.5" />
+              Non-AI backed
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!open && topMoverName && (
+            <span className="text-[10px] text-gray-500 truncate max-w-[120px] hidden sm:inline">{topMoverName}</span>
+          )}
+          <span className="text-[10px] text-gray-500">{moverCount} {moverCount === 1 ? 'mover' : 'movers'}</span>
+          {open ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-800">
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -248,35 +328,35 @@ export function MarketIntelSection({ raceGroups, raceEntriesMap, modelPicksMap, 
       </div>
 
       <div className="space-y-3">
-        {classifiedByRace.map(({ group, movers }) => (
-          <div key={`${group.course_name}_${group.off_time}`} className="bg-gray-900/60 border border-gray-800 rounded-xl">
-            {/* Race header */}
-            <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-gray-800/40 border-b border-gray-800">
-              <div className="flex items-center gap-2">
-                <MapPin className="w-3.5 h-3.5 text-gray-500" />
-                <span className="text-sm font-medium text-white">{group.course_name}</span>
-                <span className="text-xs text-gray-500">{formatTime(group.off_time)}</span>
+        {classifiedByRace.map(({ group, movers }) => {
+          const hasWarning = movers.some(m => m.modelBadges.length === 0 && Math.abs(m.mover.odds_movement_pct || 0) >= 8 && m.mover.odds_movement === 'steaming')
+          return (
+            <CollapsibleRaceGroup
+              key={`${group.course_name}_${group.off_time}`}
+              courseName={group.course_name}
+              offTime={group.off_time}
+              moverCount={movers.length}
+              hasWarning={hasWarning}
+              topMoverName={movers[0]?.mover.horse_name}
+              topMoverPct={Math.abs(movers[0]?.mover.odds_movement_pct || 0)}
+            >
+              <div className="divide-y divide-gray-800/60">
+                {movers.map(({ mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges, equinovaScore }) => (
+                  <MarketIntelCard
+                    key={`${mover.horse_id}-${mover.bookmaker}`}
+                    mover={mover}
+                    isTopMlPick={isTopPick}
+                    normalizedEnsemble={normalizedEnsemble}
+                    modelBadges={modelBadges}
+                    equinovaScore={equinovaScore}
+                    onHorseClick={onHorseClick}
+                    raceEntry={raceEntry}
+                  />
+                ))}
               </div>
-              <span className="text-[10px] text-gray-500">{movers.length} {movers.length === 1 ? 'mover' : 'movers'}</span>
-            </div>
-
-            {/* Movers within this race */}
-            <div className="divide-y divide-gray-800/60">
-              {movers.map(({ mover, raceEntry, isTopPick, normalizedEnsemble, modelBadges, equinovaScore }) => (
-                <MarketIntelCard
-                  key={`${mover.horse_id}-${mover.bookmaker}`}
-                  mover={mover}
-                  isTopMlPick={isTopPick}
-                  normalizedEnsemble={normalizedEnsemble}
-                  modelBadges={modelBadges}
-                  equinovaScore={equinovaScore}
-                  onHorseClick={onHorseClick}
-                  raceEntry={raceEntry}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
+            </CollapsibleRaceGroup>
+          )
+        })}
       </div>
     </div>
   )
