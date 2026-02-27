@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronUp, Gauge, MapPin, Users, RotateCcw } from 'lucide-react'
+import { ChevronDown, ChevronUp, Gauge, MapPin, Users, RotateCcw, TrendingUp } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
@@ -7,6 +7,15 @@ import { formatOdds } from '@/lib/odds'
 import { formatTime } from '@/lib/dateUtils'
 import type { SpeedStandout, TrainerHotspot, CourseDistanceSpecialist } from '@/lib/confluenceScore'
 import type { RaceEntry } from '@/lib/supabase'
+
+export interface ValueBetInsider {
+  entry: RaceEntry
+  raceId: string
+  normProb: number
+  impliedProb: number
+  edge: number
+  modelBadges: { label: string; color: string }[]
+}
 
 interface CollapsibleAngleProps {
   title: string
@@ -385,9 +394,79 @@ function ReturningImproversList({ improvers, raceMap, modelPicksMap, onHorseClic
   )
 }
 
+// ─── Value Bets ─────────────────────────────────────────────────────
+
+interface ValueBetsListProps {
+  valueBets: ValueBetInsider[]
+  raceMap: Record<string, { course_name: string; off_time: string }>
+  onHorseClick?: (entry: RaceEntry) => void
+}
+
+function formatPct(n: number): string {
+  return (n * 100).toFixed(0) + '%'
+}
+
+function ValueBetsList({ valueBets, raceMap, onHorseClick }: ValueBetsListProps) {
+  if (valueBets.length === 0) {
+    return <p className="text-xs text-gray-500">No value bets right now. We only show horses that at least one AI model picks AND whose AI win probability is higher than the odds suggest.</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      {valueBets.slice(0, 8).map((vb, i) => {
+        const race = raceMap[vb.raceId] || { course_name: '', off_time: '' }
+        return (
+          <div key={`${vb.entry.horse_id}-${i}`} className="flex items-center gap-3 bg-gray-800/30 rounded-lg p-2.5">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <HorseNameWithSilk
+                  horseName={vb.entry.horse_name}
+                  silkUrl={vb.entry.silk_url}
+                  className="text-white font-medium text-sm"
+                  clickable={!!onHorseClick}
+                  onHorseClick={onHorseClick}
+                  horseEntry={vb.entry}
+                />
+                <div className="flex gap-0.5">
+                  {vb.modelBadges.map((b, j) => (
+                    <ModelBadge key={j} label={b.label} color={b.color} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                <span>{race.course_name} {formatTime(race.off_time)}</span>
+                <span>·</span>
+                <span>AI says {formatPct(vb.normProb)} win chance vs {formatPct(vb.impliedProb)} implied by odds</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="text-right">
+                <span className="text-sm font-bold text-green-400 block">+{(vb.edge * 100).toFixed(1)}%</span>
+                <span className="text-[10px] text-gray-500">edge</span>
+              </div>
+              <span className="text-xs font-medium text-white bg-gray-800 px-1.5 py-0.5 rounded">
+                {formatOdds(vb.entry.current_odds)}
+              </span>
+              <ShortlistButton
+                horseName={vb.entry.horse_name}
+                raceContext={{ race_id: vb.raceId, course_name: race.course_name, off_time: race.off_time }}
+                odds={formatOdds(vb.entry.current_odds)}
+                jockeyName={vb.entry.jockey_name}
+                trainerName={vb.entry.trainer_name}
+                size="small"
+              />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Main DataAngles Section ────────────────────────────────────────
 
 interface DataAnglesSectionProps {
+  valueBets: ValueBetInsider[]
   speedStandouts: SpeedStandout[]
   specialists: CourseDistanceSpecialist[]
   trainerHotspots: TrainerHotspot[]
@@ -398,6 +477,7 @@ interface DataAnglesSectionProps {
 }
 
 export function DataAnglesSection({
+  valueBets,
   speedStandouts,
   specialists,
   trainerHotspots,
@@ -406,7 +486,7 @@ export function DataAnglesSection({
   modelPicksMap,
   onHorseClick,
 }: DataAnglesSectionProps) {
-  const totalAngles = speedStandouts.length + specialists.length + trainerHotspots.length + returningImprovers.length
+  const totalAngles = valueBets.length + speedStandouts.length + specialists.length + trainerHotspots.length + returningImprovers.length
 
   return (
     <div className="space-y-3">
@@ -420,6 +500,21 @@ export function DataAnglesSection({
       </div>
 
       <div className="space-y-2">
+        <CollapsibleAngle
+          title="Value Bets"
+          subtitle="Horses picked by at least one AI model where the odds are bigger than our AI thinks they should be"
+          icon={TrendingUp}
+          iconColor="text-emerald-400"
+          count={valueBets.length}
+          defaultOpen={valueBets.length > 0 && valueBets.length <= 6}
+        >
+          <ValueBetsList
+            valueBets={valueBets}
+            raceMap={raceMap}
+            onHorseClick={onHorseClick}
+          />
+        </CollapsibleAngle>
+
         <CollapsibleAngle
           title="Fastest In The Field"
           subtitle="Horses with the best speed figures compared to the rest of the field"

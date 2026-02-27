@@ -28,7 +28,8 @@ import { findReturningImprovers } from '@/components/insider/DataAnglesSection'
 import { SpotlightSection } from '@/components/insider/SpotlightCard'
 import { RaceVerdictsSection } from '@/components/insider/RaceVerdictCard'
 import { MarketIntelSection } from '@/components/insider/MarketIntelCard'
-import { DataAnglesSection } from '@/components/insider/DataAnglesSection'
+import { DataAnglesSection, type ValueBetInsider } from '@/components/insider/DataAnglesSection'
+import { normalizeField } from '@/lib/normalize'
 import { Brain, RefreshCw, Loader2, AlertCircle, Clock } from 'lucide-react'
 
 // ─── Model picks helper (same as TodaysRacesPage) ──────────────────
@@ -398,6 +399,38 @@ export function AIInsiderPage() {
   const trainerHotspots = useMemo(() => findTrainerHotspots(next4Entries, trainerIntentMap), [next4Entries, trainerIntentMap])
   const returningImprovers = useMemo(() => findReturningImprovers(next4Entries), [next4Entries])
 
+  // ─── Value Bets (ML top pick + positive edge) ─────────────────────
+
+  const valueBets = useMemo<ValueBetInsider[]>(() => {
+    const results: ValueBetInsider[] = []
+    const next4RaceIds = new Set(raceVerdicts.map(v => v.raceId))
+
+    for (const [raceId, entries] of Object.entries(entriesByRace)) {
+      if (!next4RaceIds.has(raceId)) continue
+
+      const normMap = normalizeField(entries, 'ensemble_proba', 'horse_id')
+      const picks = modelPicksMap[raceId] || new Map()
+
+      for (const entry of entries) {
+        const badges = picks.get(entry.horse_id) || []
+        if (badges.length === 0) continue
+
+        const odds = Number(entry.current_odds)
+        if (!odds || odds <= 0 || !entry.ensemble_proba || entry.ensemble_proba <= 0) continue
+
+        const normProb = normMap.get(String(entry.horse_id)) ?? 0
+        const impliedProb = 1 / (odds + 1)
+        const edge = normProb - impliedProb
+
+        if (edge > 0.05) {
+          results.push({ entry, raceId, normProb, impliedProb, edge, modelBadges: badges })
+        }
+      }
+    }
+
+    return results.sort((a, b) => b.edge - a.edge)
+  }, [entriesByRace, raceVerdicts, modelPicksMap])
+
   // ─── Market Movers with race groups ──────────────────────────────
 
   const marketRaceGroups = marketMoversData?.raceGroups || []
@@ -481,17 +514,38 @@ export function AIInsiderPage() {
 
         {/* Main content */}
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-8">
-          {/* Page intro */}
+          {/* Welcome section */}
           {!isLoading && upcomingEntries.length > 0 && (
-            <div className="bg-gradient-to-r from-yellow-500/5 to-amber-500/5 border border-yellow-500/20 rounded-xl p-4 sm:p-5">
-              <h2 className="text-sm font-bold text-yellow-400 mb-1.5">How the Equinova Score works</h2>
-              <p className="text-xs text-gray-300 leading-relaxed mb-2">
-                Every horse gets a score from 0 to 100. We combine <strong className="text-white">5 AI models</strong>, <strong className="text-white">live odds movement</strong>, <strong className="text-white">speed figures</strong>, <strong className="text-white">course & trainer form</strong> into one number that tells you how strong the case is for each horse.
-              </p>
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
-                <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1.5" />50+ = <strong className="text-green-400">Top Pick</strong> — strong across the board</span>
-                <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5" />35-49 = <strong className="text-amber-400">Worth a Look</strong> — some positive signals</span>
-                <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5" />Under 35 = <strong className="text-red-400">Risky</strong> — limited data support</span>
+            <div className="space-y-4">
+              <div className="bg-gradient-to-r from-yellow-500/5 to-amber-500/5 border border-yellow-500/20 rounded-xl p-4 sm:p-5">
+                <h2 className="text-base font-bold text-yellow-400 mb-2">Welcome to AI Insider</h2>
+                <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                  This is your daily briefing. We crunch <strong className="text-white">5 AI models</strong>, <strong className="text-white">live market odds</strong>, <strong className="text-white">speed figures</strong>, <strong className="text-white">course form</strong>, and <strong className="text-white">trainer data</strong> to surface the horses worth your attention. Everything on this page updates automatically as races approach.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                  <div className="bg-gray-800/40 rounded-lg p-3">
+                    <h3 className="text-[11px] font-bold text-white mb-1">Today's Best Picks</h3>
+                    <p className="text-[10px] text-gray-400 leading-relaxed">The standout horses across all of today's races. These scored 50+ on the Equinova Scale — meaning AI models, form, speed, and market all agree.</p>
+                  </div>
+                  <div className="bg-gray-800/40 rounded-lg p-3">
+                    <h3 className="text-[11px] font-bold text-white mb-1">Next Races & Market Movers</h3>
+                    <p className="text-[10px] text-gray-400 leading-relaxed">Our AI verdict for the next 4 races plus horses with shortening odds. See who we like and why, race by race.</p>
+                  </div>
+                  <div className="bg-gray-800/40 rounded-lg p-3">
+                    <h3 className="text-[11px] font-bold text-white mb-1">Key Stats</h3>
+                    <p className="text-[10px] text-gray-400 leading-relaxed">Data patterns worth knowing — value bets, fastest horses, proven course winners, in-form trainers, and fresh horses running near their best.</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-yellow-500/10 pt-3">
+                  <h3 className="text-[11px] font-bold text-yellow-400/80 mb-1.5">Equinova Score explained</h3>
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1.5" />50+ = <strong className="text-green-400">Top Pick</strong> — strong across the board</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5" />35-49 = <strong className="text-amber-400">Worth a Look</strong> — some positive signals</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5" />Under 35 = <strong className="text-red-400">Risky</strong> — limited data support</span>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -572,6 +626,7 @@ export function AIInsiderPage() {
           {/* SECTION 4: Data Angles */}
           {!isLoading && upcomingEntries.length > 0 && (
             <DataAnglesSection
+              valueBets={valueBets}
               speedStandouts={speedStandouts}
               specialists={specialists}
               trainerHotspots={trainerHotspots}
