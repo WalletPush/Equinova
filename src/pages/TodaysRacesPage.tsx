@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import type { SmartSignal, PatternAlert } from '@/types/signals'
 import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
+import { MarketMovementBadge, buildMarketComment, getRaceMarketSummary } from '@/components/MarketMovement'
 import type { RaceEntry } from '@/lib/supabase'
 
 /**
@@ -627,6 +628,26 @@ export function TodaysRacesPage() {
                             <span className="text-green-400 font-medium">£{formatPrize(race.prize)}</span>
                           </div>
                         )}
+                        {race.topEntries && (() => {
+                          const mkt = getRaceMarketSummary(race.topEntries)
+                          if (mkt.steamCount === 0 && mkt.driftCount === 0) return null
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              {mkt.topSteamer && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-400 bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded-full">
+                                  <TrendingUp className="w-3 h-3" />
+                                  {mkt.steamCount} backed
+                                </span>
+                              )}
+                              {mkt.topDrifter && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded-full">
+                                  <ChevronDown className="w-3 h-3" />
+                                  {mkt.driftCount} drifting
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
                     </div>
                     
@@ -712,6 +733,21 @@ export function TodaysRacesPage() {
                       </div>
                     )}
 
+                    {/* Market Movement Commentary */}
+                    {race.topEntries && race.topEntries.length > 0 && (() => {
+                      const marketComment = buildMarketComment({
+                        entries: race.topEntries,
+                        modelPicksMap,
+                      })
+                      if (!marketComment) return null
+                      return (
+                        <div className="flex items-start gap-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2.5">
+                          <TrendingUp className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-cyan-300 leading-relaxed">{marketComment}</p>
+                        </div>
+                      )
+                    })()}
+
                     {/* Complete Runners List */}
                     {race.topEntries && race.topEntries.length > 0 && (
                       <div className="space-y-3">
@@ -781,13 +817,11 @@ export function TodaysRacesPage() {
                                   </div>
                                 )}
                                 {entry.current_odds && (
-                                  <div className="flex items-center gap-1">
-                                    {entry.odds_movement === 'steaming' && (
-                                      <TrendingUp className="w-3 h-3 text-green-400" />
-                                    )}
-                                    {entry.odds_movement === 'drifting' && (
-                                      <ChevronDown className="w-3 h-3 text-red-400" />
-                                    )}
+                                  <div className="flex items-center gap-1.5">
+                                    <MarketMovementBadge
+                                      movement={entry.odds_movement}
+                                      pct={entry.odds_movement_pct}
+                                    />
                                     <div className={`text-sm font-mono font-medium ${
                                       entry.odds_movement === 'steaming' ? 'text-green-400' :
                                       entry.odds_movement === 'drifting' ? 'text-red-400' :

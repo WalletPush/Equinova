@@ -3,6 +3,7 @@ import { Zap, TrendingUp, Brain, Timer, Target, Users } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
+import { MarketMovementBadge } from '@/components/MarketMovement'
 import { formatOdds } from '@/lib/odds'
 import { formatTime } from '@/lib/dateUtils'
 import { formatNormalized } from '@/lib/normalize'
@@ -186,12 +187,7 @@ export function SpotlightCard({ result, rank, courseName, offTime, raceClass, di
             <span className="text-xs text-green-400 font-medium">
               {formatNormalized(normalizedEnsemble)} win prob
             </span>
-            {entry.odds_movement === 'steaming' && (
-              <span className="text-xs text-cyan-400 flex items-center gap-0.5">
-                <TrendingUp className="w-3 h-3" />
-                {Math.abs(entry.odds_movement_pct || 0).toFixed(0)}%
-              </span>
-            )}
+            <MarketMovementBadge movement={entry.odds_movement} pct={entry.odds_movement_pct} size="md" />
           </div>
 
           {/* Model badges */}

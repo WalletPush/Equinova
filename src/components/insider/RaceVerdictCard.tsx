@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronUp, MapPin, Clock, Users, Trophy, AlertTriangle, Shield, Zap, MessageSquare } from 'lucide-react'
+import { ChevronDown, ChevronUp, MapPin, Clock, Users, Trophy, AlertTriangle, Shield, Zap, MessageSquare, TrendingUp } from 'lucide-react'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ModelBadge } from '@/components/ModelBadge'
 import { ShortlistButton } from '@/components/ShortlistButton'
+import { MarketMovementBadge, buildMarketComment } from '@/components/MarketMovement'
 import { formatOdds } from '@/lib/odds'
 import { formatTime } from '@/lib/dateUtils'
 import { formatNormalized } from '@/lib/normalize'
@@ -175,6 +176,7 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
             )}
             <span className="text-xs text-gray-400 truncate max-w-[120px]">{verdict.topSelection.entry.horse_name}</span>
             <span className="text-xs font-bold text-white">{formatOdds(verdict.topSelection.entry.current_odds)}</span>
+            <MarketMovementBadge movement={verdict.topSelection.entry.odds_movement} pct={verdict.topSelection.entry.odds_movement_pct} />
             <ScoreBadge score={verdict.topSelection.score} />
           </div>
         )}
@@ -252,6 +254,7 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                     {formatOdds(topEntry.current_odds)}
                   </span>
                   <span className="text-[10px] text-gray-500">odds</span>
+                  <MarketMovementBadge movement={topEntry.odds_movement} pct={topEntry.odds_movement_pct} size="md" />
                   <span className="text-xs text-green-400 font-medium">
                     {formatNormalized(topEnsemble)}
                   </span>
@@ -292,6 +295,21 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                     <p className="text-[11px] text-gray-300 leading-relaxed">{detailedComment}</p>
                   </div>
                 </div>
+
+                {/* Market movement commentary */}
+                {(() => {
+                  const marketComment = buildMarketComment({
+                    entries: verdict.entries,
+                    modelPicksMap: modelPicks,
+                  })
+                  if (!marketComment) return null
+                  return (
+                    <div className="flex items-start gap-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2">
+                      <TrendingUp className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-cyan-300 leading-relaxed">{marketComment}</p>
+                    </div>
+                  )
+                })()}
 
                 <ShortlistButton
                   horseName={topEntry.horse_name}
@@ -341,7 +359,8 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                     onHorseClick={onHorseClick}
                     horseEntry={r.entry}
                   />
-                  <div className="ml-auto flex items-center gap-2">
+                    <div className="ml-auto flex items-center gap-2">
+                    <MarketMovementBadge movement={r.entry.odds_movement} pct={r.entry.odds_movement_pct} />
                     <div className="flex gap-0.5">
                       {(modelPicks.get(r.entry.horse_id) || []).map((b, j) => (
                         <ModelBadge key={j} label={b.label} color={b.color} />
