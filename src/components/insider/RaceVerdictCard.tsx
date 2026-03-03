@@ -104,14 +104,24 @@ function buildDetailedComment(
     parts.push(`Proven at this distance with a ${horseWinDist.toFixed(0)}% win rate`)
   }
 
-  // Profitable signals summary
+  // Profitable signals summary using historical performance
   if (signals.length > 0) {
     const topSig = signals[0]
-    const pct = parseInt(topSig.winRate)
+    const hasHistorical = topSig.periodLabel && topSig.totalBets
     if (signals.length >= 2) {
-      parts.push(`Matches ${signals.length} historically profitable patterns — the strongest being "${topSig.label}" which has a ${topSig.winRate} win rate`)
+      if (hasHistorical && topSig.profit !== undefined) {
+        const profitLabel = topSig.profit >= 0 ? `+£${topSig.profit.toFixed(2)} profit` : `£${topSig.profit.toFixed(2)}`
+        parts.push(`Matches ${signals.length} historically profitable patterns — "${topSig.label}" has a ${topSig.winRate} win rate over the last ${topSig.periodLabel} (${topSig.totalBets} bets, ${profitLabel})`)
+      } else {
+        parts.push(`Matches ${signals.length} historically profitable patterns — the strongest being "${topSig.label}" which has a ${topSig.winRate} win rate`)
+      }
     } else {
-      parts.push(`Matches the "${topSig.label}" pattern which historically wins ${topSig.winRate} of the time`)
+      if (hasHistorical && topSig.profit !== undefined) {
+        const profitLabel = topSig.profit >= 0 ? `+£${topSig.profit.toFixed(2)} profit` : `£${topSig.profit.toFixed(2)}`
+        parts.push(`Matches the "${topSig.label}" pattern — ${topSig.winRate} win rate over the last ${topSig.periodLabel} (${profitLabel})`)
+      } else {
+        parts.push(`Matches the "${topSig.label}" pattern which historically wins ${topSig.winRate} of the time`)
+      }
     }
   }
 
@@ -273,7 +283,7 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                   )}
                 </div>
 
-                {/* Profitable signal tags */}
+                {/* Profitable signal tags with historical data */}
                 {verdict.topPickSignals.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <Zap className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
@@ -281,8 +291,9 @@ export function RaceVerdictCard({ verdict, modelPicks, onHorseClick }: RaceVerdi
                       <span
                         key={sig.key}
                         className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${sig.color}`}
+                        title={sig.totalBets ? `${sig.totalBets} bets, ${sig.profit !== undefined ? (sig.profit >= 0 ? '+' : '') + '£' + sig.profit.toFixed(2) : ''}` : undefined}
                       >
-                        {sig.label} ({sig.winRate} win)
+                        {sig.label} ({sig.winRate} win{sig.periodLabel ? ` ${sig.periodLabel}` : ''})
                       </span>
                     ))}
                   </div>

@@ -462,6 +462,16 @@ export interface ProfitableSignal {
   label: string
   winRate: string
   color: string
+  periodLabel?: string
+  profit?: number
+  totalBets?: number
+}
+
+export interface HistoricalSignalStats {
+  win_rate: number
+  profit: number
+  total_bets: number
+  roi_pct: number
 }
 
 const SIGNAL_REGISTRY: { key: string; label: string; winRate: string }[] = [
@@ -482,6 +492,8 @@ export function detectProfitableSignals(
   raceEntries: RaceEntry[],
   modelBadges: { label: string; color: string }[],
   trainerIntent?: TrainerIntentData,
+  historicalStats?: Record<string, HistoricalSignalStats>,
+  periodLabel?: string,
 ): ProfitableSignal[] {
   const isMLTopPick = modelBadges.length >= 1
   const isSteaming = entry.odds_movement === 'steaming'
@@ -530,7 +542,28 @@ export function detectProfitableSignals(
 
   const matched: ProfitableSignal[] = []
   for (const sig of SIGNAL_REGISTRY) {
-    if (flags[sig.key]) {
+    if (!flags[sig.key]) continue
+
+    const hist = historicalStats?.[sig.key]
+
+    if (hist && hist.total_bets >= 3) {
+      // Skip signals that are unprofitable over the historical period
+      if (hist.profit < 0 && hist.win_rate < 15) continue
+
+      const pct = hist.win_rate
+      const color = pct >= 40 ? 'text-green-400 bg-green-500/15 border-green-500/40'
+        : pct >= 25 ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'
+        : 'text-gray-300 bg-gray-500/15 border-gray-500/40'
+      matched.push({
+        key: sig.key,
+        label: sig.label,
+        winRate: `${pct}%`,
+        color,
+        periodLabel: periodLabel || '14d',
+        profit: hist.profit,
+        totalBets: hist.total_bets,
+      })
+    } else {
       const pct = parseInt(sig.winRate)
       const color = pct >= 50 ? 'text-green-400 bg-green-500/15 border-green-500/40'
         : pct >= 30 ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'

@@ -93,6 +93,14 @@ export function AppLayout({ children }: AppLayoutProps) {
                   <span>Tracker</span>
                 </NavLink>
                 <NavLink
+                  to="/performance"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  <span>Performance</span>
+                </NavLink>
+                <NavLink
                   to="/bankroll"
                   onClick={() => setIsMenuOpen(false)}
                   className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
@@ -118,14 +126,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                     >
                       <Shield className="w-4 h-4" />
                       <span>Admin</span>
-                    </NavLink>
-                    <NavLink
-                      to="/performance"
-                      onClick={() => setIsMenuOpen(false)}
-                      className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                    >
-                      <TrendingUp className="w-4 h-4" />
-                      <span>ML Analytics</span>
                     </NavLink>
                   </>
                 )}

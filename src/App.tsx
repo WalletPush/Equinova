@@ -18,7 +18,7 @@ import { AIInsiderPage } from '@/pages/AIInsiderPage'
 import { ShortListPage } from '@/pages/ShortListPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { AdminPage } from '@/pages/AdminPage'
-import { MLPerformancePage } from '@/pages/MLPerformancePage'
+import { PerformancePage } from '@/pages/PerformancePage'
 import { BankrollPage } from '@/pages/BankrollPage'
 import { MLTrackerPage } from '@/pages/MLTrackerPage'
 import './App.css'
@@ -91,9 +91,9 @@ function App() {
                     </AdminRoute>
                   } />
                   <Route path="/performance" element={
-                    <AdminRoute>
-                      <MLPerformancePage />
-                    </AdminRoute>
+                    <ProtectedRoute>
+                      <PerformancePage />
+                    </ProtectedRoute>
                   } />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

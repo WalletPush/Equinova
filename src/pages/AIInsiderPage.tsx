@@ -23,6 +23,7 @@ import {
   type ConfluenceResult,
   type RaceVerdict,
   type TrainerIntentData,
+  type HistoricalSignalStats,
 } from '@/lib/confluenceScore'
 import { findReturningImprovers } from '@/components/insider/DataAnglesSection'
 import { SpotlightSection } from '@/components/insider/SpotlightCard'
@@ -230,6 +231,39 @@ export function AIInsiderPage() {
     retry: 2,
   })
 
+  // 5. Fetch historical signal performance (14 days) for intelligent badges
+  const { data: historicalSignalData } = useQuery({
+    queryKey: ['insider-historical-signals'],
+    queryFn: async () => {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+      const start = new Date()
+      start.setDate(start.getDate() - 14)
+      const startDate = start.toISOString().split('T')[0]
+
+      const { data, error } = await supabase.functions.invoke('performance-summary', {
+        body: { start_date: startDate, end_date: today, race_type: 'all', model: 'all', signal: 'all' },
+      })
+      if (error) throw error
+      return data?.data as any
+    },
+    staleTime: 1000 * 60 * 30,
+    retry: 2,
+  })
+
+  const historicalSignalStats = useMemo<Record<string, HistoricalSignalStats> | undefined>(() => {
+    if (!historicalSignalData?.signals?.aggregated) return undefined
+    const map: Record<string, HistoricalSignalStats> = {}
+    for (const sig of historicalSignalData.signals.aggregated) {
+      map[sig.signal_type] = {
+        win_rate: sig.win_rate,
+        profit: sig.profit,
+        total_bets: sig.total_bets,
+        roi_pct: sig.roi_pct,
+      }
+    }
+    return map
+  }, [historicalSignalData])
+
   // ─── Derived Data ──────────────────────────────────────────────────
 
   const allEntries = allEntriesData || []
@@ -346,7 +380,7 @@ export function AIInsiderPage() {
         ? scored[0].score - scored[Math.min(2, scored.length - 1)].score
         : 999
 
-      // Detect profitable signals for the top pick
+      // Detect profitable signals for the top pick using historical data
       const topPick = scored[0] || null
       const topPickSignals = topPick
         ? detectProfitableSignals(
@@ -354,6 +388,8 @@ export function AIInsiderPage() {
             entries,
             (modelPicksMap[raceId] || new Map()).get(topPick.horseId) || [],
             trainerIntentMap.get(topPick.horseId),
+            historicalSignalStats,
+            '14d',
           )
         : []
 
@@ -380,7 +416,7 @@ export function AIInsiderPage() {
 
     // Always sort chronologically by race time
     return verdicts.sort((a, b) => compareRaceTimes(a.offTime, b.offTime))
-  }, [allScoredByRace, raceMetaMap, entriesByRace, modelPicksMap, trainerIntentMap])
+  }, [allScoredByRace, raceMetaMap, entriesByRace, modelPicksMap, trainerIntentMap, historicalSignalStats])
 
   // Show only the next 4 upcoming races in Race by Race
   const raceVerdicts = useMemo(() => {
