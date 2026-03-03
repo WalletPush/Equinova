@@ -235,19 +235,27 @@ export function AIInsiderPage() {
   const { data: historicalSignalData } = useQuery({
     queryKey: ['insider-historical-signals'],
     queryFn: async () => {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
-      const start = new Date()
-      start.setDate(start.getDate() - 14)
-      const startDate = start.toISOString().split('T')[0]
+      try {
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+        const start = new Date()
+        start.setDate(start.getDate() - 14)
+        const startDate = start.toISOString().split('T')[0]
 
-      const { data, error } = await supabase.functions.invoke('performance-summary', {
-        body: { start_date: startDate, end_date: today, race_type: 'all', model: 'all', signal: 'all' },
-      })
-      if (error) throw error
-      return data?.data as any
+        const { data, error } = await supabase.functions.invoke('performance-summary', {
+          body: { start_date: startDate, end_date: today, race_type: 'all', model: 'all', signal: 'all' },
+        })
+        if (error) {
+          console.warn('Historical signal fetch failed, using defaults:', error)
+          return null
+        }
+        return data?.data as any
+      } catch (err) {
+        console.warn('Historical signal fetch error, using defaults:', err)
+        return null
+      }
     },
     staleTime: 1000 * 60 * 30,
-    retry: 2,
+    retry: 1,
   })
 
   const historicalSignalStats = useMemo<Record<string, HistoricalSignalStats> | undefined>(() => {

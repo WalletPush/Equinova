@@ -278,8 +278,18 @@ export function PerformancePage() {
           signal: filters.signal,
         },
       })
-      if (error) throw error
-      return data?.data as PerformanceData
+      if (error) {
+        console.error('Performance summary error:', error)
+        throw new Error(error.message || 'Failed to load performance data')
+      }
+      if (!data?.data) {
+        return {
+          filters: {}, dates_included: 0, races_included: 0,
+          ml_models: { aggregated: {}, by_date: {} },
+          signals: { aggregated: [], by_date: {} },
+        } as PerformanceData
+      }
+      return data.data as PerformanceData
     },
     staleTime: 1000 * 60 * 5,
     retry: 2,

@@ -16,20 +16,20 @@ Deno.serve(async (req) => {
     if (!supabaseUrl || !supabaseKey) throw new Error('Missing Supabase credentials');
 
     const body = await req.json().catch(() => ({}));
+
+    // Default to 14 days if dates not provided
+    const today = new Date().toISOString().split('T')[0];
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
     const {
-      start_date,
-      end_date,
+      start_date = fourteenDaysAgo,
+      end_date = today,
       race_type = 'all',
       model = 'all',
       signal = 'all',
     } = body;
 
-    if (!start_date || !end_date) {
-      return new Response(JSON.stringify({ error: 'start_date and end_date are required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    console.log(`Performance summary request: ${start_date} to ${end_date}, type=${race_type}, model=${model}, signal=${signal}`);
 
     const authHeaders = {
       'Authorization': `Bearer ${supabaseKey}`,
@@ -38,11 +38,16 @@ Deno.serve(async (req) => {
     };
 
     // ─── Step 1: Fetch races in date range with optional type filter ───
-    let racesUrl = `${supabaseUrl}/rest/v1/races?select=race_id,date,type,surface&date=gte.${start_date}&date=lte.${end_date}&order=date.desc`;
+    let racesUrl = `${supabaseUrl}/rest/v1/races?select=race_id,date,type,surface&date=gte.${start_date}&date=lte.${end_date}&order=date.desc&limit=2000`;
 
     const racesRes = await fetch(racesUrl, { headers: authHeaders });
-    if (!racesRes.ok) throw new Error(`Failed to fetch races: ${racesRes.status}`);
+    if (!racesRes.ok) {
+      const errorText = await racesRes.text();
+      console.error(`Failed to fetch races: ${racesRes.status} - ${errorText}`);
+      throw new Error(`Failed to fetch races: ${racesRes.status}`);
+    }
     let races: any[] = await racesRes.json();
+    console.log(`Found ${races.length} races in date range`);
 
     // Apply race type filter
     if (race_type !== 'all') {
@@ -64,39 +69,26 @@ Deno.serve(async (req) => {
     }
 
     // ─── Step 2: Fetch ML model race results ───────────────────────────
-    const mlResults = await fetchInBatches(
-      supabaseUrl,
-      'ml_model_race_results',
+    const mlResults = await fetchInBatches(supabaseUrl, 'ml_model_race_results',
       'race_id,model_name,is_winner,is_top3,predicted_probability,actual_position',
-      raceIds,
-      'race_id',
-      authHeaders,
-    );
+      raceIds, 'race_id', authHeaders);
+    console.log(`Fetched ${mlResults.length} ML model results`);
 
-    // Filter by model if specified
     const filteredMl = model === 'all'
       ? mlResults
       : mlResults.filter((r: any) => r.model_name?.toLowerCase() === model.toLowerCase());
 
     // ─── Step 3: Fetch race entries with finishing positions ────────────
-    const entries = await fetchInBatches(
-      supabaseUrl,
-      'race_entries',
+    const entries = await fetchInBatches(supabaseUrl, 'race_entries',
       'race_id,horse_id,horse_name,finishing_position,current_odds,mlp_proba,rf_proba,xgboost_proba,benter_proba,ensemble_proba,rpr,ts,odds_movement,odds_movement_pct,horse_win_percentage_at_distance,trainer_win_percentage_at_course,trainer_21_days_win_percentage,best_speed_figure_at_distance,last_speed_figure,mean_speed_figure,best_speed_figure_on_course_going_distance,best_speed_figure_at_track',
-      raceIds,
-      'race_id',
-      authHeaders,
-    );
+      raceIds, 'race_id', authHeaders);
+    console.log(`Fetched ${entries.length} race entries`);
 
     // ─── Step 4: Fetch race runners for SP data ────────────────────────
-    const runners = await fetchInBatches(
-      supabaseUrl,
-      'race_runners',
+    const runners = await fetchInBatches(supabaseUrl, 'race_runners',
       'race_id,horse,position,sp',
-      raceIds,
-      'race_id',
-      authHeaders,
-    );
+      raceIds, 'race_id', authHeaders);
+    console.log(`Fetched ${runners.length} race runners`);
 
     // Build SP lookup: race_id+horse_lower → decimal SP
     const spMap: Record<string, number> = {};
@@ -203,10 +195,18 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     console.error('Performance summary error:', error);
+    // Return 200 with error info in data to avoid Supabase client FunctionsHttpError
     return new Response(JSON.stringify({
-      error: { message: error?.message || 'Unknown error', code: 'PERFORMANCE_SUMMARY_ERROR' },
+      data: {
+        filters: {},
+        dates_included: 0,
+        races_included: 0,
+        ml_models: { aggregated: {}, by_date: {} },
+        signals: { aggregated: [], by_date: {} },
+        error_message: error?.message || 'Unknown error',
+      },
     }), {
-      status: 500,
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -276,16 +276,23 @@ async function fetchInBatches(
   idField: string,
   headers: Record<string, string>,
 ): Promise<any[]> {
-  const batchSize = 80;
+  if (ids.length === 0) return [];
+  const batchSize = 50;
   let all: any[] = [];
   for (let i = 0; i < ids.length; i += batchSize) {
     const batch = ids.slice(i, i + batchSize);
     const inFilter = `in.(${batch.map(id => `"${id}"`).join(',')})`;
-    const url = `${supabaseUrl}/rest/v1/${table}?select=${select}&${idField}=${inFilter}`;
-    const res = await fetch(url, { headers });
-    if (res.ok) {
-      const data = await res.json();
-      all = all.concat(data);
+    const url = `${supabaseUrl}/rest/v1/${table}?select=${encodeURIComponent(select)}&${idField}=${inFilter}&limit=5000`;
+    try {
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        all = all.concat(data);
+      } else {
+        console.error(`Batch fetch ${table} failed: ${res.status} for batch ${i / batchSize + 1}`);
+      }
+    } catch (err) {
+      console.error(`Batch fetch ${table} error:`, err);
     }
   }
   return all;
