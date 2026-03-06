@@ -256,10 +256,12 @@ export function SignalPicksSection({ signalPicks, raceMap, modelPicksMap, onHors
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-1">
-        <BadgeCheck className="w-5 h-5 text-green-400" />
-        <h2 className="text-lg font-bold text-white">Today's Profitable Signals</h2>
-        <span className="text-xs text-gray-500 ml-1">Horses matching historically profitable signal patterns · ordered by race time</span>
+      <div className="mb-1">
+        <div className="flex items-center gap-2">
+          <BadgeCheck className="w-5 h-5 text-green-400" />
+          <h2 className="text-lg font-bold text-white whitespace-nowrap">Today's Profitable Signals</h2>
+        </div>
+        <p className="text-xs text-gray-500 mt-1 ml-7">Horses matching historically profitable signal patterns · ordered by race time</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
