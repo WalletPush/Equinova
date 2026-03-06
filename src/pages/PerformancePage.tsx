@@ -36,6 +36,7 @@ interface TodayMatch {
   trainer: string
   current_odds: number
   silk_url: string | null
+  finishing_position: number | null
   matching_combos: ComboResult[]
   model_picks: string[]
 }
@@ -86,6 +87,12 @@ function decToFrac(dec: number): string {
 
 function fmtProfit(v: number) { return `${v >= 0 ? '+' : ''}£${v.toFixed(2)}` }
 function fmtRoi(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` }
+function fmtPos(p: number) {
+  if (p === 1) return '1st'
+  if (p === 2) return '2nd'
+  if (p === 3) return '3rd'
+  return `${p}th`
+}
 
 // ─── Component ───────────────────────────────────────────────────────
 
@@ -231,6 +238,14 @@ export function PerformancePage() {
                 </span>
               ))}
             </div>
+            <span className={`w-10 text-right font-bold flex-shrink-0 ${
+              m.finishing_position == null ? 'text-gray-600 text-[10px] font-normal'
+              : m.finishing_position === 1 ? 'text-green-400'
+              : m.finishing_position <= 3 ? 'text-yellow-400'
+              : 'text-gray-500'
+            }`}>
+              {m.finishing_position != null ? fmtPos(m.finishing_position) : '—'}
+            </span>
           </div>
         ))}
       </div>
@@ -261,6 +276,15 @@ export function PerformancePage() {
             <span className="text-gray-400 font-mono text-[10px]">
               {m.current_odds > 0 ? decToFrac(m.current_odds) : ''}
             </span>
+            {m.finishing_position != null && (
+              <span className={`font-bold text-[10px] ${
+                m.finishing_position === 1 ? 'text-green-400'
+                : m.finishing_position <= 3 ? 'text-yellow-400'
+                : 'text-gray-500'
+              }`}>
+                {fmtPos(m.finishing_position)}
+              </span>
+            )}
           </div>
         ))}
       </div>

@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
       horse_name: string; horse_id: string; race_id: string;
       course: string; off_time: string; race_type: string;
       jockey: string; trainer: string; current_odds: number;
-      silk_url: string | null;
+      silk_url: string | null; finishing_position: number | null;
       matching_combos: Combo[]; model_picks: string[];
     }
 
@@ -194,6 +194,7 @@ Deno.serve(async (req) => {
           trainer: entry.trainer_name || '',
           current_odds: entry.current_odds || 0,
           silk_url: entry.silk_url || null,
+          finishing_position: entry.finishing_position ?? null,
           matching_combos: matchedCombos,
           model_picks: badges,
         });
