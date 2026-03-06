@@ -154,6 +154,25 @@ const RACE_TYPE_COLORS: Record<string, string> = {
   chase: 'bg-red-500/20 text-red-400',
 }
 
+function decToFrac(dec: number): string {
+  if (dec <= 1) return 'EVS'
+  const num = dec - 1
+  const common = [
+    [1, 5], [1, 4], [1, 3], [2, 5], [4, 9], [1, 2], [8, 15], [4, 7], [8, 13],
+    [4, 6], [8, 11], [4, 5], [5, 6], [10, 11], [1, 1], [6, 5], [5, 4], [11, 8],
+    [6, 4], [7, 4], [2, 1], [9, 4], [5, 2], [11, 4], [3, 1], [10, 3], [7, 2],
+    [4, 1], [9, 2], [5, 1], [11, 2], [6, 1], [13, 2], [7, 1], [8, 1], [9, 1],
+    [10, 1], [11, 1], [12, 1], [14, 1], [16, 1], [20, 1], [25, 1], [33, 1],
+    [40, 1], [50, 1], [66, 1], [100, 1],
+  ]
+  let bestN = Math.round(num), bestD = 1, bestDiff = Math.abs(num - bestN)
+  for (const [n, d] of common) {
+    const diff = Math.abs(num - n / d)
+    if (diff < bestDiff) { bestDiff = diff; bestN = n; bestD = d }
+  }
+  return `${bestN}/${bestD}`
+}
+
 function fmtProfit(v: number) { return `${v >= 0 ? '+' : ''}£${v.toFixed(2)}` }
 function fmtRoi(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` }
 function fmtPos(p: number) {
@@ -559,7 +578,7 @@ export function PerformancePage() {
     for (const m of comboScanData.today_matches) {
       const bestROI = m.matching_combos.length > 0 ? m.matching_combos[0].roi_pct : 0
       const sigs = m.matching_combos.map(c => c.label).join(' | ')
-      const oddsStr = m.current_odds > 0 ? m.current_odds.toFixed(2) : ''
+      const oddsStr = m.current_odds > 0 ? decToFrac(m.current_odds) : ''
       lines.push(`${m.off_time},"${m.course}","${m.horse_name}",${m.race_type.toUpperCase()},"${m.jockey}","${m.trainer}",${oddsStr},"${m.model_picks.join(', ')}","${sigs}",${bestROI > 0 ? '+' : ''}${bestROI.toFixed(1)}%`)
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
@@ -865,7 +884,7 @@ export function PerformancePage() {
                                 <td className="py-2 px-3 text-gray-400 whitespace-nowrap max-w-[110px] truncate">{m.jockey || '—'}</td>
                                 <td className="py-2 px-3 text-gray-400 whitespace-nowrap max-w-[110px] truncate">{m.trainer || '—'}</td>
                                 <td className="py-2 px-3 text-right text-gray-300 font-mono whitespace-nowrap">
-                                  {m.current_odds > 0 ? m.current_odds.toFixed(2) : '—'}
+                                  {m.current_odds > 0 ? decToFrac(m.current_odds) : '—'}
                                 </td>
                                 <td className="py-2 px-3">
                                   <div className="flex items-center gap-1">
@@ -912,7 +931,7 @@ export function PerformancePage() {
                               {m.silk_url && <img src={m.silk_url} alt="" className="w-5 h-5 object-contain" />}
                               <span className="text-sm text-white font-medium truncate">{m.horse_name}</span>
                               <span className="text-xs text-gray-500 font-mono ml-auto">
-                                {m.current_odds > 0 ? m.current_odds.toFixed(2) : '—'}
+                                {m.current_odds > 0 ? decToFrac(m.current_odds) : '—'}
                               </span>
                             </div>
                             <div className="flex items-center gap-3 text-[10px] text-gray-500 mb-2">
