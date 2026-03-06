@@ -210,6 +210,16 @@ function SignalPickCard({ result, signals, courseName, offTime, raceClass, dista
           ))}
         </div>
 
+        {/* Expert comment from CSV */}
+        {entry.comment && (
+          <div className="mt-3 pt-3 border-t border-gray-800">
+            <div className="flex items-start gap-2">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold flex-shrink-0 pt-0.5">Comment</span>
+              <p className="text-xs text-gray-300 leading-relaxed italic">{entry.comment}</p>
+            </div>
+          </div>
+        )}
+
         {/* Shortlist */}
         <div className="mt-3 flex justify-end">
           <ShortlistButton
