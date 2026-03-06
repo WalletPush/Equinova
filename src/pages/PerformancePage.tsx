@@ -28,6 +28,8 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
+  Radar,
+  FileDown,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -81,6 +83,46 @@ interface PerformanceData {
   picks: PickRow[]
 }
 
+// ─── Combo Scanner Types ──────────────────────────────────────────────
+
+interface ComboResult {
+  race_type: string
+  signal: string
+  label: string
+  total_bets: number
+  wins: number
+  win_rate: number
+  profit: number
+  roi_pct: number
+}
+
+interface TodayMatch {
+  horse_name: string
+  horse_id: string
+  race_id: string
+  course: string
+  off_time: string
+  race_type: string
+  jockey: string
+  trainer: string
+  current_odds: number
+  silk_url: string | null
+  matching_combos: ComboResult[]
+  model_picks: string[]
+}
+
+interface ComboScanData {
+  top_combinations: ComboResult[]
+  today_matches: TodayMatch[]
+  meta: {
+    historical_races: number
+    historical_entries: number
+    today_races: number
+    min_bets_threshold: number
+    generated_at: string
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function getUKDateString(): string {
@@ -103,6 +145,13 @@ const MODEL_DISPLAY: Record<string, { label: string; color: string }> = {
   mlp: { label: 'MLP', color: 'text-green-400' },
   xgboost: { label: 'XGB', color: 'text-orange-400' },
   ensemble: { label: 'ENS', color: 'text-cyan-400' },
+}
+
+const RACE_TYPE_COLORS: Record<string, string> = {
+  flat: 'bg-emerald-500/20 text-emerald-400',
+  aw: 'bg-blue-500/20 text-blue-400',
+  hurdles: 'bg-orange-500/20 text-orange-400',
+  chase: 'bg-red-500/20 text-red-400',
 }
 
 function fmtProfit(v: number) { return `${v >= 0 ? '+' : ''}£${v.toFixed(2)}` }
@@ -439,20 +488,110 @@ export function PerformancePage() {
     }
   }, [])
 
+  // ─── Combo Scanner ─────────────────────────────────────────────────
+  const [comboScanData, setComboScanData] = useState<ComboScanData | null>(null)
+  const [comboScanning, setComboScanning] = useState(false)
+  const [comboError, setComboError] = useState<string | null>(null)
+  const [showComboResults, setShowComboResults] = useState(true)
+  const [comboRaceTypeFilter, setComboRaceTypeFilter] = useState<string>('all')
+
+  const runComboScan = useCallback(async () => {
+    setComboScanning(true)
+    setComboError(null)
+    try {
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/combo-scanner`
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${anonKey}`,
+          'apikey': anonKey,
+        },
+        body: JSON.stringify({ min_bets: 10 }),
+      })
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '')
+        throw new Error(`Server error ${res.status}: ${txt.slice(0, 200)}`)
+      }
+      const json = await res.json()
+      if (json.error) throw new Error(json.error.message)
+      setComboScanData(json.data as ComboScanData)
+    } catch (err: any) {
+      setComboError(err.message || 'Combo scan failed')
+    } finally {
+      setComboScanning(false)
+    }
+  }, [])
+
+  const filteredCombos = useMemo(() => {
+    if (!comboScanData) return []
+    const combos = comboScanData.top_combinations
+    if (comboRaceTypeFilter === 'all') return combos
+    return combos.filter(c => c.race_type === comboRaceTypeFilter)
+  }, [comboScanData, comboRaceTypeFilter])
+
+  const filteredMatches = useMemo(() => {
+    if (!comboScanData) return []
+    const matches = comboScanData.today_matches
+    if (comboRaceTypeFilter === 'all') return matches
+    return matches.filter(m => m.race_type === comboRaceTypeFilter)
+  }, [comboScanData, comboRaceTypeFilter])
+
+  const exportComboCSV = useCallback(() => {
+    if (!comboScanData) return
+    const today = getUKDateString()
+    const lines: string[] = []
+    lines.push('EQUINOVA - LIFETIME COMBO SCANNER MATCHES')
+    lines.push(`Date: ${today}`)
+    lines.push(`Generated: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`)
+    lines.push(`Profitable combos found: ${comboScanData.top_combinations.length}`)
+    lines.push(`Today's matching runners: ${comboScanData.today_matches.length}`)
+    lines.push('')
+    lines.push('--- TOP PROFITABLE COMBINATIONS ---')
+    lines.push('Race Type,Signal,Bets,Wins,Win Rate,P&L,ROI')
+    for (const c of comboScanData.top_combinations) {
+      lines.push(`${c.race_type.toUpperCase()},"${c.label}",${c.total_bets},${c.wins},${c.win_rate}%,${c.profit > 0 ? '+' : ''}£${c.profit.toFixed(2)},${c.roi_pct > 0 ? '+' : ''}${c.roi_pct.toFixed(1)}%`)
+    }
+    lines.push('')
+    lines.push("--- TODAY'S MATCHES ---")
+    lines.push('Off Time,Course,Horse,Race Type,Jockey,Trainer,Odds,AI Models,Matching Signals,Best Signal ROI')
+    for (const m of comboScanData.today_matches) {
+      const bestROI = m.matching_combos.length > 0 ? m.matching_combos[0].roi_pct : 0
+      const sigs = m.matching_combos.map(c => c.label).join(' | ')
+      const oddsStr = m.current_odds > 0 ? m.current_odds.toFixed(2) : ''
+      lines.push(`${m.off_time},"${m.course}","${m.horse_name}",${m.race_type.toUpperCase()},"${m.jockey}","${m.trainer}",${oddsStr},"${m.model_picks.join(', ')}","${sigs}",${bestROI > 0 ? '+' : ''}${bestROI.toFixed(1)}%`)
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `equinova-combo-scanner-${today}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [comboScanData])
+
   return (
     <AppLayout>
       <div className="p-4 space-y-5">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <BarChart3 className="w-6 h-6 text-yellow-400" />
             <h1 className="text-2xl font-bold text-white">Performance</h1>
           </div>
-          <button onClick={handleExport} disabled={exporting}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50">
-            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-            {exporting ? 'Generating...' : "Export today's profitable signals"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={runComboScan} disabled={comboScanning}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-900 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-lg hover:from-yellow-300 hover:to-amber-400 transition-all disabled:opacity-50 shadow-lg shadow-yellow-500/20">
+              {comboScanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radar className="w-3.5 h-3.5" />}
+              {comboScanning ? 'Scanning...' : 'Run Lifetime Combo Scan'}
+            </button>
+            <button onClick={handleExport} disabled={exporting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50">
+              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {exporting ? 'Generating...' : "Export today's signals"}
+            </button>
+          </div>
         </div>
 
         {/* How to use guide */}
@@ -535,6 +674,277 @@ export function PerformancePage() {
             </div>
           )}
         </div>
+
+        {/* Combo Scanner Error */}
+        {comboError && (
+          <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+            <p className="text-sm text-red-400">{comboError}</p>
+          </div>
+        )}
+
+        {/* Combo Scanner Loading */}
+        {comboScanning && (
+          <div className="flex items-center justify-center py-12 bg-gray-900/60 border border-yellow-500/20 rounded-xl">
+            <Loader2 className="w-6 h-6 text-yellow-400 animate-spin mr-3" />
+            <span className="text-gray-300">Scanning lifetime data across all race types... this may take a moment</span>
+          </div>
+        )}
+
+        {/* Combo Scanner Results */}
+        {comboScanData && !comboScanning && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <button onClick={() => setShowComboResults(!showComboResults)} className="flex items-center gap-2">
+                <Radar className="w-5 h-5 text-yellow-400" />
+                <h2 className="text-lg font-bold text-white">Lifetime Combo Scanner</h2>
+                {showComboResults ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+              </button>
+              <div className="flex items-center gap-2">
+                {/* Race type filter for combo results */}
+                <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5">
+                  {['all', 'flat', 'aw', 'hurdles', 'chase'].map(rt => (
+                    <button key={rt} onClick={() => setComboRaceTypeFilter(rt)}
+                      className={`px-2.5 py-1 text-[10px] font-medium rounded transition-all capitalize ${
+                        comboRaceTypeFilter === rt ? 'bg-yellow-500/20 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
+                      }`}>
+                      {rt === 'all' ? 'All Types' : rt === 'aw' ? 'AW' : rt}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={exportComboCSV}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-gray-300 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-700 hover:text-white transition-colors">
+                  <FileDown className="w-3 h-3" /> CSV
+                </button>
+              </div>
+            </div>
+
+            {showComboResults && (
+              <div className="space-y-5">
+                {/* Meta info */}
+                <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                  <span>{comboScanData.meta.historical_races} historical races analysed</span>
+                  <span className="text-gray-700">·</span>
+                  <span>{comboScanData.top_combinations.length} profitable combos</span>
+                  <span className="text-gray-700">·</span>
+                  <span>{comboScanData.today_matches.length} matches today</span>
+                  <span className="text-gray-700">·</span>
+                  <span>Min {comboScanData.meta.min_bets_threshold} bets</span>
+                </div>
+
+                {/* Top Profitable Combos Table */}
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    Top Profitable Combinations ({filteredCombos.length})
+                  </h3>
+
+                  {filteredCombos.length === 0 ? (
+                    <p className="text-sm text-gray-500 py-4 text-center">No profitable combinations for this race type.</p>
+                  ) : (
+                    <>
+                      {/* Desktop */}
+                      <div className="hidden sm:block overflow-x-auto rounded-xl border border-gray-700/50">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-gray-800/80 text-gray-500 uppercase text-[10px] tracking-wider">
+                              <th className="py-2 px-3 text-left">Race Type</th>
+                              <th className="py-2 px-3 text-left">Signal</th>
+                              <th className="py-2 px-3 text-right">Bets</th>
+                              <th className="py-2 px-3 text-right">Wins</th>
+                              <th className="py-2 px-3 text-right">Win %</th>
+                              <th className="py-2 px-3 text-right">P&L</th>
+                              <th className="py-2 px-3 text-right">ROI</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-800/50">
+                            {filteredCombos.map((c, i) => (
+                              <tr key={`${c.race_type}-${c.signal}-${i}`}
+                                className="hover:bg-gray-800/30 transition-colors">
+                                <td className="py-2 px-3">
+                                  <span className={`inline-block px-2 py-0.5 text-[9px] font-bold uppercase rounded ${
+                                    RACE_TYPE_COLORS[c.race_type] || 'bg-gray-700 text-gray-300'
+                                  }`}>
+                                    {c.race_type === 'aw' ? 'AW' : c.race_type}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-gray-300">{c.label}</td>
+                                <td className="py-2 px-3 text-right text-gray-500">{c.total_bets}</td>
+                                <td className="py-2 px-3 text-right text-gray-400">{c.wins}</td>
+                                <td className={`py-2 px-3 text-right font-bold ${
+                                  c.win_rate >= 40 ? 'text-green-400' : c.win_rate >= 20 ? 'text-yellow-400' : 'text-gray-300'
+                                }`}>{c.win_rate}%</td>
+                                <td className={`py-2 px-3 text-right font-semibold ${c.profit > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {fmtProfit(c.profit)}
+                                </td>
+                                <td className={`py-2 px-3 text-right font-medium ${c.roi_pct > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {fmtRoi(c.roi_pct)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {/* Mobile cards */}
+                      <div className="sm:hidden space-y-1.5">
+                        {filteredCombos.map((c, i) => (
+                          <div key={`m-${c.race_type}-${c.signal}-${i}`}
+                            className="bg-gray-800/30 border border-gray-700/30 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className={`inline-block px-2 py-0.5 text-[9px] font-bold uppercase rounded ${
+                                RACE_TYPE_COLORS[c.race_type] || 'bg-gray-700 text-gray-300'
+                              }`}>
+                                {c.race_type === 'aw' ? 'AW' : c.race_type}
+                              </span>
+                              <span className={`text-xs font-bold ${c.roi_pct > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {fmtRoi(c.roi_pct)} ROI
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-300 mb-1">{c.label}</div>
+                            <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                              <span>{c.total_bets} bets</span>
+                              <span>{c.wins} wins</span>
+                              <span>{c.win_rate}%</span>
+                              <span className={c.profit > 0 ? 'text-green-400' : 'text-red-400'}>{fmtProfit(c.profit)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Today's Matches Table */}
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    Today's Matches ({filteredMatches.length})
+                  </h3>
+
+                  {filteredMatches.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Radar className="w-10 h-10 text-gray-700 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500">No runners today match the profitable combinations.</p>
+                      <p className="text-xs text-gray-600 mt-1">This can happen if today's card doesn't have races for the profitable race types, or no horses trigger the right signal flags.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Desktop */}
+                      <div className="hidden sm:block overflow-x-auto rounded-xl border border-yellow-500/20">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-yellow-500/5 text-gray-500 uppercase text-[10px] tracking-wider">
+                              <th className="py-2 px-3 text-left">Time</th>
+                              <th className="py-2 px-3 text-left">Course</th>
+                              <th className="py-2 px-3 text-left">Horse</th>
+                              <th className="py-2 px-3 text-left">Type</th>
+                              <th className="py-2 px-3 text-left">Jockey</th>
+                              <th className="py-2 px-3 text-left">Trainer</th>
+                              <th className="py-2 px-3 text-right">Odds</th>
+                              <th className="py-2 px-3 text-left">AI Models</th>
+                              <th className="py-2 px-3 text-left">Matching Profitable Signals</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-800/50">
+                            {filteredMatches.map((m, i) => (
+                              <tr key={`${m.race_id}-${m.horse_id}-${i}`}
+                                className="hover:bg-yellow-500/5 transition-colors">
+                                <td className="py-2 px-3 text-gray-400 whitespace-nowrap font-mono">{m.off_time}</td>
+                                <td className="py-2 px-3 text-gray-300 whitespace-nowrap max-w-[120px] truncate">{m.course}</td>
+                                <td className="py-2 px-3">
+                                  <div className="flex items-center gap-2">
+                                    {m.silk_url && <img src={m.silk_url} alt="" className="w-5 h-5 object-contain" />}
+                                    <span className="text-white font-medium whitespace-nowrap">{m.horse_name}</span>
+                                  </div>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${
+                                    RACE_TYPE_COLORS[m.race_type] || 'bg-gray-700 text-gray-300'
+                                  }`}>
+                                    {m.race_type === 'aw' ? 'AW' : m.race_type}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-gray-400 whitespace-nowrap max-w-[110px] truncate">{m.jockey || '—'}</td>
+                                <td className="py-2 px-3 text-gray-400 whitespace-nowrap max-w-[110px] truncate">{m.trainer || '—'}</td>
+                                <td className="py-2 px-3 text-right text-gray-300 font-mono whitespace-nowrap">
+                                  {m.current_odds > 0 ? m.current_odds.toFixed(2) : '—'}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <div className="flex items-center gap-1">
+                                    {m.model_picks.map(mp => (
+                                      <span key={mp} className="inline-block px-1.5 py-0.5 text-[9px] bg-cyan-500/10 text-cyan-400 rounded border border-cyan-500/20 uppercase">
+                                        {mp}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {m.matching_combos.slice(0, 3).map((c, ci) => (
+                                      <span key={ci} className="inline-block px-1.5 py-0.5 text-[9px] bg-yellow-500/10 text-yellow-400 rounded border border-yellow-500/20 whitespace-nowrap"
+                                        title={`${c.win_rate}% win, ${fmtProfit(c.profit)} P&L, ${fmtRoi(c.roi_pct)} ROI (${c.total_bets} bets)`}>
+                                        {c.label}
+                                      </span>
+                                    ))}
+                                    {m.matching_combos.length > 3 && (
+                                      <span className="text-[9px] text-gray-600">+{m.matching_combos.length - 3}</span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Mobile */}
+                      <div className="sm:hidden space-y-2">
+                        {filteredMatches.map((m, i) => (
+                          <div key={`mm-${m.race_id}-${m.horse_id}-${i}`}
+                            className="bg-gray-800/30 border border-yellow-500/20 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] text-gray-500">{m.off_time} · {m.course}</span>
+                              <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${
+                                RACE_TYPE_COLORS[m.race_type] || 'bg-gray-700 text-gray-300'
+                              }`}>
+                                {m.race_type === 'aw' ? 'AW' : m.race_type}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mb-1.5">
+                              {m.silk_url && <img src={m.silk_url} alt="" className="w-5 h-5 object-contain" />}
+                              <span className="text-sm text-white font-medium truncate">{m.horse_name}</span>
+                              <span className="text-xs text-gray-500 font-mono ml-auto">
+                                {m.current_odds > 0 ? m.current_odds.toFixed(2) : '—'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] text-gray-500 mb-2">
+                              <span>J: {m.jockey || '—'}</span>
+                              <span>T: {m.trainer || '—'}</span>
+                            </div>
+                            {m.model_picks.length > 0 && (
+                              <div className="flex items-center gap-1 mb-1.5">
+                                {m.model_picks.map(mp => (
+                                  <span key={mp} className="inline-block px-1.5 py-0.5 text-[9px] bg-cyan-500/10 text-cyan-400 rounded border border-cyan-500/20 uppercase">
+                                    {mp}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {m.matching_combos.map((c, ci) => (
+                                <span key={ci} className="inline-block px-1.5 py-0.5 text-[9px] bg-yellow-500/10 text-yellow-400 rounded border border-yellow-500/20">
+                                  {c.label} ({fmtRoi(c.roi_pct)})
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <PerformanceFiltersBar filters={filters} onChange={setFilters} />
 
