@@ -27,6 +27,7 @@ import {
   Activity,
   CheckCircle2,
   XCircle,
+  HelpCircle,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -353,6 +354,7 @@ export function PerformancePage() {
   const [picksPage, setPicksPage] = useState(0)
   const [showSignals, setShowSignals] = useState(true)
   const [showPicks, setShowPicks] = useState(true)
+  const [showGuide, setShowGuide] = useState(false)
 
   const dateRange = useMemo(
     () => getDateRange(filters.period, filters.startDate, filters.endDate),
@@ -451,6 +453,87 @@ export function PerformancePage() {
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             {exporting ? 'Generating...' : "Export today's profitable signals"}
           </button>
+        </div>
+
+        {/* How to use guide */}
+        <div className="bg-gray-900/60 border border-gray-800 rounded-xl">
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-800/30 transition-colors"
+          >
+            <HelpCircle className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+            <span className="text-sm font-medium text-yellow-400">How to use the Performance page</span>
+            <div className="ml-auto text-gray-500">
+              {showGuide ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </div>
+          </button>
+
+          {showGuide && (
+            <div className="border-t border-gray-800 px-4 py-4 space-y-4 text-xs text-gray-300 leading-relaxed">
+              <p>
+                This page shows you <strong className="text-white">how well our AI signals have performed historically</strong>. Think of it as a report card — you can see which signal patterns have actually made money, which ones haven't, and drill down into every individual pick.
+              </p>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Time Period</h4>
+                <p>
+                  Choose how far back you want to look. <strong className="text-white">7 Days</strong> and <strong className="text-white">14 Days</strong> show recent form. <strong className="text-white">30 Days</strong> gives a broader picture. <strong className="text-white">Lifetime</strong> goes all the way back to January 2024 — this is the most statistically meaningful because it has the most data. <strong className="text-white">Custom</strong> lets you pick exact start and end dates.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Race Type</h4>
+                <p>
+                  Filter results by the type of racing. <strong className="text-white">Flat</strong> is turf flat racing. <strong className="text-white">AW</strong> is all-weather (artificial surfaces like Polytrack or Tapeta). <strong className="text-white">Hurdles</strong> and <strong className="text-white">Chase</strong> are National Hunt (jumps) racing. Use <strong className="text-white">All</strong> to see everything combined.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Model Filter</h4>
+                <p>
+                  We run <strong className="text-white">5 different AI models</strong> on every race. This filter lets you see how each one performs on its own. <strong className="text-white">Ensemble</strong> is the combined prediction from all models. <strong className="text-white">Benter</strong>, <strong className="text-white">MLP</strong>, <strong className="text-white">Random Forest</strong>, and <strong className="text-white">XGBoost</strong> are individual models with different approaches. Leave on <strong className="text-white">All Models</strong> to see the overall picture.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Signal Filter</h4>
+                <p>
+                  This is the most powerful filter. A <strong className="text-white">"signal"</strong> is a combination of factors that line up for a horse — for example, "ML Pick + Top RPR" means our AI picked the horse AND it has the highest Racing Post Rating in the field. Use this dropdown to isolate a specific signal and see exactly how it has performed: win rate, profit/loss, and every individual pick. The signals at the top of the dropdown (like "C&D + ML Pick + Value") combine the most factors and tend to be the most selective.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">What the numbers mean</h4>
+                <ul className="space-y-1.5 text-gray-400">
+                  <li><strong className="text-white">Signal Picks</strong> — Total number of horses that matched the selected signal(s) and had a result.</li>
+                  <li><strong className="text-white">Win Rate</strong> — What percentage of those picks actually won their race.</li>
+                  <li><strong className="text-white">P&L</strong> — Profit & Loss if you had bet £1 on every pick at Starting Price (SP). Green = profit, red = loss.</li>
+                  <li><strong className="text-white">ROI</strong> — Return on Investment. +20% means you'd have made 20p for every £1 staked.</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Signal Performance section</h4>
+                <p>
+                  Shows every signal pattern ranked by performance. Click the column headers (<strong className="text-white">Win %</strong>, <strong className="text-white">P&L</strong>, <strong className="text-white">Bets</strong>) to re-sort. Green bars mean the signal is profitable, red means it's lost money. The more bets a signal has, the more reliable its stats are.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Individual Results</h4>
+                <p>
+                  A full list of every pick with the date, course, horse, jockey, trainer, starting price, finishing position, and which signals applied. This is your audit trail — you can verify every result yourself.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider mb-2">Export button</h4>
+                <p>
+                  The <strong className="text-white">"Export today's profitable signals"</strong> button at the top right downloads a CSV file with all of today's runners that match a historically profitable signal. You can open it in Excel or Google Sheets for your own analysis.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <PerformanceFiltersBar filters={filters} onChange={setFilters} />
