@@ -513,6 +513,9 @@ export function PerformancePage() {
   const [comboError, setComboError] = useState<string | null>(null)
   const [showComboResults, setShowComboResults] = useState(true)
   const [comboRaceTypeFilter, setComboRaceTypeFilter] = useState<string>('all')
+  const [comboSortField, setComboSortField] = useState<'roi_pct' | 'win_rate' | 'profit'>('roi_pct')
+  const [comboSortDir, setComboSortDir] = useState<'desc' | 'asc'>('desc')
+  const [selectedCombo, setSelectedCombo] = useState<{ race_type: string; signal: string } | null>(null)
 
   const runComboScan = useCallback(async () => {
     setComboScanning(true)
@@ -545,17 +548,39 @@ export function PerformancePage() {
 
   const filteredCombos = useMemo(() => {
     if (!comboScanData) return []
-    const combos = comboScanData.top_combinations
-    if (comboRaceTypeFilter === 'all') return combos
-    return combos.filter(c => c.race_type === comboRaceTypeFilter)
-  }, [comboScanData, comboRaceTypeFilter])
+    let combos = comboScanData.top_combinations
+    if (comboRaceTypeFilter !== 'all') combos = combos.filter(c => c.race_type === comboRaceTypeFilter)
+    const dir = comboSortDir === 'desc' ? -1 : 1
+    return [...combos].sort((a, b) => (a[comboSortField] - b[comboSortField]) * dir)
+  }, [comboScanData, comboRaceTypeFilter, comboSortField, comboSortDir])
+
+  const toggleComboSort = useCallback((field: 'roi_pct' | 'win_rate' | 'profit') => {
+    if (comboSortField === field) {
+      setComboSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setComboSortField(field)
+      setComboSortDir('desc')
+    }
+  }, [comboSortField])
+
+  const handleComboRowClick = useCallback((c: ComboResult) => {
+    setSelectedCombo(prev =>
+      prev && prev.race_type === c.race_type && prev.signal === c.signal ? null : { race_type: c.race_type, signal: c.signal },
+    )
+  }, [])
 
   const filteredMatches = useMemo(() => {
     if (!comboScanData) return []
-    const matches = comboScanData.today_matches
-    if (comboRaceTypeFilter === 'all') return matches
-    return matches.filter(m => m.race_type === comboRaceTypeFilter)
-  }, [comboScanData, comboRaceTypeFilter])
+    let matches = comboScanData.today_matches
+    if (comboRaceTypeFilter !== 'all') matches = matches.filter(m => m.race_type === comboRaceTypeFilter)
+    if (selectedCombo) {
+      matches = matches.filter(m =>
+        m.race_type === selectedCombo.race_type &&
+        m.matching_combos.some(mc => mc.signal === selectedCombo.signal),
+      )
+    }
+    return matches
+  }, [comboScanData, comboRaceTypeFilter, selectedCombo])
 
   const exportComboCSV = useCallback(() => {
     if (!comboScanData) return
@@ -723,7 +748,7 @@ export function PerformancePage() {
                 {/* Race type filter for combo results */}
                 <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5">
                   {['all', 'flat', 'aw', 'hurdles', 'chase'].map(rt => (
-                    <button key={rt} onClick={() => setComboRaceTypeFilter(rt)}
+                    <button key={rt} onClick={() => { setComboRaceTypeFilter(rt); setSelectedCombo(null) }}
                       className={`px-2.5 py-1 text-[10px] font-medium rounded transition-all capitalize ${
                         comboRaceTypeFilter === rt ? 'bg-yellow-500/20 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
                       }`}>
@@ -770,63 +795,115 @@ export function PerformancePage() {
                               <th className="py-2 px-3 text-left">Signal</th>
                               <th className="py-2 px-3 text-right">Bets</th>
                               <th className="py-2 px-3 text-right">Wins</th>
-                              <th className="py-2 px-3 text-right">Win %</th>
-                              <th className="py-2 px-3 text-right">P&L</th>
-                              <th className="py-2 px-3 text-right">ROI</th>
+                              <th className="py-2 px-3 text-right cursor-pointer select-none hover:text-yellow-400 transition-colors"
+                                onClick={() => toggleComboSort('win_rate')}>
+                                <span className="inline-flex items-center gap-1 justify-end">
+                                  Win %
+                                  {comboSortField === 'win_rate' && (
+                                    comboSortDir === 'desc' ? <ChevronDown className="w-3 h-3 text-yellow-400" /> : <ChevronUp className="w-3 h-3 text-yellow-400" />
+                                  )}
+                                </span>
+                              </th>
+                              <th className="py-2 px-3 text-right cursor-pointer select-none hover:text-yellow-400 transition-colors"
+                                onClick={() => toggleComboSort('profit')}>
+                                <span className="inline-flex items-center gap-1 justify-end">
+                                  P&L
+                                  {comboSortField === 'profit' && (
+                                    comboSortDir === 'desc' ? <ChevronDown className="w-3 h-3 text-yellow-400" /> : <ChevronUp className="w-3 h-3 text-yellow-400" />
+                                  )}
+                                </span>
+                              </th>
+                              <th className="py-2 px-3 text-right cursor-pointer select-none hover:text-yellow-400 transition-colors"
+                                onClick={() => toggleComboSort('roi_pct')}>
+                                <span className="inline-flex items-center gap-1 justify-end">
+                                  ROI
+                                  {comboSortField === 'roi_pct' && (
+                                    comboSortDir === 'desc' ? <ChevronDown className="w-3 h-3 text-yellow-400" /> : <ChevronUp className="w-3 h-3 text-yellow-400" />
+                                  )}
+                                </span>
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-800/50">
-                            {filteredCombos.map((c, i) => (
-                              <tr key={`${c.race_type}-${c.signal}-${i}`}
-                                className="hover:bg-gray-800/30 transition-colors">
-                                <td className="py-2 px-3">
-                                  <span className={`inline-block px-2 py-0.5 text-[9px] font-bold uppercase rounded ${
-                                    RACE_TYPE_COLORS[c.race_type] || 'bg-gray-700 text-gray-300'
+                            {filteredCombos.map((c, i) => {
+                              const isSelected = selectedCombo?.race_type === c.race_type && selectedCombo?.signal === c.signal
+                              return (
+                                <tr key={`${c.race_type}-${c.signal}-${i}`}
+                                  onClick={() => handleComboRowClick(c)}
+                                  className={`cursor-pointer transition-colors ${
+                                    isSelected
+                                      ? 'bg-yellow-500/15 border-l-2 border-l-yellow-400'
+                                      : 'hover:bg-gray-800/30'
                                   }`}>
-                                    {c.race_type === 'aw' ? 'AW' : c.race_type}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3 text-gray-300">{c.label}</td>
-                                <td className="py-2 px-3 text-right text-gray-500">{c.total_bets}</td>
-                                <td className="py-2 px-3 text-right text-gray-400">{c.wins}</td>
-                                <td className={`py-2 px-3 text-right font-bold ${
-                                  c.win_rate >= 40 ? 'text-green-400' : c.win_rate >= 20 ? 'text-yellow-400' : 'text-gray-300'
-                                }`}>{c.win_rate}%</td>
-                                <td className={`py-2 px-3 text-right font-semibold ${c.profit > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {fmtProfit(c.profit)}
-                                </td>
-                                <td className={`py-2 px-3 text-right font-medium ${c.roi_pct > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {fmtRoi(c.roi_pct)}
-                                </td>
-                              </tr>
-                            ))}
+                                  <td className="py-2 px-3">
+                                    <span className={`inline-block px-2 py-0.5 text-[9px] font-bold uppercase rounded ${
+                                      RACE_TYPE_COLORS[c.race_type] || 'bg-gray-700 text-gray-300'
+                                    }`}>
+                                      {c.race_type === 'aw' ? 'AW' : c.race_type}
+                                    </span>
+                                  </td>
+                                  <td className={`py-2 px-3 ${isSelected ? 'text-yellow-400 font-medium' : 'text-gray-300'}`}>{c.label}</td>
+                                  <td className="py-2 px-3 text-right text-gray-500">{c.total_bets}</td>
+                                  <td className="py-2 px-3 text-right text-gray-400">{c.wins}</td>
+                                  <td className={`py-2 px-3 text-right font-bold ${
+                                    c.win_rate >= 40 ? 'text-green-400' : c.win_rate >= 20 ? 'text-yellow-400' : 'text-gray-300'
+                                  }`}>{c.win_rate}%</td>
+                                  <td className={`py-2 px-3 text-right font-semibold ${c.profit > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {fmtProfit(c.profit)}
+                                  </td>
+                                  <td className={`py-2 px-3 text-right font-medium ${c.roi_pct > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                    {fmtRoi(c.roi_pct)}
+                                  </td>
+                                </tr>
+                              )
+                            })}
                           </tbody>
                         </table>
                       </div>
                       {/* Mobile cards */}
                       <div className="sm:hidden space-y-1.5">
-                        {filteredCombos.map((c, i) => (
-                          <div key={`m-${c.race_type}-${c.signal}-${i}`}
-                            className="bg-gray-800/30 border border-gray-700/30 rounded-lg p-3">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className={`inline-block px-2 py-0.5 text-[9px] font-bold uppercase rounded ${
-                                RACE_TYPE_COLORS[c.race_type] || 'bg-gray-700 text-gray-300'
+                        {/* Mobile sort controls */}
+                        <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5 mb-2">
+                          {([['win_rate', 'Win%'], ['profit', 'P&L'], ['roi_pct', 'ROI']] as const).map(([f, label]) => (
+                            <button key={f} onClick={() => toggleComboSort(f)}
+                              className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-all flex items-center justify-center gap-1 ${
+                                comboSortField === f ? 'bg-gray-700 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
                               }`}>
-                                {c.race_type === 'aw' ? 'AW' : c.race_type}
-                              </span>
-                              <span className={`text-xs font-bold ${c.roi_pct > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {fmtRoi(c.roi_pct)} ROI
-                              </span>
+                              {label}
+                              {comboSortField === f && (comboSortDir === 'desc' ? '↓' : '↑')}
+                            </button>
+                          ))}
+                        </div>
+                        {filteredCombos.map((c, i) => {
+                          const isSelected = selectedCombo?.race_type === c.race_type && selectedCombo?.signal === c.signal
+                          return (
+                            <div key={`m-${c.race_type}-${c.signal}-${i}`}
+                              onClick={() => handleComboRowClick(c)}
+                              className={`rounded-lg p-3 cursor-pointer transition-colors ${
+                                isSelected
+                                  ? 'bg-yellow-500/10 border border-yellow-500/30'
+                                  : 'bg-gray-800/30 border border-gray-700/30'
+                              }`}>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className={`inline-block px-2 py-0.5 text-[9px] font-bold uppercase rounded ${
+                                  RACE_TYPE_COLORS[c.race_type] || 'bg-gray-700 text-gray-300'
+                                }`}>
+                                  {c.race_type === 'aw' ? 'AW' : c.race_type}
+                                </span>
+                                <span className={`text-xs font-bold ${c.roi_pct > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {fmtRoi(c.roi_pct)} ROI
+                                </span>
+                              </div>
+                              <div className={`text-sm mb-1 ${isSelected ? 'text-yellow-400 font-medium' : 'text-gray-300'}`}>{c.label}</div>
+                              <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                                <span>{c.total_bets} bets</span>
+                                <span>{c.wins} wins</span>
+                                <span>{c.win_rate}%</span>
+                                <span className={c.profit > 0 ? 'text-green-400' : 'text-red-400'}>{fmtProfit(c.profit)}</span>
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-300 mb-1">{c.label}</div>
-                            <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                              <span>{c.total_bets} bets</span>
-                              <span>{c.wins} wins</span>
-                              <span>{c.win_rate}%</span>
-                              <span className={c.profit > 0 ? 'text-green-400' : 'text-red-400'}>{fmtProfit(c.profit)}</span>
-                            </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </>
                   )}
@@ -834,9 +911,22 @@ export function PerformancePage() {
 
                 {/* Today's Matches Table */}
                 <div>
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                    Today's Matches ({filteredMatches.length})
-                  </h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      Today's Matches ({filteredMatches.length})
+                      {selectedCombo && (
+                        <span className="ml-2 text-yellow-400 normal-case font-normal">
+                          — filtered by: {filteredCombos.find(c => c.race_type === selectedCombo.race_type && c.signal === selectedCombo.signal)?.label || selectedCombo.signal}
+                        </span>
+                      )}
+                    </h3>
+                    {selectedCombo && (
+                      <button onClick={() => setSelectedCombo(null)}
+                        className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-gray-400 bg-gray-800 rounded hover:text-white transition-colors">
+                        <XCircle className="w-3 h-3" /> Clear filter
+                      </button>
+                    )}
+                  </div>
 
                   {filteredMatches.length === 0 ? (
                     <div className="text-center py-8">
