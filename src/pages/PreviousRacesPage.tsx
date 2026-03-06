@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
-import { supabase, Race } from '@/lib/supabase'
+import { ProfitableSignalBadges } from '@/components/ProfitableSignalBadges'
+import { supabase, Race, type RaceEntry } from '@/lib/supabase'
+import { detectProfitableSignals, type ProfitableSignal } from '@/lib/confluenceScore'
+import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { formatTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
 import { 
   Calendar,
@@ -70,6 +73,21 @@ function bareHorseName(name: string): string {
   return name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
 }
 
+// ─── Parse fractional SP string to decimal profit (£1 level stake) ──
+function spToProfit(sp: string | null): number {
+  if (!sp) return 0
+  const s = sp.trim().toLowerCase()
+  if (s === 'evens' || s === 'evs') return 1
+  if (s.includes('/')) {
+    const [num, den] = s.split('/')
+    const n = parseFloat(num), d = parseFloat(den)
+    if (d > 0) return n / d
+  }
+  const dec = parseFloat(s)
+  if (!isNaN(dec) && dec > 1) return dec - 1
+  return 0
+}
+
 // ─── Medal colors for positions ─────────────────────────────────────
 function positionBadge(pos: number | null) {
   if (pos === 1) return { bg: 'bg-yellow-500', text: 'text-gray-900', label: '1st' }
@@ -132,6 +150,7 @@ export function PreviousRacesPage() {
   const [selectedDate, setSelectedDate] = useState(() => getUKDate())
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedRaces, setExpandedRaces] = useState<Set<string>>(new Set())
+  const lifetimeSignalStats = useLifetimeSignalStats()
 
   // ─── Live UK clock (ticks every second when viewing today) ──────
   const [ukTime, setUkTime] = useState(() =>
@@ -303,6 +322,44 @@ export function PreviousRacesPage() {
     <AppLayout>
       <div className="p-4 space-y-5">
 
+        {/* ── Date Navigation ────────────────────────────────── */}
+        <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <button onClick={goToPreviousDay} className="p-2 text-gray-400 hover:text-white transition-colors">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-white">{formatDate(selectedDate)}</div>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                max={ukToday}
+                className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm mt-1 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+              />
+            </div>
+            <button
+              onClick={goToNextDay}
+              disabled={!canGoNext}
+              className={`p-2 transition-colors ${canGoNext ? 'text-gray-400 hover:text-white' : 'text-gray-600 cursor-not-allowed'}`}
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Search ──────────────────────────────────────────── */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by course name..."
+            className="w-full pl-10 pr-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-colors"
+          />
+        </div>
+
         {/* ── Header ─────────────────────────────────────────── */}
         <div>
           <div className="flex items-center justify-between">
@@ -333,6 +390,109 @@ export function PreviousRacesPage() {
             </div>
           )}
         </div>
+
+        {/* ── Profitable Winners Brief ─────────────────────────── */}
+        {completed.length > 0 && (() => {
+          const profitableWinners: { horse: string; course: string; offTime: string; sp: string; profit: number; models: string[]; signals: ProfitableSignal[] }[] = []
+
+          for (const race of completed) {
+            const runners = race.runners || []
+            const winner = runners.find(r => r.position === 1)
+            if (!winner) continue
+            const picks = getModelPicksMap(race.topEntries, race.runners)
+            const bn = bareHorseName(winner.horse)
+            const models = picks.get(bn) || []
+            if (models.length === 0) continue
+
+            let signals: ProfitableSignal[] = []
+            if (lifetimeSignalStats && race.topEntries) {
+              const entry = race.topEntries.find(e => bareHorseName(e.horse_name) === bn)
+              if (entry) {
+                signals = detectProfitableSignals(entry, race.topEntries, models, undefined, lifetimeSignalStats, 'lifetime')
+              }
+            }
+
+            if (signals.length === 0) continue
+
+            profitableWinners.push({
+              horse: winner.horse,
+              course: race.course_name,
+              offTime: race.off_time,
+              sp: winner.sp || '',
+              profit: spToProfit(winner.sp),
+              models: models.map(m => m.label),
+              signals,
+            })
+          }
+
+          profitableWinners.sort((a, b) => raceTimeToMinutes(a.offTime) - raceTimeToMinutes(b.offTime))
+          const totalProfit = profitableWinners.reduce((s, w) => s + w.profit, 0)
+          const totalBets = completed.length
+          const netProfit = totalProfit - (totalBets - profitableWinners.length)
+
+          if (profitableWinners.length === 0) return null
+
+          return (
+            <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <Trophy className="w-5 h-5 text-yellow-400" />
+                  <h2 className="text-base font-semibold text-white">
+                    Profitable Winners
+                    <span className="ml-2 text-sm font-normal text-green-400">
+                      {profitableWinners.length} winner{profitableWinners.length !== 1 ? 's' : ''} from {totalBets} race{totalBets !== 1 ? 's' : ''}
+                    </span>
+                  </h2>
+                </div>
+                <div className="text-right">
+                  <div className={`text-lg font-bold ${totalProfit > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    +£{totalProfit.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-gray-500">total returns</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {profitableWinners.map((w, i) => (
+                  <div key={i} className="py-2 px-3 bg-gray-800/50 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className="w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
+                          <Trophy className="w-3 h-3 text-gray-900" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-white truncate">{w.horse}</div>
+                          <div className="text-[10px] text-gray-500">{w.course} · {formatTime(w.offTime)}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-3 flex-shrink-0">
+                        <div className="flex items-center gap-1">
+                          {w.models.map(m => (
+                            <span key={m} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">{m}</span>
+                          ))}
+                        </div>
+                        <span className="text-sm font-mono text-gray-300 min-w-[40px] text-right">{w.sp}</span>
+                        <span className="text-sm font-semibold text-green-400 min-w-[56px] text-right">+£{w.profit.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    {w.signals.length > 0 && (
+                      <div className="mt-1.5 ml-9">
+                        <ProfitableSignalBadges signals={w.signals} compact />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-green-500/20 flex items-center justify-between text-xs">
+                <span className="text-gray-400">£1 level stakes across {totalBets} races</span>
+                <span className={`font-semibold ${netProfit > 0 ? 'text-green-400' : netProfit < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                  Net P&L: {netProfit > 0 ? '+' : ''}£{netProfit.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ── Daily Intelligence Panel ─────────────────────────── */}
         {completed.length > 0 && (
@@ -563,43 +723,6 @@ export function PreviousRacesPage() {
           </div>
         )}
 
-        {/* ── Date Navigation ────────────────────────────────── */}
-        <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <button onClick={goToPreviousDay} className="p-2 text-gray-400 hover:text-white transition-colors">
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <div className="text-center">
-              <div className="text-lg font-semibold text-white">{formatDate(selectedDate)}</div>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                max={ukToday}
-                className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm mt-1 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
-              />
-            </div>
-            <button
-              onClick={goToNextDay}
-              disabled={!canGoNext}
-              className={`p-2 transition-colors ${canGoNext ? 'text-gray-400 hover:text-white' : 'text-gray-600 cursor-not-allowed'}`}
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* ── Search ──────────────────────────────────────────── */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by course name..."
-            className="w-full pl-10 pr-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-colors"
-          />
-        </div>
 
         {/* ── Loading ─────────────────────────────────────────── */}
         {(isLoading || isFetching) && (
@@ -683,43 +806,61 @@ export function PreviousRacesPage() {
                       const badge = positionBadge(runner.position)
                       const bn = bareHorseName(runner.horse)
                       const modelPicks = modelPicksMap.get(bn) || []
+
+                      // Detect profitable signals for this runner
+                      let runnerSignals: ProfitableSignal[] = []
+                      if (lifetimeSignalStats && race.topEntries) {
+                        const entry = race.topEntries.find(e => bareHorseName(e.horse_name) === bn)
+                        if (entry) {
+                          const badges = modelPicksMap.get(bn) || []
+                          runnerSignals = detectProfitableSignals(entry, race.topEntries, badges, undefined, lifetimeSignalStats, 'lifetime')
+                        }
+                      }
+
                       return (
-                        <div key={runner.id} className="flex items-center justify-between py-1.5 px-3 bg-gray-700/30 rounded-lg">
-                          <div className="flex items-center space-x-3 min-w-0">
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.bg} ${badge.text}`}>
-                              {runner.position}
+                        <div key={runner.id} className="py-1.5 px-3 bg-gray-700/30 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3 min-w-0">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.bg} ${badge.text}`}>
+                                {runner.position}
+                              </div>
+                              {runner.number > 0 && (
+                                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
+                                  {runner.number}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-white text-sm font-medium flex items-center gap-1.5 flex-wrap">
+                                  <span className="truncate">{runner.horse}</span>
+                                  {modelPicks.length > 0 && (
+                                    <span className="flex items-center gap-1 flex-shrink-0">
+                                      {modelPicks.map(mp => (
+                                        <ModelBadge
+                                          key={mp.label}
+                                          label={mp.label}
+                                          color={mp.color}
+                                          showCheck={runner.position === 1}
+                                        />
+                                      ))}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            {runner.number > 0 && (
-                              <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
-                                {runner.number}
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <div className="text-white text-sm font-medium flex items-center gap-1.5 flex-wrap">
-                                <span className="truncate">{runner.horse}</span>
-                                {modelPicks.length > 0 && (
-                                  <span className="flex items-center gap-1 flex-shrink-0">
-                                    {modelPicks.map(mp => (
-                                      <ModelBadge
-                                        key={mp.label}
-                                        label={mp.label}
-                                        color={mp.color}
-                                        showCheck={runner.position === 1}
-                                      />
-                                    ))}
-                                  </span>
-                                )}
-                              </div>
+                            <div className="flex items-center space-x-4 text-right flex-shrink-0">
+                              {runner.btn != null && runner.position !== 1 && (
+                                <span className="text-xs text-gray-400">{runner.btn} len</span>
+                              )}
+                              {runner.sp && (
+                                <span className="text-sm text-gray-200 font-mono min-w-[48px] text-right">{runner.sp}</span>
+                              )}
                             </div>
                           </div>
-                          <div className="flex items-center space-x-4 text-right flex-shrink-0">
-                            {runner.btn != null && runner.position !== 1 && (
-                              <span className="text-xs text-gray-400">{runner.btn} len</span>
-                            )}
-                            {runner.sp && (
-                              <span className="text-sm text-gray-200 font-mono min-w-[48px] text-right">{runner.sp}</span>
-                            )}
-                          </div>
+                          {runnerSignals.length > 0 && (
+                            <div className="mt-1 ml-10">
+                              <ProfitableSignalBadges signals={runnerSignals} compact />
+                            </div>
+                          )}
                         </div>
                       )
                     })}

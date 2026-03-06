@@ -183,8 +183,15 @@ function scoreSpecialist(entry: RaceEntry): number {
     }
   }
 
-  if (totalWeight === 0) return 20
-  return Math.min(100, weightedSum / totalWeight)
+  let base = totalWeight === 0 ? 20 : Math.min(100, weightedSum / totalWeight)
+
+  // C&D in comment means the horse has won at this course & distance —
+  // guarantee a meaningful specialist floor so the Track Form bar reflects it
+  const comment = (entry.comment || '').toLowerCase()
+  const isCD = /\bc\s*&\s*d\b/.test(comment) || /\bcourse\s+and\s+distance\b/.test(comment)
+  if (isCD) base = Math.max(base, 45)
+
+  return base
 }
 
 // ─── Trainer Intent (0-100) ────────────────────────────────────────
@@ -432,6 +439,7 @@ export interface CourseDistanceSpecialist {
   horseWinPctAtDistance: number
   trainerWinPctAtCourse: number
   combinedScore: number
+  isCommentCD: boolean
 }
 
 export function findCourseDistanceSpecialists(allEntries: RaceEntry[]): CourseDistanceSpecialist[] {
@@ -441,13 +449,19 @@ export function findCourseDistanceSpecialists(allEntries: RaceEntry[]): CourseDi
     const horseWin = entry.horse_win_percentage_at_distance || 0
     const trainerWin = entry.trainer_win_percentage_at_course || 0
 
-    if (horseWin >= 20 || (horseWin >= 10 && trainerWin >= 15)) {
+    const comment = (entry.comment || '').toLowerCase()
+    const isCD = /\bc\s*&\s*d\b/.test(comment) || /\bcourse\s+and\s+distance\b/.test(comment)
+
+    if (horseWin >= 20 || (horseWin >= 10 && trainerWin >= 15) || isCD) {
       specialists.push({
         entry,
         raceId: entry.race_id,
         horseWinPctAtDistance: horseWin,
         trainerWinPctAtCourse: trainerWin,
-        combinedScore: horseWin * 0.6 + trainerWin * 0.4,
+        combinedScore: isCD
+          ? Math.max(horseWin * 0.6 + trainerWin * 0.4, 25)
+          : horseWin * 0.6 + trainerWin * 0.4,
+        isCommentCD: isCD,
       })
     }
   }
@@ -465,6 +479,7 @@ export interface ProfitableSignal {
   periodLabel?: string
   profit?: number
   totalBets?: number
+  roi_pct?: number
 }
 
 export interface HistoricalSignalStats {
@@ -475,16 +490,37 @@ export interface HistoricalSignalStats {
 }
 
 const SIGNAL_REGISTRY: { key: string; label: string; winRate: string }[] = [
-  { key: 'triple_signal', label: 'Triple Signal', winRate: '75%' },
-  { key: 'steamer_ml_pick', label: 'Backed + ML Pick', winRate: '60%' },
-  { key: 'course_specialist', label: 'Course Specialist', winRate: '50%' },
-  { key: 'ml_pick_top_rpr', label: 'ML Pick + Top RPR', winRate: '50%' },
-  { key: 'ml_ratings_consensus', label: 'ML + RPR + TS', winRate: '50%' },
-  { key: 'ml_pick_course_specialist', label: 'ML + Course Specialist', winRate: '45%' },
-  { key: 'ml_pick_trainer_form', label: 'ML + Trainer Form', winRate: '40%' },
-  { key: 'ratings_consensus', label: 'RPR + TS Consensus', winRate: '27%' },
+  { key: 'cd_ml_value', label: 'C&D + ML Pick + Value', winRate: '—' },
+  { key: 'cd_ml_backed', label: 'C&D + ML Pick + Backed', winRate: '—' },
+  { key: 'cd_ml_pick', label: 'C&D + ML Pick', winRate: '—' },
+  { key: 'cd_value', label: 'C&D + Value Bet', winRate: '—' },
+  { key: 'cd_backed', label: 'C&D + Backed', winRate: '—' },
+  { key: 'cd_top_rated', label: 'C&D + Top Rated', winRate: '—' },
+  { key: 'value_ml_backed_rated', label: 'Value + ML + Backed + Top Rated', winRate: '29%' },
+  { key: 'value_ml_top_rated', label: 'Value + ML Pick + Top Rated', winRate: '23%' },
+  { key: 'value_ml_backed', label: 'Value + ML Pick + Backed', winRate: '15%' },
+  { key: 'triple_signal', label: 'Triple Signal (Backed + ML + Top Rated)', winRate: '33%' },
+  { key: 'value_ml_pick', label: 'Value + ML Pick', winRate: '14%' },
+  { key: 'value_top_rated', label: 'Value + Top Rated', winRate: '16%' },
+  { key: 'steamer_ml_pick', label: 'Backed + ML Pick', winRate: '24%' },
+  { key: 'steamer_trainer_form', label: 'Backed + Trainer in Form', winRate: '13%' },
+  { key: 'ml_ratings_consensus', label: 'ML Pick + Top RPR + Top TS', winRate: '40%' },
+  { key: 'ml_pick_top_rpr', label: 'ML Pick + Top RPR', winRate: '37%' },
+  { key: 'ml_pick_course_specialist', label: 'ML Pick + Course Specialist', winRate: '45%' },
+  { key: 'ml_pick_trainer_form', label: 'ML Pick + Trainer in Form', winRate: '29%' },
+  { key: 'ratings_consensus', label: 'Top RPR + Top TS', winRate: '34%' },
   { key: 'steamer_single_trainer', label: 'Backed + Single Trainer', winRate: '20%' },
   { key: 'single_trainer_in_form', label: 'Single Trainer in Form', winRate: '20%' },
+  { key: 'value_bet', label: 'Value Bet (AI Edge)', winRate: '9%' },
+  { key: 'value_backed', label: 'Value + Backed', winRate: '9%' },
+  { key: 'ml_top_pick', label: 'ML Top Pick', winRate: '26%' },
+  { key: 'top_rpr', label: 'Top RPR in Field', winRate: '28%' },
+  { key: 'top_ts', label: 'Top Topspeed in Field', winRate: '24%' },
+  { key: 'steamer', label: 'Backed (Odds Shortening)', winRate: '11%' },
+  { key: 'cd_specialist', label: 'C&D Specialist', winRate: '—' },
+  { key: 'course_specialist', label: 'Course Specialist', winRate: '50%' },
+  { key: 'trainer_form', label: 'Trainer in Form (21d)', winRate: '16%' },
+  { key: 'speed_standout', label: 'Speed Figure Standout', winRate: '13%' },
 ]
 
 export function detectProfitableSignals(
@@ -527,17 +563,50 @@ export function detectProfitableSignals(
     || 0
   const isSpeedStandout = fieldAvg > 0 && bestFig > 0 && ((bestFig - fieldAvg) / fieldAvg) * 100 >= 5
 
+  // Value bet: AI ensemble probability exceeds bookmaker implied probability by 5%+
+  const ensProb = entry.ensemble_proba || 0
+  const totalEns = raceEntries.reduce((s, e) => s + (e.ensemble_proba || 0), 0)
+  const normProb = totalEns > 0 ? ensProb / totalEns : 0
+  const curOdds = entry.current_odds || 0
+  const impliedProb = curOdds > 1 ? 1 / curOdds : 0
+  const isValue = impliedProb > 0 && (normProb - impliedProb) >= 0.05
+
+  // C&D specialist from comment text
+  const comment = (entry.comment || '').toLowerCase()
+  const isCD = /\bc\s*&\s*d\b/.test(comment) || /\bcourse\s+and\s+distance\b/.test(comment)
+
   const flags: Record<string, boolean> = {
+    cd_ml_value: isCD && isMLTopPick && isValue,
+    cd_ml_backed: isCD && isMLTopPick && isSteaming,
+    cd_ml_pick: isCD && isMLTopPick,
+    cd_value: isCD && isValue,
+    cd_backed: isCD && isSteaming,
+    cd_top_rated: isCD && (isTopRpr || isTopTs),
+    value_ml_backed_rated: isValue && isMLTopPick && isSteaming && (isTopRpr || isTopTs),
+    value_ml_top_rated: isValue && isMLTopPick && (isTopRpr || isTopTs),
+    value_ml_backed: isValue && isMLTopPick && isSteaming,
     triple_signal: isSteaming && isMLTopPick && (isTopRpr || isTopTs),
+    value_ml_pick: isValue && isMLTopPick,
+    value_top_rated: isValue && (isTopRpr || isTopTs),
     steamer_ml_pick: isSteaming && isMLTopPick,
-    course_specialist: isCourseSpec,
-    ml_pick_top_rpr: isMLTopPick && isTopRpr,
+    steamer_trainer_form: isSteaming && isTrainerForm,
     ml_ratings_consensus: isMLTopPick && isTopRpr && isTopTs,
+    ml_pick_top_rpr: isMLTopPick && isTopRpr,
     ml_pick_course_specialist: isMLTopPick && isCourseSpec,
     ml_pick_trainer_form: isMLTopPick && isTrainerForm,
     ratings_consensus: isTopRpr && isTopTs,
     steamer_single_trainer: isSteaming && isSingleTrainer,
     single_trainer_in_form: isSingleTrainer && isTrainerForm,
+    value_bet: isValue,
+    value_backed: isValue && isSteaming,
+    ml_top_pick: isMLTopPick,
+    top_rpr: isTopRpr,
+    top_ts: isTopTs,
+    steamer: isSteaming,
+    cd_specialist: isCD,
+    course_specialist: isCourseSpec,
+    trainer_form: isTrainerForm,
+    speed_standout: isSpeedStandout,
   }
 
   const matched: ProfitableSignal[] = []
@@ -547,30 +616,46 @@ export function detectProfitableSignals(
     const hist = historicalStats?.[sig.key]
 
     if (hist && hist.total_bets >= 3) {
-      // Skip signals that are unprofitable over the historical period
-      if (hist.profit < 0 && hist.win_rate < 15) continue
+      if (hist.profit <= 0) continue
 
       const pct = hist.win_rate
-      const color = pct >= 40 ? 'text-green-400 bg-green-500/15 border-green-500/40'
-        : pct >= 25 ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'
-        : 'text-gray-300 bg-gray-500/15 border-gray-500/40'
+      const roi = hist.roi_pct
+      const color = pct >= 35 ? 'text-green-400 bg-green-500/20 border-green-500/50'
+        : pct >= 25 ? 'text-emerald-400 bg-emerald-500/15 border-emerald-500/40'
+        : 'text-amber-400 bg-amber-500/15 border-amber-500/40'
       matched.push({
         key: sig.key,
         label: sig.label,
         winRate: `${pct}%`,
         color,
-        periodLabel: periodLabel || '14d',
+        periodLabel: periodLabel || 'lifetime',
         profit: hist.profit,
         totalBets: hist.total_bets,
+        roi_pct: roi,
       })
-    } else {
-      const pct = parseInt(sig.winRate)
-      const color = pct >= 50 ? 'text-green-400 bg-green-500/15 border-green-500/40'
-        : pct >= 30 ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'
-        : 'text-gray-300 bg-gray-500/15 border-gray-500/40'
-      matched.push({ ...sig, color })
     }
   }
+
+  // C&D is factual (horse has won at this course & distance) — show it as
+  // an informational badge, but ONLY when the horse already has at least
+  // one other non-CD profitable signal.  C&D alone is not enough.
+  const hasNonCDSignal = matched.some(s => !s.key.startsWith('cd_'))
+  if (isCD && hasNonCDSignal && !matched.some(s => s.key.startsWith('cd_'))) {
+    const hist = historicalStats?.['cd_specialist']
+    matched.push({
+      key: 'cd_specialist',
+      label: 'C&D Specialist',
+      winRate: hist ? `${hist.win_rate}%` : '—',
+      color: 'text-purple-400 bg-purple-500/15 border-purple-500/40',
+      periodLabel: 'form',
+      profit: hist?.profit ?? 0,
+      totalBets: hist?.total_bets ?? 0,
+      roi_pct: hist?.roi_pct ?? 0,
+    })
+  }
+
+  // Sort by profit descending so the most profitable shows first
+  matched.sort((a, b) => (b.profit || 0) - (a.profit || 0))
 
   return matched
 }

@@ -161,6 +161,11 @@ function SpecialistsList({ specialists, raceMap, modelPicksMap, onHorseClick }: 
                   onHorseClick={onHorseClick}
                   horseEntry={s.entry}
                 />
+                {s.isCommentCD && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-purple-500/15 text-purple-400 border-purple-500/30">
+                    C&D
+                  </span>
+                )}
                 <div className="flex gap-0.5">
                   {badges.map((b, j) => (
                     <ModelBadge key={j} label={b.label} color={b.color} />
@@ -174,9 +179,11 @@ function SpecialistsList({ specialists, raceMap, modelPicksMap, onHorseClick }: 
               </div>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
-              <div className="text-right">
-                <span className="text-xs text-purple-400 font-medium">{s.horseWinPctAtDistance.toFixed(0)}% win at distance</span>
-              </div>
+              {s.horseWinPctAtDistance > 0 && (
+                <div className="text-right">
+                  <span className="text-xs text-purple-400 font-medium">{s.horseWinPctAtDistance.toFixed(0)}% win at distance</span>
+                </div>
+              )}
               {s.trainerWinPctAtCourse > 0 && (
                 <div className="text-right">
                   <span className="text-xs text-blue-400">{s.trainerWinPctAtCourse.toFixed(0)}% trainer wins here</span>

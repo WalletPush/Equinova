@@ -3,8 +3,11 @@ import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
+import { ProfitableSignalBadges } from '@/components/ProfitableSignalBadges'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, Race } from '@/lib/supabase'
+import { detectProfitableSignals } from '@/lib/confluenceScore'
+import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { formatOdds } from '@/lib/odds'
 import { fetchFromSupabaseFunction } from '@/lib/api'
@@ -67,6 +70,7 @@ export function TodaysRacesPage() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [expandedRace, setExpandedRace] = useState<string | null>(null)
   const { openHorseDetail } = useHorseDetail()
+  const lifetimeSignalStats = useLifetimeSignalStats()
 
   const { data: racesData, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['races', selectedDate, 'today-races'],
@@ -759,19 +763,28 @@ export function TodaysRacesPage() {
                           {race.topEntries.map((entry) => {
                             const hasSignal = signalHorseIds.has(entry.horse_id)
                             const entryModelPicks = modelPicksMap.get(entry.horse_id) || []
+
+                            // Detect profitable signals for this runner
+                            const profSignals = lifetimeSignalStats
+                              ? detectProfitableSignals(entry, race.topEntries!, entryModelPicks, undefined, lifetimeSignalStats, 'lifetime')
+                              : []
+                            const hasProfSignal = profSignals.length > 0
+
                             return (
-                            <div key={entry.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg ${
+                            <div key={entry.id} className={`py-2.5 px-3 rounded-lg ${
+                              hasProfSignal ? 'bg-green-500/5 border border-green-500/20' :
                               hasSignal ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-gray-700/30'
                             }`}>
+                              <div className="flex items-center justify-between">
                               <div className="flex items-center space-x-3 min-w-0 flex-1">
                                 <div className="relative flex-shrink-0">
                                   <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white">
                                     {entry.number}
                                   </div>
-                                  {hasSignal && (
+                                  {(hasSignal || hasProfSignal) && (
                                     <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
-                                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-400" />
+                                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${hasProfSignal ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                                      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${hasProfSignal ? 'bg-green-400' : 'bg-yellow-400'}`} />
                                     </span>
                                   )}
                                 </div>
@@ -845,6 +858,12 @@ export function TodaysRacesPage() {
                                   Form
                                 </button>
                               </div>
+                              </div>
+                              {hasProfSignal && (
+                                <div className="mt-1.5 ml-9">
+                                  <ProfitableSignalBadges signals={profSignals} compact />
+                                </div>
+                              )}
                             </div>
                             )
                           })}

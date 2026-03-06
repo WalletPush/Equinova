@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
+import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { supabase, type RaceEntry, type Race } from '@/lib/supabase'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { MODEL_DEFS } from '@/components/ModelBadge'
@@ -23,10 +24,10 @@ import {
   type ConfluenceResult,
   type RaceVerdict,
   type TrainerIntentData,
-  type HistoricalSignalStats,
+  type ProfitableSignal,
 } from '@/lib/confluenceScore'
 import { findReturningImprovers } from '@/components/insider/DataAnglesSection'
-import { SpotlightSection } from '@/components/insider/SpotlightCard'
+import { SignalPicksSection } from '@/components/insider/SignalPicksSection'
 import { RaceVerdictsSection } from '@/components/insider/RaceVerdictCard'
 import { MarketIntelSection } from '@/components/insider/MarketIntelCard'
 import { DataAnglesSection, type ValueBetInsider } from '@/components/insider/DataAnglesSection'
@@ -231,46 +232,8 @@ export function AIInsiderPage() {
     retry: 2,
   })
 
-  // 5. Fetch historical signal performance (14 days) for intelligent badges
-  const { data: historicalSignalData } = useQuery({
-    queryKey: ['insider-historical-signals'],
-    queryFn: async () => {
-      try {
-        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
-        const start = new Date()
-        start.setDate(start.getDate() - 14)
-        const startDate = start.toISOString().split('T')[0]
-
-        const { data, error } = await supabase.functions.invoke('performance-summary', {
-          body: { start_date: startDate, end_date: today, race_type: 'all', model: 'all', signal: 'all' },
-        })
-        if (error) {
-          console.warn('Historical signal fetch failed, using defaults:', error)
-          return null
-        }
-        return data?.data as any
-      } catch (err) {
-        console.warn('Historical signal fetch error, using defaults:', err)
-        return null
-      }
-    },
-    staleTime: 1000 * 60 * 30,
-    retry: 1,
-  })
-
-  const historicalSignalStats = useMemo<Record<string, HistoricalSignalStats> | undefined>(() => {
-    if (!historicalSignalData?.signals?.aggregated) return undefined
-    const map: Record<string, HistoricalSignalStats> = {}
-    for (const sig of historicalSignalData.signals.aggregated) {
-      map[sig.signal_type] = {
-        win_rate: sig.win_rate,
-        profit: sig.profit,
-        total_bets: sig.total_bets,
-        roi_pct: sig.roi_pct,
-      }
-    }
-    return map
-  }, [historicalSignalData])
+  // 5. Lifetime signal performance for intelligent badges (shared hook)
+  const historicalSignalStats = useLifetimeSignalStats()
 
   // ─── Derived Data ──────────────────────────────────────────────────
 
@@ -365,16 +328,45 @@ export function AIInsiderPage() {
     return map
   }, [entriesByRace, trainerIntentMap])
 
-  // Spotlight picks: best across ALL upcoming races, 50+ score, max 5
-  const spotlightPicks = useMemo(() => {
-    const all: ConfluenceResult[] = []
-    for (const scored of Object.values(allScoredByRace)) {
-      if (scored.length > 0 && scored[0].score >= 50) {
-        all.push(scored[0])
+  // Signal picks: horses with profitable lifetime signals, ordered by race time
+  const PASSTHROUGH_SIGNAL_KEYS = new Set([
+    'value_bet', 'value_ml_pick', 'value_backed', 'value_top_rated',
+    'value_ml_backed', 'value_ml_top_rated', 'value_ml_backed_rated',
+    'cd_ml_pick', 'cd_value', 'cd_backed',
+    'cd_ml_value', 'cd_ml_backed', 'cd_top_rated',
+  ])
+
+  const signalPicks = useMemo(() => {
+    if (!historicalSignalStats) return []
+    const results: { result: ConfluenceResult; signals: ProfitableSignal[]; offTime: string }[] = []
+
+    for (const [raceId, scored] of Object.entries(allScoredByRace)) {
+      const meta = raceMetaMap[raceId]
+      if (!meta) continue
+      const raceEntries = entriesByRace[raceId] || []
+      const picks = modelPicksMap[raceId] || new Map()
+
+      for (const horse of scored) {
+        const badges = picks.get(horse.entry.horse_id) || []
+        const ti = trainerIntentMap.get(horse.entry.horse_id)
+        const sigs = detectProfitableSignals(horse.entry, raceEntries, badges, ti, historicalSignalStats, 'lifetime')
+        if (sigs.length === 0) continue
+
+        const hasPassthroughSignal = sigs.some(s => PASSTHROUGH_SIGNAL_KEYS.has(s.key))
+        // Allow through if: 2+ models agree OR horse has a profitable value/C&D signal
+        if (badges.length < 2 && !hasPassthroughSignal) continue
+
+        results.push({ result: horse, signals: sigs, offTime: meta.off_time })
       }
     }
-    return all.sort((a, b) => b.score - a.score).slice(0, 5)
-  }, [allScoredByRace])
+
+    // Sort by race time, then by number of signals descending within same race
+    return results.sort((a, b) => {
+      const timeComp = compareRaceTimes(a.offTime, b.offTime)
+      if (timeComp !== 0) return timeComp
+      return b.signals.length - a.signals.length
+    })
+  }, [allScoredByRace, raceMetaMap, entriesByRace, modelPicksMap, trainerIntentMap, historicalSignalStats])
 
   // Race verdicts: all upcoming races, sorted by time
   const allRaceVerdicts = useMemo(() => {
@@ -397,7 +389,7 @@ export function AIInsiderPage() {
             (modelPicksMap[raceId] || new Map()).get(topPick.horseId) || [],
             trainerIntentMap.get(topPick.horseId),
             historicalSignalStats,
-            '14d',
+            'lifetime',
           )
         : []
 
@@ -543,8 +535,8 @@ export function AIInsiderPage() {
               {leanCount > 0 && (
                 <span className="text-amber-400">{leanCount} worth a look</span>
               )}
-              {spotlightPicks.length > 0 && (
-                <span className="text-yellow-400">{spotlightPicks.length} best {spotlightPicks.length === 1 ? 'pick' : 'picks'}</span>
+              {signalPicks.length > 0 && (
+                <span className="text-yellow-400">{signalPicks.length} profitable {signalPicks.length === 1 ? 'signal' : 'signals'}</span>
               )}
               {(marketMoversData?.movers?.length || 0) > 0 && (
                 <span className="text-cyan-400">{marketMoversData?.movers?.length} market movers</span>
@@ -569,8 +561,8 @@ export function AIInsiderPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                   <div className="bg-gray-800/40 rounded-lg p-3">
-                    <h3 className="text-[11px] font-bold text-white mb-1">Today's Best Picks</h3>
-                    <p className="text-[10px] text-gray-400 leading-relaxed">The standout horses across all of today's races. These scored 50+ on the Equinova Scale — meaning AI models, form, speed, and market all agree.</p>
+                    <h3 className="text-[11px] font-bold text-white mb-1">Today's Profitable Signals</h3>
+                    <p className="text-[10px] text-gray-400 leading-relaxed">Horses matching historically profitable signal patterns — value bets, ML consensus, market moves, and ratings all verified against lifetime performance data.</p>
                   </div>
                   <div className="bg-gray-800/40 rounded-lg p-3">
                     <h3 className="text-[11px] font-bold text-white mb-1">Next Races & Market Movers</h3>
@@ -627,19 +619,10 @@ export function AIInsiderPage() {
             </div>
           )}
 
-          {/* SECTION 1: AI Spotlight */}
-          {!isLoading && spotlightPicks.length > 0 && (
-            <SpotlightSection
-              spotlightPicks={spotlightPicks}
-              raceMap={raceMetaMap}
-              modelPicksMap={modelPicksMap}
-              onHorseClick={handleHorseClick}
-            />
-          )}
-
-          {!isLoading && spotlightPicks.length === 0 && upcomingEntries.length > 0 && (
-            <SpotlightSection
-              spotlightPicks={[]}
+          {/* SECTION 1: Profitable Signals */}
+          {!isLoading && (
+            <SignalPicksSection
+              signalPicks={signalPicks}
               raceMap={raceMetaMap}
               modelPicksMap={modelPicksMap}
               onHorseClick={handleHorseClick}
