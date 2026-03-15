@@ -2,9 +2,9 @@
  * Equinova Score — a composite 0-100 rating that combines multiple data
  * signals to rate every horse in every race.
  *
- * Weights:
- *   AI Models     35%  — How many of 5 ML models rank this horse top
- *   Value         13%  — Gap between AI win probability and bookmaker odds
+ * Weights (Benter value-first):
+ *   AI Models     28%  — How many of 5 ML models rank this horse top
+ *   Value         20%  — Benter value score (AI probability × odds)
  *   Market Move   12%  — Whether the horse is being backed (odds shortening)
  *   Speed         15%  — Speed figures relative to the field
  *   Track Form    10%  — Trainer/jockey/horse win% at this course & distance
@@ -103,12 +103,11 @@ function scoreMlConsensus(entry: RaceEntry, raceEntries: RaceEntry[], normalized
 
 function scoreValueEdge(normalizedProb: number, currentOdds: number): number {
   if (!currentOdds || currentOdds <= 1) return 0
-  const impliedProb = 1 / currentOdds
-  const edge = normalizedProb - impliedProb
+  const valueScore = normalizedProb * currentOdds
 
-  if (edge <= 0) return 0
-  // 20%+ edge → 100, 10% → 60, 5% → 35
-  return Math.min(100, edge * 500)
+  if (valueScore <= 1.0) return 0
+  // 1.5x+ → 100, 1.3x → 75, 1.15x → 45, 1.05x → 15
+  return Math.min(100, (valueScore - 1.0) * 200)
 }
 
 // ─── Market Momentum (0-100) ───────────────────────────────────────
@@ -221,8 +220,8 @@ function scoreTrainerIntent(entry: RaceEntry, intentData?: TrainerIntentData): n
 // ─── Main Confluence Calculator ────────────────────────────────────
 
 const WEIGHTS = {
-  mlConsensus: 0.35,
-  valueEdge: 0.13,
+  mlConsensus: 0.28,
+  valueEdge: 0.20,
   marketMomentum: 0.12,
   formFigures: 0.15,
   specialist: 0.10,
@@ -563,13 +562,12 @@ export function detectProfitableSignals(
     || 0
   const isSpeedStandout = fieldAvg > 0 && bestFig > 0 && ((bestFig - fieldAvg) / fieldAvg) * 100 >= 5
 
-  // Value bet: AI ensemble probability exceeds bookmaker implied probability by 5%+
   const ensProb = entry.ensemble_proba || 0
   const totalEns = raceEntries.reduce((s, e) => s + (e.ensemble_proba || 0), 0)
   const normProb = totalEns > 0 ? ensProb / totalEns : 0
   const curOdds = entry.current_odds || 0
-  const impliedProb = curOdds > 1 ? 1 / curOdds : 0
-  const isValue = impliedProb > 0 && (normProb - impliedProb) >= 0.05
+  const benterValue = curOdds > 1 ? normProb * curOdds : 0
+  const isValue = benterValue >= 1.05
 
   // C&D specialist from comment text
   const comment = (entry.comment || '').toLowerCase()

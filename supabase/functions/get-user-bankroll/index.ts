@@ -65,7 +65,7 @@ Deno.serve(async (req)=>{
         },
         body: JSON.stringify({
           user_id: userId,
-          current_amount: 0
+          current_amount: 200
         })
       });
       if (!createBankrollResponse.ok) {
@@ -79,7 +79,7 @@ Deno.serve(async (req)=>{
         success: true,
         data: {
           user_id: userId,
-          current_amount: 0,
+          current_amount: 200,
           created_at: newBankroll[0].created_at,
           updated_at: newBankroll[0].updated_at,
           has_bankroll: true

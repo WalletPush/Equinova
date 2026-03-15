@@ -221,26 +221,38 @@ Deno.serve(async (req)=>{
           if (updateBetResponse.ok) {
             updatedBets++;
             console.log(`Updated bet ${bet.id} to ${newStatus}`);
-            // If bet won, add winnings to bankroll
             if (isWinner) {
               try {
-                const bankrollUpdateResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}`, {
-                  method: 'PATCH',
+                const getCurrentBankroll = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}&select=current_amount`, {
+                  method: 'GET',
                   headers: {
                     'Authorization': `Bearer ${supabaseKey}`,
                     'apikey': supabaseKey,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({
-                    current_amount: bet.potential_return,
-                    updated_at: new Date().toISOString()
-                  })
+                  }
                 });
-                if (bankrollUpdateResponse.ok) {
-                  bankrollUpdates++;
-                  console.log(`Updated bankroll for user ${bet.user_id} with winnings ${bet.potential_return}`);
-                } else {
-                  console.warn(`Failed to update bankroll for user ${bet.user_id}: ${bankrollUpdateResponse.status}`);
+                if (getCurrentBankroll.ok) {
+                  const bankrollRows = await getCurrentBankroll.json();
+                  const existingAmount = bankrollRows.length > 0 ? Number(bankrollRows[0].current_amount) : 0;
+                  const newAmount = existingAmount + Number(bet.potential_return);
+
+                  const bankrollUpdateResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}`, {
+                    method: 'PATCH',
+                    headers: {
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'apikey': supabaseKey,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      current_amount: newAmount,
+                      updated_at: new Date().toISOString()
+                    })
+                  });
+                  if (bankrollUpdateResponse.ok) {
+                    bankrollUpdates++;
+                    console.log(`Updated bankroll for user ${bet.user_id}: £${existingAmount} + £${bet.potential_return} = £${newAmount}`);
+                  } else {
+                    console.warn(`Failed to update bankroll for user ${bet.user_id}: ${bankrollUpdateResponse.status}`);
+                  }
                 }
               } catch (bankrollError) {
                 console.warn(`Error updating bankroll for user ${bet.user_id}:`, bankrollError.message);

@@ -8,12 +8,8 @@ import {
   Shield, 
   LogOut,
   TrendingUp,
-  Brain,
   Menu,
   X,
-  List,
-  Wallet,
-  BarChart3,
   Clock
 } from 'lucide-react'
 
@@ -43,10 +39,9 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const navItems = [
-    { to: '/races', icon: Home, label: 'Today', active: 'races' },
-    { to: '/previous', icon: Trophy, label: 'Results', active: 'previous' },
-    { to: '/ai-insider', icon: Brain, label: 'AI Insider', active: 'ai-insider' },
-    { to: '/short-list', icon: List, label: 'Shortlist', active: 'short-list' },
+    { to: '/races', icon: Home, label: 'Dashboard', active: 'races' },
+    { to: '/performance', icon: TrendingUp, label: 'Performance', active: 'performance' },
+    { to: '/settings', icon: Settings, label: 'Settings', active: 'settings' },
   ]
 
   const isAdmin = profile?.role === 'admin'
@@ -85,36 +80,12 @@ export function AppLayout({ children }: AppLayoutProps) {
             {isMenuOpen && (
               <div className="absolute right-0 top-12 bg-gray-800 border border-gray-700 rounded-lg shadow-lg min-w-32 z-50">
                 <NavLink
-                  to="/ml-tracker"
+                  to="/previous"
                   onClick={() => setIsMenuOpen(false)}
                   className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
                 >
-                  <BarChart3 className="w-4 h-4" />
-                  <span>Tracker</span>
-                </NavLink>
-                <NavLink
-                  to="/performance"
-                  onClick={() => setIsMenuOpen(false)}
-                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                >
-                  <TrendingUp className="w-4 h-4" />
-                  <span>Performance</span>
-                </NavLink>
-                <NavLink
-                  to="/bankroll"
-                  onClick={() => setIsMenuOpen(false)}
-                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                >
-                  <Wallet className="w-4 h-4" />
-                  <span>Bankroll</span>
-                </NavLink>
-                <NavLink
-                  to="/settings"
-                  onClick={() => setIsMenuOpen(false)}
-                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                >
-                  <Settings className="w-4 h-4" />
-                  <span>Settings</span>
+                  <Trophy className="w-4 h-4" />
+                  <span>Results</span>
                 </NavLink>
                 {isAdmin && (
                   <>
@@ -129,6 +100,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </NavLink>
                   </>
                 )}
+                <div className="border-t border-gray-700 my-1" />
                 <button
                   onClick={() => {
                     setIsMenuOpen(false)

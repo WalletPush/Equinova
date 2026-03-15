@@ -26,6 +26,10 @@ import {
   X,
   Zap,
   Search,
+  Wallet,
+  CheckCircle,
+  XCircle,
+  Target,
 } from 'lucide-react'
 import type { SmartSignal, PatternAlert } from '@/types/signals'
 import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
@@ -230,7 +234,8 @@ export function TodaysRacesPage() {
     normProb: number
     impliedProb: number
     edge: number
-    entry: any // full entry for opening modal
+    valueScore: number
+    entry: any
   }
 
   const valueBets = useMemo<ValueBetResult[]>(() => {
@@ -249,11 +254,11 @@ export function TodaysRacesPage() {
         if (!odds || odds <= 0 || !entry.ensemble_proba || entry.ensemble_proba <= 0) continue
 
         const normProb = normMap.get(String(entry.horse_id)) ?? 0
-        const impliedProb = 1 / (odds + 1)
+        const impliedProb = 1 / odds
         const edge = normProb - impliedProb
+        const valueScore = normProb * odds
 
-        // Only include horses with a strong positive edge (> 10%)
-        if (edge > 0.10) {
+        if (valueScore > 1.05) {
           results.push({
             horse_name: entry.horse_name,
             horse_id: entry.horse_id,
@@ -268,17 +273,65 @@ export function TodaysRacesPage() {
             normProb,
             impliedProb,
             edge,
+            valueScore,
             entry,
           })
         }
       }
     }
 
-    // Sort by edge descending (biggest value first)
-    results.sort((a, b) => b.edge - a.edge)
+    results.sort((a, b) => b.valueScore - a.valueScore)
 
     return results
   }, [races])
+
+  // ── Auto-bet dashboard data ─────────────────────────────────────
+  const { data: autoBetData } = useQuery({
+    queryKey: ['auto-bets-today', selectedDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('auto_bet_ledger')
+        .select('*')
+        .eq('bet_date', selectedDate)
+        .order('id', { ascending: true })
+      if (error) throw error
+      return data || []
+    },
+    staleTime: 30_000,
+  })
+
+  const { data: bankrollSummary } = useQuery({
+    queryKey: ['auto-bet-summary'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('auto_bet_ledger')
+        .select('bankroll_after,profit,won,stake')
+        .order('id', { ascending: false })
+        .limit(1)
+      if (error) throw error
+      const last = data?.[0]
+      const { data: allBets } = await supabase
+        .from('auto_bet_ledger')
+        .select('profit,stake,won')
+      const totalPL = allBets?.reduce((s, b) => s + Number(b.profit), 0) || 0
+      const totalStaked = allBets?.reduce((s, b) => s + Number(b.stake), 0) || 0
+      const totalWins = allBets?.filter(b => b.won).length || 0
+      const totalBets = allBets?.length || 0
+      return {
+        bankroll: last ? Number(last.bankroll_after) : 200,
+        totalPL,
+        roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
+        winRate: totalBets > 0 ? (totalWins / totalBets) * 100 : 0,
+        totalBets,
+      }
+    },
+    staleTime: 60_000,
+  })
+
+  const todayPlays = autoBetData || []
+  const todayPL = todayPlays.reduce((s, b) => s + Number(b.profit), 0)
+  const todayWins = todayPlays.filter(b => b.won).length
+  const todayPending = todayPlays.filter(b => Number(b.finishing_position) === 0).length
 
   // Background enrichment: trigger per-horse odds refresh for value bets
   const enrichmentRef = useRef<Set<string>>(new Set())
@@ -340,6 +393,102 @@ export function TodaysRacesPage() {
   return (
     <AppLayout>
       <div className="p-4 space-y-6">
+        {/* Bankroll + Today's Plays Header */}
+        {bankrollSummary && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Wallet className="w-3.5 h-3.5 text-yellow-400" />
+                <span className="text-[9px] text-gray-500 uppercase tracking-wider">Bankroll</span>
+              </div>
+              <div className="text-lg font-bold text-white">£{bankrollSummary.bankroll.toFixed(2)}</div>
+            </div>
+            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                {bankrollSummary.roi >= 0
+                  ? <TrendingUp className="w-3.5 h-3.5 text-green-400" />
+                  : <Target className="w-3.5 h-3.5 text-red-400" />}
+                <span className="text-[9px] text-gray-500 uppercase tracking-wider">ROI</span>
+              </div>
+              <div className={`text-lg font-bold ${bankrollSummary.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {bankrollSummary.roi >= 0 ? '+' : ''}{bankrollSummary.roi.toFixed(1)}%
+              </div>
+            </div>
+            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-[9px] text-gray-500 uppercase tracking-wider">Today</span>
+              </div>
+              <div className="text-lg font-bold text-white">
+                {todayPlays.length > 0
+                  ? <>{todayWins}W / {todayPlays.length - todayWins - todayPending}L{todayPending > 0 && <span className="text-yellow-400 text-xs ml-1">({todayPending} pending)</span>}</>
+                  : <span className="text-gray-500">—</span>
+                }
+              </div>
+            </div>
+            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                {todayPL >= 0
+                  ? <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                  : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+                <span className="text-[9px] text-gray-500 uppercase tracking-wider">Today P/L</span>
+              </div>
+              <div className={`text-lg font-bold ${todayPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {todayPL >= 0 ? '+' : '-'}£{Math.abs(todayPL).toFixed(2)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Today's Auto Plays */}
+        {todayPlays.length > 0 && (
+          <div className="bg-gray-800/60 border border-yellow-500/20 rounded-xl">
+            <div className="px-4 py-2.5 flex items-center justify-between border-b border-gray-700/50">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-yellow-400" />
+                <span className="text-sm font-semibold text-yellow-400">Today's Auto Plays</span>
+                <span className="text-[10px] text-gray-500">{todayPlays.length} bets</span>
+              </div>
+              <Link to="/performance" className="text-[10px] text-gray-500 hover:text-yellow-400 transition-colors">
+                Full History →
+              </Link>
+            </div>
+            <div className="divide-y divide-gray-700/30">
+              {todayPlays.map((bet: any) => {
+                const won = bet.won
+                const pending = Number(bet.finishing_position) === 0
+                return (
+                  <div key={bet.id} className="px-4 py-2 flex items-center gap-3 text-xs">
+                    <div className="flex-shrink-0">
+                      {pending
+                        ? <Clock className="w-3.5 h-3.5 text-yellow-400" />
+                        : won
+                        ? <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                        : <XCircle className="w-3.5 h-3.5 text-gray-600" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className={`font-medium truncate block ${won ? 'text-green-300' : pending ? 'text-white' : 'text-gray-400'}`}>
+                        {bet.horse_name}
+                      </span>
+                      <span className="text-[10px] text-gray-500">{bet.off_time?.substring(0, 5)} {bet.course}</span>
+                    </div>
+                    <span className="text-gray-400 font-mono">{formatOdds(String(bet.current_odds))}</span>
+                    <span className={`font-bold text-[11px] ${bet.value_score >= 1.3 ? 'text-amber-400' : 'text-gray-500'}`}>
+                      {Number(bet.value_score).toFixed(2)}x
+                    </span>
+                    <span className="text-gray-400">£{Number(bet.stake).toFixed(2)}</span>
+                    <span className={`font-bold w-14 text-right ${
+                      pending ? 'text-yellow-400' : Number(bet.profit) >= 0 ? 'text-green-400' : 'text-red-400'
+                    }`}>
+                      {pending ? 'pending' : `${Number(bet.profit) >= 0 ? '+' : '-'}£${Math.abs(Number(bet.profit)).toFixed(2)}`}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Header - Mobile Optimized */}
         <div className="space-y-3">
           {/* Line 1: Title only */}
@@ -405,7 +554,7 @@ export function TodaysRacesPage() {
                   <Zap className="w-5 h-5 text-green-400" />
                   <h3 className="text-white font-bold text-sm">Value Bet Scanner</h3>
                   <span className="text-gray-400 text-xs">
-                    {valueBets.length} found across {races.length} races
+                    {valueBets.length} value bets ({'>'}1.05x) across {races.length} races
                   </span>
                 </div>
                 <button
@@ -421,7 +570,7 @@ export function TodaysRacesPage() {
                 <div className="text-center py-8 px-4">
                   <Search className="w-10 h-10 text-gray-600 mx-auto mb-3" />
                   <p className="text-gray-400 font-medium">No value bets found</p>
-                  <p className="text-gray-500 text-sm mt-1">No horses currently have a meaningful edge over the market odds</p>
+                  <p className="text-gray-500 text-sm mt-1">No horses currently have a Benter value score above 1.05x</p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-700/50 max-h-[60vh] overflow-y-auto">
@@ -475,15 +624,19 @@ export function TodaysRacesPage() {
                           </div>
                         </div>
 
-                        {/* Right: edge + odds + action */}
+                        {/* Right: value score + odds + action */}
                         <div className="flex items-center gap-3 flex-shrink-0">
-                          {/* Edge + probabilities */}
+                          {/* Value Score */}
                           <div className="text-right">
-                            <div className="text-green-400 font-bold text-sm">
-                              +{(vb.edge * 100).toFixed(1)}% edge
+                            <div className={`font-bold text-sm ${
+                              vb.valueScore >= 1.3 ? 'text-green-400' :
+                              vb.valueScore >= 1.15 ? 'text-emerald-400' :
+                              'text-yellow-400'
+                            }`}>
+                              {vb.valueScore.toFixed(2)}x
                             </div>
                             <div className="text-[10px] text-gray-500">
-                              {formatNormalized(vb.normProb)} vs {formatNormalized(vb.impliedProb)}
+                              {formatNormalized(vb.normProb)} AI · {formatNormalized(vb.impliedProb)} mkt
                             </div>
                           </div>
 
@@ -824,11 +977,25 @@ export function TodaysRacesPage() {
                               </div>
                               
                               <div className="flex items-center gap-2.5 flex-shrink-0">
-                                {entry.ensemble_proba > 0 && (
-                                  <div className={`text-sm font-medium ${getNormalizedColor(normMap.get(String(entry.horse_id)) ?? 0)}`}>
-                                    {formatNormalized(normMap.get(String(entry.horse_id)) ?? 0)}
-                                  </div>
-                                )}
+                                {entry.ensemble_proba > 0 && (() => {
+                                  const np = normMap.get(String(entry.horse_id)) ?? 0
+                                  const odds = Number(entry.current_odds)
+                                  const vs = odds > 1 ? np * odds : 0
+                                  return (
+                                    <div className="text-right">
+                                      <div className={`text-sm font-medium ${getNormalizedColor(np)}`}>
+                                        {formatNormalized(np)}
+                                      </div>
+                                      {vs > 1.05 && (
+                                        <div className={`text-[10px] font-bold ${
+                                          vs >= 1.3 ? 'text-green-400' : vs >= 1.15 ? 'text-emerald-400' : 'text-yellow-400'
+                                        }`}>
+                                          {vs.toFixed(2)}x value
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })()}
                                 {entry.current_odds && (
                                   <div className="flex items-center gap-1.5">
                                     <MarketMovementBadge

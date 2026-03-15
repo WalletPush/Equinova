@@ -159,12 +159,12 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
     const oddsRank =
       sortedByOdds.findIndex((e) => String(e.horse_id) === horseId) + 1
 
-    // Value bet: compare NORMALIZED probability to market implied probability
     const odds = Number(entry.current_odds)
     const mlProb = normEnsemble
-    const impliedProb = odds > 0 ? 1 / (odds + 1) : 0
+    const impliedProb = odds > 1 ? 1 / odds : 0
     const edge = mlProb - impliedProb
-    const isValueBet = edge > 0.02 // 2%+ edge to avoid noise
+    const valueScore = odds > 1 ? mlProb * odds : 0
+    const isValueBet = valueScore > 1.05
 
     // Model-by-model analysis using normalized probabilities
     const models: { key: string; label: string; field: ProbaField }[] = [
@@ -212,9 +212,10 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
       ensembleRank,
       oddsRank,
       odds,
-      mlProb,        // normalized win probability
+      mlProb,
       impliedProb,
       edge,
+      valueScore,
       isValueBet,
       modelAnalysis,
       modelsWhereTop,
@@ -313,15 +314,26 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-4 gap-2 mb-4">
             <div className="text-center bg-gray-800/60 rounded-lg py-3 px-2">
-              <div className="text-xs text-gray-400 mb-1">Win Probability</div>
+              <div className="text-xs text-gray-400 mb-1">Value Score</div>
+              <div className={`text-xl font-bold ${
+                analysis.valueScore >= 1.3 ? 'text-green-400' :
+                analysis.valueScore >= 1.15 ? 'text-emerald-400' :
+                analysis.valueScore >= 1.0 ? 'text-yellow-400' :
+                'text-red-400'
+              }`}>
+                {analysis.valueScore.toFixed(2)}x
+              </div>
+            </div>
+            <div className="text-center bg-gray-800/60 rounded-lg py-3 px-2">
+              <div className="text-xs text-gray-400 mb-1">AI Prob</div>
               <div className={`text-xl font-bold ${getNormalizedColor(analysis.mlProb)}`}>
                 {formatNormalized(analysis.mlProb)}
               </div>
             </div>
             <div className="text-center bg-gray-800/60 rounded-lg py-3 px-2">
-              <div className="text-xs text-gray-400 mb-1">Market Implied</div>
+              <div className="text-xs text-gray-400 mb-1">Market</div>
               <div className="text-xl font-bold text-gray-300">
                 {formatNormalized(analysis.impliedProb)}
               </div>
@@ -336,8 +348,8 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
 
           <p className="text-sm text-gray-300 leading-relaxed">
             {analysis.isValueBet
-              ? `Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} win probability, but the current odds of ${formatOdds(analysis.odds)} imply only ${formatNormalized(analysis.impliedProb)}. That's a ${(analysis.edge * 100).toFixed(1)}% edge — the market is undervaluing this horse.`
-              : `At ${formatOdds(analysis.odds)}, the market implies a ${formatNormalized(analysis.impliedProb)} chance. Our ML models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} — there is no significant edge at current odds.`}
+              ? `Value Score ${analysis.valueScore.toFixed(2)}x — our models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)}, but ${formatOdds(analysis.odds)} implies only ${formatNormalized(analysis.impliedProb)}. Every £1 bet has an expected return of £${analysis.valueScore.toFixed(2)}.`
+              : `Value Score ${analysis.valueScore.toFixed(2)}x — at ${formatOdds(analysis.odds)}, the market implies ${formatNormalized(analysis.impliedProb)}. Our models rate ${entry.horse_name} at ${formatNormalized(analysis.mlProb)} — no edge at current price.`}
           </p>
         </div>
       ) : (
