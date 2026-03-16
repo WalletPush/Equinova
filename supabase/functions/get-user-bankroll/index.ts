@@ -53,36 +53,13 @@ Deno.serve(async (req)=>{
       throw new Error(`Failed to fetch bankroll: ${errorText}`);
     }
     const bankrollData = await bankrollResponse.json();
-    // If no bankroll exists, create one with 0 amount
     if (!bankrollData || bankrollData.length === 0) {
-      const createBankrollResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${serviceRoleKey}`,
-          'apikey': serviceRoleKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          current_amount: 200
-        })
-      });
-      if (!createBankrollResponse.ok) {
-        const errorText = await createBankrollResponse.text();
-        console.error('Failed to create bankroll:', errorText);
-        throw new Error(`Failed to create bankroll: ${errorText}`);
-      }
-      const newBankroll = await createBankrollResponse.json();
-      console.log('Created new bankroll:', newBankroll);
       return new Response(JSON.stringify({
         success: true,
         data: {
           user_id: userId,
-          current_amount: 200,
-          created_at: newBankroll[0].created_at,
-          updated_at: newBankroll[0].updated_at,
-          has_bankroll: true
+          current_amount: 0,
+          has_bankroll: false
         }
       }), {
         headers: {

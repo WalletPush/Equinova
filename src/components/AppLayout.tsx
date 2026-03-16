@@ -49,7 +49,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     { to: '/races', icon: CalendarDays, label: 'Today', active: 'races' },
     { to: '/previous', icon: Trophy, label: 'Results', active: 'previous' },
     { to: '/performance', icon: TrendingUp, label: 'Performance', active: 'performance' },
-    { to: '/auto-bets', icon: Zap, label: 'Auto Bets', active: 'auto-bets' },
+    { to: '/auto-bets', icon: Zap, label: 'Top Picks', active: 'auto-bets' },
   ]
 
   const isAdmin = profile?.role === 'admin'

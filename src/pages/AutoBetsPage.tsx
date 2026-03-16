@@ -1,11 +1,15 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
+import { PlaceBetButton } from '@/components/PlaceBetButton'
+import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { supabase } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { useDynamicSignals, type DynamicMatch, type DynamicCombo } from '@/hooks/useDynamicSignals'
+import { useBankroll } from '@/hooks/useBankroll'
+import { useAuth } from '@/contexts/AuthContext'
 import {
   Zap,
   Trophy,
@@ -16,22 +20,41 @@ import {
   Target,
   Wallet,
   ChevronRight,
-  CalendarDays,
+  ChevronDown,
+  ChevronUp,
   Brain,
   Sparkles,
   ShieldCheck,
-  AlertTriangle,
+  Info,
+  Gauge,
+  MessageSquare,
+  Activity,
 } from 'lucide-react'
 
-const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
-  proven:   { bg: 'bg-green-500/20 border-green-500/40', text: 'text-green-400', label: 'PROVEN' },
-  strong:   { bg: 'bg-emerald-500/15 border-emerald-500/40', text: 'text-emerald-400', label: 'STRONG' },
-  emerging: { bg: 'bg-amber-500/15 border-amber-500/40', text: 'text-amber-400', label: 'EMERGING' },
+const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
+  proven:   { bg: 'bg-green-500/20 border-green-500/40', text: 'text-green-400' },
+  strong:   { bg: 'bg-emerald-500/15 border-emerald-500/40', text: 'text-emerald-400' },
+  emerging: { bg: 'bg-amber-500/15 border-amber-500/40', text: 'text-amber-400' },
+}
+
+const SIGNAL_LABELS: Record<string, string> = {
+  top_rpr: 'Top RPR', top_ts: 'Top TS', top_ofr: 'Top OFR', top_speed_fig: 'Top Speed',
+  ratings_consensus: 'Ratings Consensus', ml_top_pick: 'ML Pick', consensus_2plus: '2+ Models',
+  consensus_3plus: '3+ Models', consensus_4plus: '4+ Models', value_1_05: 'Value 1.05+',
+  value_1_10: 'Value 1.10+', value_1_15: 'Value 1.15+', steaming: 'Steaming',
+  drifting: 'Drifting', cd_winner: 'C&D Winner', course_specialist: 'Course Specialist',
+  distance_specialist: 'Distance Specialist', improving_form: 'Improving', trainer_21d_wr10: 'Trainer Hot',
+  trainer_21d_wr15: 'Trainer 15%+', trainer_21d_wr20: 'Trainer 20%+', trainer_course_wr15: 'Trainer@Course',
+  jockey_21d_wr10: 'Jockey Hot', jockey_21d_wr15: 'Jockey 15%+', jockey_dist_wr15: 'Jockey@Dist',
+  speed_standout_5: 'Speed +5%', speed_standout_10: 'Speed +10%', low_avg_fp: 'Low Avg FP',
+  odds_evs_to_3: 'Short Price', odds_3_to_6: 'Mid Price', odds_6_to_10: 'Each-Way', odds_10_plus: 'Big Price',
 }
 
 export function AutoBetsPage() {
+  const { user } = useAuth()
   const todayUK = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
   const { matches: dynamicMatches, meta, isLoading: loadingSignals } = useDynamicSignals()
+  const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
 
   const { data: todayBets, isLoading: loadingBets } = useQuery({
     queryKey: ['auto-bets-today', todayUK],
@@ -64,11 +87,9 @@ export function AutoBetsPage() {
       const totalBets = allBets?.length || 0
       return {
         bankroll: lastBet?.[0] ? Number(lastBet[0].bankroll_after) : 200,
-        totalPL,
-        roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
+        totalPL, roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
         winRate: totalBets > 0 ? (totalWins / totalBets) * 100 : 0,
-        totalBets,
-        totalWins,
+        totalBets, totalWins,
       }
     },
     staleTime: 60_000,
@@ -76,75 +97,88 @@ export function AutoBetsPage() {
 
   const betsByHorse = useMemo(() => {
     const map = new Map<string, any>()
-    for (const b of todayBets || []) {
-      map.set(`${b.race_id}:${b.horse_id}`, b)
-    }
+    for (const b of todayBets || []) map.set(`${b.race_id}:${b.horse_id}`, b)
     return map
   }, [todayBets])
 
   const plays = todayBets || []
   const todayPL = plays.reduce((s, b) => s + Number(b.profit), 0)
-  const todayWins = plays.filter(b => b.won).length
-  const todayPending = plays.filter(b => Number(b.finishing_position) === 0).length
 
-  // Group dynamic matches by race (off_time + course)
-  const matchesByRace = useMemo(() => {
+  // Split matches into upcoming and settled
+  const { upcomingRaces, settledRaces } = useMemo(() => {
     const grouped = new Map<string, { course: string; off_time: string; race_type: string; matches: DynamicMatch[] }>()
     for (const m of dynamicMatches) {
-      const key = m.race_id
-      if (!grouped.has(key)) {
-        grouped.set(key, { course: m.course, off_time: m.off_time, race_type: m.race_type, matches: [] })
+      if (!grouped.has(m.race_id)) {
+        grouped.set(m.race_id, { course: m.course, off_time: m.off_time, race_type: m.race_type, matches: [] })
       }
-      grouped.get(key)!.matches.push(m)
+      grouped.get(m.race_id)!.matches.push(m)
     }
-    const sorted = [...grouped.entries()].sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
-    return sorted
+
+    const upcoming: [string, typeof grouped extends Map<string, infer V> ? V : never][] = []
+    const settled: [string, typeof grouped extends Map<string, infer V> ? V : never][] = []
+
+    for (const [raceId, race] of grouped) {
+      const allSettled = race.matches.every(m => m.finishing_position != null && m.finishing_position > 0)
+      if (allSettled) settled.push([raceId, race])
+      else upcoming.push([raceId, race])
+    }
+
+    upcoming.sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
+    settled.sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
+    return { upcomingRaces: upcoming, settledRaces: settled }
   }, [dynamicMatches])
 
   const isLoading = loadingSignals || loadingBets
 
   return (
     <AppLayout>
+      {needsSetup && <BankrollSetupModal onSetup={addFunds} isSubmitting={isAddingFunds} />}
+
       <div className="p-4 space-y-5">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Brain className="w-6 h-6 text-purple-400" />
-            Smart Picks
+            Top Picks
           </h1>
           <p className="text-gray-400 text-sm mt-1">
-            Self-learning system matching horses to historically profitable patterns
+            AI-discovered patterns matched to today's runners
           </p>
         </div>
 
-        {/* Self-learning banner */}
-        {meta && (
-          <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl p-3 flex items-center gap-3">
-            <Sparkles className="w-5 h-5 text-purple-400 flex-shrink-0" />
-            <div className="text-xs text-gray-300">
-              <span className="text-purple-300 font-semibold">{meta.combos_available?.toLocaleString()}</span> profitable patterns discovered across{' '}
-              <span className="text-purple-300 font-semibold">12,000+</span> races.{' '}
-              Patterns update daily as new results come in.
-            </div>
+        {/* How it works banner */}
+        <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-400 flex-shrink-0" />
+            <span className="text-sm font-semibold text-purple-300">How Top Picks Work</span>
           </div>
-        )}
+          <p className="text-xs text-gray-400 leading-relaxed">
+            Our system tests thousands of signal combinations against historical race data to find patterns that have been
+            <span className="text-green-400 font-medium"> statistically profitable</span>. Each horse below matches at least one proven pattern.
+            The <span className="text-purple-300 font-medium">confidence score</span> reflects how many patterns match and their historical strength.
+            The <span className="text-yellow-400 font-medium">Kelly wager</span> is the mathematically optimal stake based on the pattern's edge.
+          </p>
+          {meta && (
+            <p className="text-[11px] text-gray-500">
+              {meta.combos_available?.toLocaleString()} patterns analysed across {meta.today_entries?.toLocaleString()} entries in {meta.today_races} races today.
+            </p>
+          )}
+        </div>
 
-        {/* Bankroll Summary Cards */}
+        {/* System summary cards */}
         {bankrollSummary && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
               <div className="flex items-center gap-1.5 mb-1">
                 <Wallet className="w-3.5 h-3.5 text-yellow-400" />
-                <span className="text-[9px] text-gray-500 uppercase tracking-wider">Bankroll</span>
+                <span className="text-[9px] text-gray-500 uppercase tracking-wider">System Bank</span>
               </div>
               <div className="text-lg font-bold text-white">£{bankrollSummary.bankroll.toFixed(2)}</div>
             </div>
             <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
               <div className="flex items-center gap-1.5 mb-1">
-                {bankrollSummary.roi >= 0
-                  ? <TrendingUp className="w-3.5 h-3.5 text-green-400" />
-                  : <Target className="w-3.5 h-3.5 text-red-400" />}
-                <span className="text-[9px] text-gray-500 uppercase tracking-wider">ROI</span>
+                {bankrollSummary.roi >= 0 ? <TrendingUp className="w-3.5 h-3.5 text-green-400" /> : <Target className="w-3.5 h-3.5 text-red-400" />}
+                <span className="text-[9px] text-gray-500 uppercase tracking-wider">System ROI</span>
               </div>
               <div className={`text-lg font-bold ${bankrollSummary.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {bankrollSummary.roi >= 0 ? '+' : ''}{bankrollSummary.roi.toFixed(1)}%
@@ -155,16 +189,12 @@ export function AutoBetsPage() {
                 <Trophy className="w-3.5 h-3.5 text-amber-400" />
                 <span className="text-[9px] text-gray-500 uppercase tracking-wider">Win Rate</span>
               </div>
-              <div className="text-lg font-bold text-white">
-                {bankrollSummary.winRate.toFixed(0)}%
-              </div>
+              <div className="text-lg font-bold text-white">{bankrollSummary.winRate.toFixed(0)}%</div>
               <div className="text-[10px] text-gray-500">{bankrollSummary.totalWins}W / {bankrollSummary.totalBets}R</div>
             </div>
             <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
               <div className="flex items-center gap-1.5 mb-1">
-                {todayPL >= 0
-                  ? <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-                  : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+                {todayPL >= 0 ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
                 <span className="text-[9px] text-gray-500 uppercase tracking-wider">Today P/L</span>
               </div>
               <div className={`text-lg font-bold ${todayPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -185,85 +215,49 @@ export function AutoBetsPage() {
         )}
 
         {/* No matches */}
-        {!isLoading && dynamicMatches.length === 0 && plays.length === 0 && (
+        {!isLoading && dynamicMatches.length === 0 && (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Brain className="w-8 h-8 text-gray-600" />
             </div>
             <h3 className="text-lg font-medium text-gray-300 mb-2">No pattern matches today</h3>
             <p className="text-gray-500 text-sm max-w-xs mx-auto">
-              The system will highlight selections when horses match historically profitable signal combinations
+              The system will highlight picks when horses match historically profitable signal combinations
             </p>
           </div>
         )}
 
-        {/* Today's Pattern Matches — grouped by race */}
-        {!isLoading && matchesByRace.length > 0 && (
+        {/* Upcoming / Live */}
+        {!isLoading && upcomingRaces.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Zap className="w-4 h-4 text-purple-400" />
-              <h2 className="text-sm font-semibold text-purple-400 uppercase tracking-wider">
-                Pattern Matches
-              </h2>
+              <Clock className="w-4 h-4 text-purple-400" />
+              <h2 className="text-sm font-semibold text-purple-400 uppercase tracking-wider">Upcoming</h2>
               <span className="text-xs text-gray-500">
-                {dynamicMatches.length} horses across {matchesByRace.length} races
+                {upcomingRaces.reduce((s, [, r]) => s + r.matches.length, 0)} picks across {upcomingRaces.length} races
               </span>
             </div>
             <div className="space-y-4">
-              {matchesByRace.map(([raceId, race]) => (
-                <div key={raceId} className="bg-gray-800/40 border border-gray-700/50 rounded-xl overflow-hidden">
-                  {/* Race header */}
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700/30 bg-gray-800/60">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-3.5 h-3.5 text-gray-500" />
-                      <span className="text-xs text-white font-semibold">{race.off_time?.substring(0, 5)}</span>
-                      <span className="text-xs text-gray-500">·</span>
-                      <span className="text-xs text-gray-300">{race.course}</span>
-                    </div>
-                    <span className="text-[10px] text-gray-500 uppercase">{race.race_type}</span>
-                  </div>
-
-                  {/* Horses matching patterns */}
-                  <div className="divide-y divide-gray-700/20">
-                    {race.matches.map((match) => {
-                      const bet = betsByHorse.get(`${raceId}:${match.horse_id}`)
-                      const isAutoBet = !!bet
-                      const betStatus = bet
-                        ? Number(bet.finishing_position) === 0
-                          ? 'pending'
-                          : bet.won ? 'won' : 'lost'
-                        : null
-
-                      return (
-                        <MatchCard
-                          key={match.horse_id}
-                          match={match}
-                          bet={bet}
-                          isAutoBet={isAutoBet}
-                          betStatus={betStatus}
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
+              {upcomingRaces.map(([raceId, race]) => (
+                <RaceGroup key={raceId} raceId={raceId} race={race} betsByHorse={betsByHorse} userBankroll={bankroll} needsSetup={needsSetup} />
               ))}
             </div>
           </div>
         )}
 
-        {/* Auto-bet settled (from ledger, not in dynamic matches) */}
-        {plays.length > 0 && (
+        {/* Settled Results */}
+        {!isLoading && settledRaces.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <CalendarDays className="w-4 h-4 text-gray-400" />
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Auto-bet Ledger</h2>
+              <Trophy className="w-4 h-4 text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Results</h2>
               <span className="text-xs text-gray-500">
-                {todayWins}W {plays.length - todayWins - todayPending}L {todayPending > 0 ? `${todayPending}P` : ''}
+                {settledRaces.reduce((s, [, r]) => s + r.matches.length, 0)} settled
               </span>
             </div>
-            <div className="space-y-2">
-              {plays.map((bet: any) => (
-                <LedgerRow key={bet.id} bet={bet} />
+            <div className="space-y-4">
+              {settledRaces.map(([raceId, race]) => (
+                <RaceGroup key={raceId} raceId={raceId} race={race} betsByHorse={betsByHorse} userBankroll={bankroll} needsSetup={needsSetup} settled />
               ))}
             </div>
           </div>
@@ -278,8 +272,8 @@ export function AutoBetsPage() {
             <div className="flex items-center gap-3">
               <TrendingUp className="w-5 h-5 text-gray-500 group-hover:text-purple-400 transition-colors" />
               <div>
-                <span className="text-white font-medium text-sm">Full Performance History</span>
-                <p className="text-gray-500 text-xs">Equity curve, daily breakdown, all bets</p>
+                <span className="text-white font-medium text-sm">My Performance</span>
+                <p className="text-gray-500 text-xs">Track your betting results</p>
               </div>
             </div>
             <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-purple-400 transition-colors" />
@@ -290,25 +284,126 @@ export function AutoBetsPage() {
   )
 }
 
+// ─── Race Group ──────────────────────────────────────────────────────────
 
-function MatchCard({ match, bet, isAutoBet, betStatus }: {
-  match: DynamicMatch
-  bet: any | null
-  isAutoBet: boolean
-  betStatus: 'pending' | 'won' | 'lost' | null
+function RaceGroup({ raceId, race, betsByHorse, userBankroll, needsSetup, settled }: {
+  raceId: string
+  race: { course: string; off_time: string; race_type: string; matches: DynamicMatch[] }
+  betsByHorse: Map<string, any>
+  userBankroll: number
+  needsSetup: boolean
+  settled?: boolean
 }) {
-  const topCombo = match.matching_combos[0]
-  const odds = match.current_odds || 0
+  return (
+    <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700/30 bg-gray-800/60">
+        <div className="flex items-center gap-2">
+          <Clock className="w-3.5 h-3.5 text-gray-500" />
+          <span className="text-xs text-white font-semibold">{race.off_time?.substring(0, 5)}</span>
+          <span className="text-xs text-gray-500">·</span>
+          <span className="text-xs text-gray-300">{race.course}</span>
+        </div>
+        <span className="text-[10px] text-gray-500 uppercase">{race.race_type}</span>
+      </div>
+      <div className="divide-y divide-gray-700/20">
+        {race.matches.map(match => (
+          <MatchCard
+            key={match.horse_id}
+            match={match}
+            bet={betsByHorse.get(`${raceId}:${match.horse_id}`)}
+            userBankroll={userBankroll}
+            needsSetup={needsSetup}
+            settled={settled}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Confidence Donut ────────────────────────────────────────────────────
+
+function ConfidenceDonut({ score }: { score: number }) {
+  const pct = Math.min(score, 100)
+  const r = 16
+  const circ = 2 * Math.PI * r
+  const offset = circ - (pct / 100) * circ
+  const color = pct >= 80 ? '#22c55e' : pct >= 60 ? '#eab308' : pct >= 40 ? '#f97316' : '#ef4444'
 
   return (
-    <div className={`p-4 ${isAutoBet ? 'bg-purple-500/5' : ''}`}>
-      {/* Horse row */}
-      <div className="flex items-start justify-between gap-3">
+    <div className="relative w-12 h-12 flex-shrink-0">
+      <svg width="48" height="48" className="-rotate-90">
+        <circle cx="24" cy="24" r={r} fill="none" stroke="#374151" strokeWidth="3" />
+        <circle cx="24" cy="24" r={r} fill="none" stroke={color} strokeWidth="3"
+          strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[10px] font-bold text-white">{Math.round(pct)}%</span>
+      </div>
+    </div>
+  )
+}
+
+// ─── Match Card ──────────────────────────────────────────────────────────
+
+function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
+  match: DynamicMatch
+  bet: any | null
+  userBankroll: number
+  needsSetup: boolean
+  settled?: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isAutoBet = !!bet
+  const odds = match.current_odds || 0
+  const fp = match.finishing_position
+  const isSettled = fp != null && fp > 0
+  const isWinner = fp === 1
+
+  // Confidence score: weighted average of pattern strength
+  const confidence = useMemo(() => {
+    const combos = match.matching_combos
+    if (!combos.length) return 0
+    const statusW: Record<string, number> = { proven: 1.0, strong: 0.7, emerging: 0.4 }
+    let total = 0
+    let weights = 0
+    for (const c of combos) {
+      const w = statusW[c.status] ?? 0.3
+      const wrScore = Math.min(c.win_rate / 40, 1) * 40
+      const roiScore = Math.min(c.roi_pct / 200, 1) * 30
+      const countBonus = Math.min(combos.length / 5, 1) * 30
+      total += (wrScore + roiScore + countBonus) * w
+      weights += w
+    }
+    return weights > 0 ? Math.min(total / weights, 100) : 0
+  }, [match.matching_combos])
+
+  // Kelly wager calculation
+  const kellyInfo = useMemo(() => {
+    if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
+    const best = match.matching_combos[0]
+    const patternWR = best.win_rate / 100
+    const implied = 1 / odds
+    const edge = patternWR - implied
+    if (edge <= 0) return null
+    const kelly = edge / (odds - 1)
+    const fraction = Math.min(kelly / 4, 0.05)
+    const stake = Math.round(userBankroll * fraction * 100) / 100
+    if (stake < 1) return null
+    return { stake, fraction, edge, patternWR: best.win_rate }
+  }, [match.matching_combos, odds, userBankroll])
+
+  return (
+    <div className={`p-4 ${isAutoBet ? 'bg-purple-500/5' : ''} ${isSettled && isWinner ? 'bg-green-500/5' : ''} ${isSettled && !isWinner ? 'opacity-70' : ''}`}>
+      {/* Top row: horse + confidence + result */}
+      <div className="flex items-start gap-3">
+        <ConfidenceDonut score={confidence} />
+
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <HorseNameWithSilk
               horseName={match.horse_name}
-              silkUrl={match.silk_url}
+              silkUrl={match.silk_url || undefined}
               className="text-white text-sm font-semibold"
             />
             {isAutoBet && (
@@ -317,16 +412,12 @@ function MatchCard({ match, bet, isAutoBet, betStatus }: {
                 AUTO
               </span>
             )}
-            {betStatus === 'won' && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-500/20 text-green-400">
-                <CheckCircle className="w-2.5 h-2.5" />
-                WON
-              </span>
-            )}
-            {betStatus === 'lost' && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-700 text-gray-500">
-                <XCircle className="w-2.5 h-2.5" />
-                LOST
+            {isSettled && (
+              <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                isWinner ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+              }`}>
+                {isWinner ? <CheckCircle className="w-2.5 h-2.5" /> : <span>{fmtPos(fp)}</span>}
+                {isWinner ? 'WON' : fmtPos(fp)}
               </span>
             )}
           </div>
@@ -337,22 +428,54 @@ function MatchCard({ match, bet, isAutoBet, betStatus }: {
           </div>
         </div>
 
-        {/* Auto-bet P/L */}
-        {bet && betStatus !== 'pending' && (
-          <div className="text-right flex-shrink-0">
-            <div className={`font-bold text-sm ${Number(bet.profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {Number(bet.profit) >= 0 ? '+' : '-'}£{Math.abs(Number(bet.profit)).toFixed(2)}
+        {/* Settled P/L or Place Bet */}
+        <div className="flex-shrink-0 text-right">
+          {isSettled && bet ? (
+            <div>
+              <div className={`font-bold text-sm ${Number(bet.profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {Number(bet.profit) >= 0 ? '+' : '-'}£{Math.abs(Number(bet.profit)).toFixed(2)}
+              </div>
+              <div className="text-[10px] text-gray-500">SP: {formatOdds(String(odds))}</div>
             </div>
-            <div className="text-[10px] text-gray-500">£{Number(bet.stake).toFixed(2)} stake</div>
-          </div>
-        )}
-        {bet && betStatus === 'pending' && (
-          <div className="text-right flex-shrink-0">
-            <div className="text-yellow-400 font-semibold text-sm">£{Number(bet.stake).toFixed(2)}</div>
-            <div className="text-[10px] text-gray-500">staked</div>
-          </div>
-        )}
+          ) : isSettled ? (
+            <div className="text-[10px] text-gray-500">SP: {formatOdds(String(odds))}</div>
+          ) : null}
+        </div>
       </div>
+
+      {/* Kelly + Place Bet row */}
+      {!isSettled && (
+        <div className="flex items-center gap-3 mt-3">
+          {kellyInfo && (
+            <div className="flex-1 bg-gray-800/60 border border-gray-700/40 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-1.5">
+                <Gauge className="w-3 h-3 text-yellow-400" />
+                <span className="text-[10px] text-gray-500 uppercase">Kelly Wager</span>
+              </div>
+              <div className="text-sm font-bold text-yellow-400 mt-0.5">
+                £{kellyInfo.stake.toFixed(2)}
+                <span className="text-[10px] text-gray-500 font-normal ml-1">
+                  ({(kellyInfo.fraction * 100).toFixed(1)}% of bank)
+                </span>
+              </div>
+            </div>
+          )}
+          {!needsSetup && (
+            <div className="flex-shrink-0">
+              <PlaceBetButton
+                horseName={match.horse_name}
+                horseId={match.horse_id}
+                raceId={match.race_id}
+                raceContext={{ race_id: match.race_id, course_name: match.course, off_time: match.off_time }}
+                odds={match.current_odds}
+                jockeyName={match.jockey}
+                trainerName={match.trainer}
+                size="small"
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pattern badges */}
       <div className="flex flex-wrap gap-1 mt-2">
@@ -364,7 +487,7 @@ function MatchCard({ match, bet, isAutoBet, betStatus }: {
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${style.bg} ${style.text}`}
               title={`${combo.total_bets} bets, ${combo.win_rate}% WR, p=${combo.p_value?.toFixed(4) ?? '—'}`}
             >
-              <span className="truncate max-w-[160px]">{combo.combo_label}</span>
+              <span className="truncate max-w-[140px]">{combo.combo_label}</span>
               <span className="opacity-60">·</span>
               <span>{combo.win_rate}%</span>
               <span className="opacity-60">·</span>
@@ -376,49 +499,99 @@ function MatchCard({ match, bet, isAutoBet, betStatus }: {
           <span className="text-[10px] text-gray-500 self-center">+{match.matching_combos.length - 4} more</span>
         )}
       </div>
+
+      {/* Expand toggle */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 mt-2 text-[11px] text-gray-500 hover:text-purple-400 transition-colors"
+      >
+        <Info className="w-3 h-3" />
+        {expanded ? 'Hide details' : 'Show details'}
+        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+
+      {/* Expanded metrics */}
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-gray-700/30 space-y-3">
+          {/* Comment */}
+          {match.comment && (
+            <div className="flex items-start gap-2">
+              <MessageSquare className="w-3.5 h-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-gray-400 italic leading-relaxed">{match.comment}</p>
+            </div>
+          )}
+
+          {/* Ratings & Speed */}
+          <div className="grid grid-cols-3 gap-2">
+            {match.rpr > 0 && (
+              <MetricBox label="RPR" value={match.rpr.toString()} highlight={match.active_signals.includes('top_rpr')} />
+            )}
+            {match.ts > 0 && (
+              <MetricBox label="TS" value={match.ts.toString()} highlight={match.active_signals.includes('top_ts')} />
+            )}
+            {match.ofr > 0 && (
+              <MetricBox label="OFR" value={match.ofr.toString()} highlight={match.active_signals.includes('top_ofr')} />
+            )}
+            {match.best_speed > 0 && (
+              <MetricBox label="Best Speed" value={match.best_speed.toString()} highlight={match.active_signals.includes('top_speed_fig')} />
+            )}
+            {match.last_speed > 0 && (
+              <MetricBox label="Last Speed" value={match.last_speed.toString()} highlight={match.last_speed > match.mean_speed} />
+            )}
+            {match.avg_fp > 0 && (
+              <MetricBox label="Avg FP" value={match.avg_fp.toFixed(1)} highlight={match.avg_fp <= 3} />
+            )}
+          </div>
+
+          {/* Connections */}
+          <div className="grid grid-cols-2 gap-2">
+            {match.trainer_21d_wr > 0 && (
+              <MetricBox label="Trainer 21d WR" value={`${match.trainer_21d_wr.toFixed(0)}%`} highlight={match.trainer_21d_wr >= 15} />
+            )}
+            {match.trainer_course_wr > 0 && (
+              <MetricBox label="Trainer@Course" value={`${match.trainer_course_wr.toFixed(0)}%`} highlight={match.trainer_course_wr >= 15} />
+            )}
+            {match.jockey_21d_wr > 0 && (
+              <MetricBox label="Jockey 21d WR" value={`${match.jockey_21d_wr.toFixed(0)}%`} highlight={match.jockey_21d_wr >= 15} />
+            )}
+            {match.jockey_dist_wr > 0 && (
+              <MetricBox label="Jockey@Distance" value={`${match.jockey_dist_wr.toFixed(0)}%`} highlight={match.jockey_dist_wr >= 15} />
+            )}
+          </div>
+
+          {/* Active signals */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Activity className="w-3 h-3 text-gray-500" />
+              <span className="text-[10px] text-gray-500 uppercase">Active Signals</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {match.active_signals.map(sig => (
+                <span key={sig} className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-700/60 text-gray-400 border border-gray-600/30">
+                  {SIGNAL_LABELS[sig] || sig}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-
-function LedgerRow({ bet }: { bet: any }) {
-  const won = bet.won
-  const pending = Number(bet.finishing_position) === 0
-  const profit = Number(bet.profit)
-  const signalLabel = bet.signal_combo_label
-
+function MetricBox({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm ${
-      won ? 'bg-green-500/5 border border-green-500/20' :
-      pending ? 'bg-gray-800/40 border border-gray-700/30' :
-      'bg-gray-800/30 border border-gray-700/20'
-    }`}>
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        {pending && <Clock className="w-3 h-3 text-yellow-400 flex-shrink-0" />}
-        {won && <CheckCircle className="w-3 h-3 text-green-400 flex-shrink-0" />}
-        {!won && !pending && <XCircle className="w-3 h-3 text-gray-500 flex-shrink-0" />}
-        <span className={`font-medium truncate ${won ? 'text-green-300' : pending ? 'text-white' : 'text-gray-400'}`}>
-          {bet.horse_name}
-        </span>
-        <span className="text-[10px] text-gray-500 flex-shrink-0">
-          {bet.off_time?.substring(0, 5)} {bet.course}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {signalLabel && (
-          <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded max-w-[120px] truncate">
-            {signalLabel}
-          </span>
-        )}
-        <span className="text-xs font-mono text-gray-400">{formatOdds(String(bet.current_odds))}</span>
-        {pending ? (
-          <span className="text-xs text-yellow-400 font-semibold w-16 text-right">£{Number(bet.stake).toFixed(2)}</span>
-        ) : (
-          <span className={`text-xs font-bold w-16 text-right ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {profit >= 0 ? '+' : '-'}£{Math.abs(profit).toFixed(2)}
-          </span>
-        )}
-      </div>
+    <div className={`px-2.5 py-1.5 rounded-lg border ${highlight ? 'bg-purple-500/10 border-purple-500/20' : 'bg-gray-800/50 border-gray-700/30'}`}>
+      <div className="text-[9px] text-gray-500 uppercase">{label}</div>
+      <div className={`text-sm font-bold ${highlight ? 'text-purple-300' : 'text-white'}`}>{value}</div>
     </div>
   )
+}
+
+function fmtPos(p: number | null) {
+  if (!p) return ''
+  if (p === 1) return '1st'
+  if (p === 2) return '2nd'
+  if (p === 3) return '3rd'
+  return `${p}th`
 }

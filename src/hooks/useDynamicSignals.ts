@@ -31,6 +31,18 @@ export interface DynamicMatch {
   finishing_position: number | null
   matching_combos: DynamicCombo[]
   active_signals: string[]
+  rpr: number
+  ts: number
+  ofr: number
+  comment: string
+  trainer_21d_wr: number
+  trainer_course_wr: number
+  jockey_21d_wr: number
+  jockey_dist_wr: number
+  best_speed: number
+  last_speed: number
+  mean_speed: number
+  avg_fp: number
 }
 
 interface ComboScannerResponse {

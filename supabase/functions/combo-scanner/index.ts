@@ -100,6 +100,12 @@ Deno.serve(async (req) => {
       finishing_position: number | null;
       matching_combos: DynCombo[];
       active_signals: string[];
+      rpr: number; ts: number; ofr: number;
+      comment: string;
+      trainer_21d_wr: number; trainer_course_wr: number;
+      jockey_21d_wr: number; jockey_dist_wr: number;
+      best_speed: number; last_speed: number; mean_speed: number;
+      avg_fp: number;
     }
 
     const todayMatches: TodayMatch[] = [];
@@ -132,6 +138,7 @@ Deno.serve(async (req) => {
         if (matchedCombos.length === 0) continue;
         matchedCombos.sort((a, b) => (b.roi_pct || 0) - (a.roi_pct || 0));
 
+        const n = (v: any) => parseFloat(v) || 0;
         todayMatches.push({
           horse_name: entry.horse_name,
           horse_id: entry.horse_id,
@@ -147,6 +154,18 @@ Deno.serve(async (req) => {
           finishing_position: entry.finishing_position ?? null,
           matching_combos: matchedCombos.slice(0, 10),
           active_signals: signals,
+          rpr: n(entry.rpr),
+          ts: n(entry.ts),
+          ofr: n(entry.ofr),
+          comment: entry.comment || '',
+          trainer_21d_wr: n(entry.trainer_21_days_win_percentage),
+          trainer_course_wr: n(entry.trainer_win_percentage_at_course),
+          jockey_21d_wr: n(entry.jockey_21_days_win_percentage),
+          jockey_dist_wr: n(entry.jockey_win_percentage_at_distance),
+          best_speed: Math.max(n(entry.best_speed_figure_on_course_going_distance), n(entry.best_speed_figure_at_distance), n(entry.best_speed_figure_at_track)),
+          last_speed: n(entry.last_speed_figure),
+          mean_speed: n(entry.mean_speed_figure),
+          avg_fp: n(entry.avg_finishing_position),
         });
       }
     }
