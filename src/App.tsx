@@ -21,6 +21,7 @@ import { AdminPage } from '@/pages/AdminPage'
 import { PerformancePage } from '@/pages/PerformancePage'
 import { BankrollPage } from '@/pages/BankrollPage'
 import { MLTrackerPage } from '@/pages/MLTrackerPage'
+import { AutoBetsPage } from '@/pages/AutoBetsPage'
 import './App.css'
 
 const queryClient = new QueryClient({
@@ -78,6 +79,11 @@ function App() {
                   <Route path="/ml-tracker" element={
                     <ProtectedRoute>
                       <MLTrackerPage />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/auto-bets" element={
+                    <ProtectedRoute>
+                      <AutoBetsPage />
                     </ProtectedRoute>
                   } />
                   <Route path="/settings" element={

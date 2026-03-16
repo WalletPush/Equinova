@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { 
-  Home, 
+  CalendarDays,
   Trophy, 
   Settings, 
   Shield, 
@@ -10,7 +10,9 @@ import {
   TrendingUp,
   Menu,
   X,
-  Clock
+  Clock,
+  Zap,
+  Brain,
 } from 'lucide-react'
 
 interface AppLayoutProps {
@@ -20,9 +22,9 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, profile, signOut } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
-  // Live UK clock - ticks every second
   const [ukTime, setUkTime] = useState(() =>
     new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', second: '2-digit' })
   )
@@ -33,15 +35,21 @@ export function AppLayout({ children }: AppLayoutProps) {
     return () => clearInterval(id)
   }, [])
 
+  // Close menu on route change
+  useEffect(() => {
+    setIsMenuOpen(false)
+  }, [location.pathname])
+
   const handleSignOut = async () => {
     await signOut()
     navigate('/')
   }
 
-  const navItems = [
-    { to: '/races', icon: Home, label: 'Dashboard', active: 'races' },
+  const bottomNavItems = [
+    { to: '/races', icon: CalendarDays, label: 'Today', active: 'races' },
+    { to: '/previous', icon: Trophy, label: 'Results', active: 'previous' },
     { to: '/performance', icon: TrendingUp, label: 'Performance', active: 'performance' },
-    { to: '/settings', icon: Settings, label: 'Settings', active: 'settings' },
+    { to: '/auto-bets', icon: Zap, label: 'Auto Bets', active: 'auto-bets' },
   ]
 
   const isAdmin = profile?.role === 'admin'
@@ -76,42 +84,64 @@ export function AppLayout({ children }: AppLayoutProps) {
               {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
             
-            {/* Dropdown Menu */}
             {isMenuOpen && (
-              <div className="absolute right-0 top-12 bg-gray-800 border border-gray-700 rounded-lg shadow-lg min-w-32 z-50">
-                <NavLink
-                  to="/previous"
+              <>
+                {/* Backdrop */}
+                <div
+                  className="fixed inset-0 z-40"
                   onClick={() => setIsMenuOpen(false)}
-                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                >
-                  <Trophy className="w-4 h-4" />
-                  <span>Results</span>
-                </NavLink>
-                {isAdmin && (
-                  <>
-                    <div className="border-t border-gray-700 my-1" />
-                    <NavLink
-                      to="/admin"
-                      onClick={() => setIsMenuOpen(false)}
-                      className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                    >
-                      <Shield className="w-4 h-4" />
-                      <span>Admin</span>
-                    </NavLink>
-                  </>
-                )}
-                <div className="border-t border-gray-700 my-1" />
-                <button
-                  onClick={() => {
-                    setIsMenuOpen(false)
-                    handleSignOut()
-                  }}
-                  className="flex items-center space-x-2 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors w-full text-left"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Logout</span>
-                </button>
-              </div>
+                />
+                {/* Dropdown */}
+                <div className="absolute right-0 top-12 bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-48 z-50">
+                  <NavLink
+                    to="/ml-tracker"
+                    className={({ isActive }) =>
+                      `flex items-center space-x-3 px-4 py-3 transition-colors rounded-t-lg ${
+                        isActive ? 'text-yellow-400 bg-gray-700/50' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                      }`
+                    }
+                  >
+                    <Brain className="w-4 h-4" />
+                    <span>ML Tracker</span>
+                  </NavLink>
+                  <div className="border-t border-gray-700" />
+                  <NavLink
+                    to="/settings"
+                    className={({ isActive }) =>
+                      `flex items-center space-x-3 px-4 py-3 transition-colors ${
+                        isActive ? 'text-yellow-400 bg-gray-700/50' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                      }`
+                    }
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span>Settings</span>
+                  </NavLink>
+                  {isAdmin && (
+                    <>
+                      <div className="border-t border-gray-700" />
+                      <NavLink
+                        to="/admin"
+                        className={({ isActive }) =>
+                          `flex items-center space-x-3 px-4 py-3 transition-colors ${
+                            isActive ? 'text-yellow-400 bg-gray-700/50' : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                          }`
+                        }
+                      >
+                        <Shield className="w-4 h-4" />
+                        <span>Admin</span>
+                      </NavLink>
+                    </>
+                  )}
+                  <div className="border-t border-gray-700" />
+                  <button
+                    onClick={handleSignOut}
+                    className="flex items-center space-x-3 px-4 py-3 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors w-full text-left rounded-b-lg"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Logout</span>
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -123,9 +153,9 @@ export function AppLayout({ children }: AppLayoutProps) {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700">
+      <nav className="fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 z-30">
         <div className="flex items-center justify-around py-2">
-          {navItems.map(({ to, icon: Icon, label, active }) => {
+          {bottomNavItems.map(({ to, icon: Icon, label, active }) => {
             const isActive = location.pathname.includes(active)
             return (
               <NavLink

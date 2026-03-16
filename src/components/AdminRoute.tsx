@@ -21,11 +21,9 @@ export function AdminRoute({ children }: AdminRouteProps) {
     return <Navigate to="/login" replace />
   }
 
-  // For now, allow all authenticated users to access admin (for easier testing)
-  // Later, you can uncomment the role check below:
-  // if (profile?.role !== 'admin') {
-  //   return <Navigate to="/races" replace />
-  // }
+  if (profile?.role !== 'admin') {
+    return <Navigate to="/races" replace />
+  }
 
   return <>{children}</>
 }
