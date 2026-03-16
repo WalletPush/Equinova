@@ -56,34 +56,31 @@ export function AutoBetsPage() {
   const { matches: dynamicMatches, meta, isLoading: loadingSignals } = useDynamicSignals()
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
 
-  const { data: userBets } = useQuery({
+  const { data: userBetsData } = useQuery({
     queryKey: ['user-bets-summary'],
     queryFn: async () => {
       const res = await callSupabaseFunction('get-user-bets', { limit: 500, offset: 0 })
-      const bets = res?.data?.bets ?? []
-      let totalPL = 0
-      let totalStaked = 0
-      let wins = 0
-      let settled = 0
-      for (const b of bets) {
-        const amt = Number(b.bet_amount)
-        totalStaked += amt
-        if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
-        else if (b.status === 'lost') { totalPL -= amt; settled++ }
-      }
-      return {
-        totalBets: bets.length,
-        totalPL,
-        totalStaked,
-        wins,
-        settled,
-        roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
-        winRate: settled > 0 ? (wins / settled) * 100 : 0,
-      }
+      return res?.data?.bets ?? []
     },
     enabled: !!user,
     staleTime: 30_000,
   })
+
+  const userBets = useMemo(() => {
+    const bets = userBetsData ?? []
+    let totalPL = 0, totalStaked = 0, wins = 0, settled = 0
+    for (const b of bets) {
+      const amt = Number(b.bet_amount)
+      totalStaked += amt
+      if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
+      else if (b.status === 'lost') { totalPL -= amt; settled++ }
+    }
+    return {
+      totalBets: bets.length, totalPL, totalStaked, wins, settled,
+      roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
+      winRate: settled > 0 ? (wins / settled) * 100 : 0,
+    }
+  }, [userBetsData])
 
   // Split matches into upcoming and settled
   const { upcomingRaces, settledRaces } = useMemo(() => {
@@ -109,7 +106,14 @@ export function AutoBetsPage() {
     return { upcomingRaces: upcoming, settledRaces: settled }
   }, [dynamicMatches])
 
-  const betsByHorse = new Map<string, any>()
+  const betsByHorse = useMemo(() => {
+    const map = new Map<string, any>()
+    for (const b of userBetsData ?? []) {
+      map.set(`${b.race_id}:${b.horse_id}`, b)
+    }
+    return map
+  }, [userBetsData])
+
   const isLoading = loadingSignals
 
   return (
@@ -448,16 +452,23 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
           )}
           {!needsSetup && (
             <div className="flex-shrink-0">
-              <PlaceBetButton
-                horseName={match.horse_name}
-                horseId={match.horse_id}
-                raceId={match.race_id}
-                raceContext={{ race_id: match.race_id, course_name: match.course, off_time: match.off_time }}
-                odds={match.current_odds}
-                jockeyName={match.jockey}
-                trainerName={match.trainer}
-                size="small"
-              />
+              {bet ? (
+                <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
+                  <CheckCircle className="w-4 h-4" />
+                  Bet Placed
+                </span>
+              ) : (
+                <PlaceBetButton
+                  horseName={match.horse_name}
+                  horseId={match.horse_id}
+                  raceId={match.race_id}
+                  raceContext={{ race_id: match.race_id, course_name: match.course, off_time: match.off_time }}
+                  odds={match.current_odds}
+                  jockeyName={match.jockey}
+                  trainerName={match.trainer}
+                  size="small"
+                />
+              )}
             </div>
           )}
         </div>
