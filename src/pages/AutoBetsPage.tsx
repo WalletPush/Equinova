@@ -5,7 +5,7 @@ import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { BankrollSetupModal } from '@/components/BankrollSetupModal'
-import { supabase } from '@/lib/supabase'
+import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { useDynamicSignals, type DynamicMatch, type DynamicCombo } from '@/hooks/useDynamicSignals'
 import { useBankroll } from '@/hooks/useBankroll'
@@ -56,53 +56,34 @@ export function AutoBetsPage() {
   const { matches: dynamicMatches, meta, isLoading: loadingSignals } = useDynamicSignals()
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
 
-  const { data: todayBets, isLoading: loadingBets } = useQuery({
-    queryKey: ['auto-bets-today', todayUK],
+  const { data: userBets } = useQuery({
+    queryKey: ['user-bets-summary'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('auto_bet_ledger')
-        .select('*')
-        .eq('bet_date', todayUK)
-        .order('id', { ascending: true })
-      if (error) throw error
-      return data || []
-    },
-    staleTime: 30_000,
-  })
-
-  const { data: bankrollSummary } = useQuery({
-    queryKey: ['auto-bet-summary'],
-    queryFn: async () => {
-      const { data: lastBet } = await supabase
-        .from('auto_bet_ledger')
-        .select('bankroll_after')
-        .order('id', { ascending: false })
-        .limit(1)
-      const { data: allBets } = await supabase
-        .from('auto_bet_ledger')
-        .select('profit,stake,won')
-      const totalPL = allBets?.reduce((s, b) => s + Number(b.profit), 0) || 0
-      const totalStaked = allBets?.reduce((s, b) => s + Number(b.stake), 0) || 0
-      const totalWins = allBets?.filter(b => b.won).length || 0
-      const totalBets = allBets?.length || 0
+      const res = await callSupabaseFunction('get-user-bets', { limit: 500, offset: 0 })
+      const bets = res?.data?.bets ?? []
+      let totalPL = 0
+      let totalStaked = 0
+      let wins = 0
+      let settled = 0
+      for (const b of bets) {
+        const amt = Number(b.bet_amount)
+        totalStaked += amt
+        if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
+        else if (b.status === 'lost') { totalPL -= amt; settled++ }
+      }
       return {
-        bankroll: lastBet?.[0] ? Number(lastBet[0].bankroll_after) : 200,
-        totalPL, roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
-        winRate: totalBets > 0 ? (totalWins / totalBets) * 100 : 0,
-        totalBets, totalWins,
+        totalBets: bets.length,
+        totalPL,
+        totalStaked,
+        wins,
+        settled,
+        roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
+        winRate: settled > 0 ? (wins / settled) * 100 : 0,
       }
     },
-    staleTime: 60_000,
+    enabled: !!user,
+    staleTime: 30_000,
   })
-
-  const betsByHorse = useMemo(() => {
-    const map = new Map<string, any>()
-    for (const b of todayBets || []) map.set(`${b.race_id}:${b.horse_id}`, b)
-    return map
-  }, [todayBets])
-
-  const plays = todayBets || []
-  const todayPL = plays.reduce((s, b) => s + Number(b.profit), 0)
 
   // Split matches into upcoming and settled
   const { upcomingRaces, settledRaces } = useMemo(() => {
@@ -128,7 +109,8 @@ export function AutoBetsPage() {
     return { upcomingRaces: upcoming, settledRaces: settled }
   }, [dynamicMatches])
 
-  const isLoading = loadingSignals || loadingBets
+  const betsByHorse = new Map<string, any>()
+  const isLoading = loadingSignals
 
   return (
     <AppLayout>
@@ -165,44 +147,48 @@ export function AutoBetsPage() {
           )}
         </div>
 
-        {/* System summary cards */}
-        {bankrollSummary && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Wallet className="w-3.5 h-3.5 text-yellow-400" />
-                <span className="text-[9px] text-gray-500 uppercase tracking-wider">System Bank</span>
-              </div>
-              <div className="text-lg font-bold text-white">£{bankrollSummary.bankroll.toFixed(2)}</div>
+        {/* Your bankroll summary */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Wallet className="w-3.5 h-3.5 text-yellow-400" />
+              <span className="text-[9px] text-gray-500 uppercase tracking-wider">My Bankroll</span>
             </div>
-            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
-              <div className="flex items-center gap-1.5 mb-1">
-                {bankrollSummary.roi >= 0 ? <TrendingUp className="w-3.5 h-3.5 text-green-400" /> : <Target className="w-3.5 h-3.5 text-red-400" />}
-                <span className="text-[9px] text-gray-500 uppercase tracking-wider">System ROI</span>
-              </div>
-              <div className={`text-lg font-bold ${bankrollSummary.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {bankrollSummary.roi >= 0 ? '+' : ''}{bankrollSummary.roi.toFixed(1)}%
-              </div>
+            <div className="text-lg font-bold text-white">£{bankroll.toFixed(2)}</div>
+          </div>
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              {(userBets?.roi ?? 0) >= 0 ? <TrendingUp className="w-3.5 h-3.5 text-green-400" /> : <Target className="w-3.5 h-3.5 text-red-400" />}
+              <span className="text-[9px] text-gray-500 uppercase tracking-wider">My ROI</span>
             </div>
-            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-[9px] text-gray-500 uppercase tracking-wider">Win Rate</span>
-              </div>
-              <div className="text-lg font-bold text-white">{bankrollSummary.winRate.toFixed(0)}%</div>
-              <div className="text-[10px] text-gray-500">{bankrollSummary.totalWins}W / {bankrollSummary.totalBets}R</div>
-            </div>
-            <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
-              <div className="flex items-center gap-1.5 mb-1">
-                {todayPL >= 0 ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
-                <span className="text-[9px] text-gray-500 uppercase tracking-wider">Today P/L</span>
-              </div>
-              <div className={`text-lg font-bold ${todayPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {todayPL >= 0 ? '+' : '-'}£{Math.abs(todayPL).toFixed(2)}
-              </div>
+            <div className={`text-lg font-bold ${(userBets?.roi ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {(userBets?.totalStaked ?? 0) > 0 ? `${(userBets?.roi ?? 0) >= 0 ? '+' : ''}${(userBets?.roi ?? 0).toFixed(1)}%` : '—'}
             </div>
           </div>
-        )}
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-[9px] text-gray-500 uppercase tracking-wider">Win Rate</span>
+            </div>
+            <div className="text-lg font-bold text-white">
+              {(userBets?.settled ?? 0) > 0 ? `${(userBets?.winRate ?? 0).toFixed(0)}%` : '—'}
+            </div>
+            {(userBets?.totalBets ?? 0) > 0 && (
+              <div className="text-[10px] text-gray-500">{userBets?.wins ?? 0}W / {userBets?.totalBets ?? 0} bets</div>
+            )}
+          </div>
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              {(userBets?.totalPL ?? 0) >= 0 ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+              <span className="text-[9px] text-gray-500 uppercase tracking-wider">P/L</span>
+            </div>
+            <div className={`text-lg font-bold ${(userBets?.totalPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {(userBets?.totalStaked ?? 0) > 0
+                ? `${(userBets?.totalPL ?? 0) >= 0 ? '+' : '-'}£${Math.abs(userBets?.totalPL ?? 0).toFixed(2)}`
+                : '—'}
+            </div>
+          </div>
+        </div>
 
         {/* Loading */}
         {isLoading && (
@@ -264,7 +250,7 @@ export function AutoBetsPage() {
         )}
 
         {/* Performance link */}
-        {(plays.length > 0 || dynamicMatches.length > 0) && (
+        {dynamicMatches.length > 0 && (
           <Link
             to="/performance"
             className="flex items-center justify-between bg-gray-800/60 border border-gray-700 rounded-xl p-4 hover:border-purple-500/30 transition-colors group"
