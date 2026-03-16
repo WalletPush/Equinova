@@ -8,6 +8,7 @@ import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, Race } from '@/lib/supabase'
 import { detectProfitableSignals } from '@/lib/confluenceScore'
 import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
+import { useDynamicSignals } from '@/hooks/useDynamicSignals'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { formatOdds } from '@/lib/odds'
 import { fetchFromSupabaseFunction } from '@/lib/api'
@@ -75,6 +76,7 @@ export function TodaysRacesPage() {
   const [expandedRace, setExpandedRace] = useState<string | null>(null)
   const { openHorseDetail } = useHorseDetail()
   const lifetimeSignalStats = useLifetimeSignalStats()
+  const { matchesByHorse } = useDynamicSignals()
 
   const { data: racesData, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['races', selectedDate, 'today-races'],
@@ -921,7 +923,9 @@ export function TodaysRacesPage() {
                             const profSignals = lifetimeSignalStats
                               ? detectProfitableSignals(entry, race.topEntries!, entryModelPicks, undefined, lifetimeSignalStats, 'lifetime')
                               : []
-                            const hasProfSignal = profSignals.length > 0
+                            const dynMatch = matchesByHorse.get(`${race.race_id}:${entry.horse_id}`)
+                            const dynCombos = dynMatch?.matching_combos ?? []
+                            const hasProfSignal = profSignals.length > 0 || dynCombos.length > 0
 
                             return (
                             <div key={entry.id} className={`py-2.5 px-3 rounded-lg ${
@@ -1028,7 +1032,7 @@ export function TodaysRacesPage() {
                               </div>
                               {hasProfSignal && (
                                 <div className="mt-1.5 ml-9">
-                                  <ProfitableSignalBadges signals={profSignals} compact />
+                                  <ProfitableSignalBadges signals={profSignals} dynamicCombos={dynCombos} compact />
                                 </div>
                               )}
                             </div>
