@@ -100,6 +100,9 @@ Deno.serve(async (req) => {
       finishing_position: number | null;
       matching_combos: DynCombo[];
       active_signals: string[];
+      opening_odds: number;
+      odds_movement: string | null;
+      odds_movement_pct: number | null;
       rpr: number; ts: number; ofr: number;
       comment: string;
       trainer_21d_wr: number; trainer_course_wr: number;
@@ -154,6 +157,21 @@ Deno.serve(async (req) => {
           finishing_position: entry.finishing_position ?? null,
           matching_combos: matchedCombos.slice(0, 10),
           active_signals: signals,
+          opening_odds: n(entry.opening_odds),
+          odds_movement: (() => {
+            const oo = n(entry.opening_odds);
+            const co = n(entry.current_odds);
+            if (oo <= 0 || co <= 0) return null;
+            if (co < oo * 0.97) return 'steaming';
+            if (co > oo * 1.03) return 'drifting';
+            return 'stable';
+          })(),
+          odds_movement_pct: (() => {
+            const oo = n(entry.opening_odds);
+            const co = n(entry.current_odds);
+            if (oo <= 0 || co <= 0) return null;
+            return ((oo - co) / oo) * 100;
+          })(),
           rpr: n(entry.rpr),
           ts: n(entry.ts),
           ofr: n(entry.ofr),

@@ -31,6 +31,9 @@ export interface DynamicMatch {
   finishing_position: number | null
   matching_combos: DynamicCombo[]
   active_signals: string[]
+  opening_odds: number
+  odds_movement: 'steaming' | 'drifting' | 'stable' | null
+  odds_movement_pct: number | null
   rpr: number
   ts: number
   ofr: number

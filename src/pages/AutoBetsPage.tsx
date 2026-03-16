@@ -7,6 +7,7 @@ import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
+import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useDynamicSignals, type DynamicMatch, type DynamicCombo } from '@/hooks/useDynamicSignals'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
@@ -414,7 +415,17 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-500">
             {match.jockey && <span>{match.jockey}</span>}
             {match.trainer && <><span>·</span><span>{match.trainer}</span></>}
-            {odds > 0 && <><span>·</span><span className="text-white font-mono">{formatOdds(String(odds))}</span></>}
+            {odds > 0 && (
+              <>
+                <span>·</span>
+                <span className={`font-mono ${
+                  match.odds_movement === 'steaming' ? 'text-green-400' :
+                  match.odds_movement === 'drifting' ? 'text-red-400' :
+                  'text-white'
+                }`}>{formatOdds(String(odds))}</span>
+              </>
+            )}
+            <MarketMovementBadge movement={match.odds_movement} pct={match.odds_movement_pct} />
           </div>
         </div>
 
