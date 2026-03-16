@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
@@ -8,11 +8,10 @@ import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
-import { useDynamicSignals, type DynamicMatch, type DynamicCombo } from '@/hooks/useDynamicSignals'
+import { useDynamicSignals, type DynamicMatch } from '@/hooks/useDynamicSignals'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
 import {
-  Zap,
   Trophy,
   Clock,
   CheckCircle,
@@ -21,12 +20,8 @@ import {
   Target,
   Wallet,
   ChevronRight,
-  ChevronDown,
-  ChevronUp,
   Brain,
   Sparkles,
-  ShieldCheck,
-  Info,
   Gauge,
   MessageSquare,
   Activity,
@@ -228,10 +223,18 @@ export function AutoBetsPage() {
                 {upcomingRaces.reduce((s, [, r]) => s + r.matches.length, 0)} picks across {upcomingRaces.length} races
               </span>
             </div>
-            <div className="space-y-4">
-              {upcomingRaces.map(([raceId, race]) => (
-                <RaceGroup key={raceId} raceId={raceId} race={race} betsByHorse={betsByHorse} userBankroll={bankroll} needsSetup={needsSetup} />
-              ))}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {upcomingRaces.flatMap(([raceId, race]) =>
+                race.matches.map(match => (
+                  <MatchCard
+                    key={`${raceId}:${match.horse_id}`}
+                    match={match}
+                    bet={betsByHorse.get(`${raceId}:${match.horse_id}`)}
+                    userBankroll={bankroll}
+                    needsSetup={needsSetup}
+                  />
+                ))
+              )}
             </div>
           </div>
         )}
@@ -246,10 +249,19 @@ export function AutoBetsPage() {
                 {settledRaces.reduce((s, [, r]) => s + r.matches.length, 0)} settled
               </span>
             </div>
-            <div className="space-y-4">
-              {settledRaces.map(([raceId, race]) => (
-                <RaceGroup key={raceId} raceId={raceId} race={race} betsByHorse={betsByHorse} userBankroll={bankroll} needsSetup={needsSetup} settled />
-              ))}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {settledRaces.flatMap(([raceId, race]) =>
+                race.matches.map(match => (
+                  <MatchCard
+                    key={`${raceId}:${match.horse_id}`}
+                    match={match}
+                    bet={betsByHorse.get(`${raceId}:${match.horse_id}`)}
+                    userBankroll={bankroll}
+                    needsSetup={needsSetup}
+                    settled
+                  />
+                ))
+              )}
             </div>
           </div>
         )}
@@ -277,65 +289,58 @@ export function AutoBetsPage() {
 
 // ─── Race Group ──────────────────────────────────────────────────────────
 
-function RaceGroup({ raceId, race, betsByHorse, userBankroll, needsSetup, settled }: {
-  raceId: string
-  race: { course: string; off_time: string; race_type: string; matches: DynamicMatch[] }
-  betsByHorse: Map<string, any>
-  userBankroll: number
-  needsSetup: boolean
-  settled?: boolean
-}) {
-  return (
-    <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700/30 bg-gray-800/60">
-        <div className="flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5 text-gray-500" />
-          <span className="text-xs text-white font-semibold">{race.off_time?.substring(0, 5)}</span>
-          <span className="text-xs text-gray-500">·</span>
-          <span className="text-xs text-gray-300">{race.course}</span>
-        </div>
-        <span className="text-[10px] text-gray-500 uppercase">{race.race_type}</span>
-      </div>
-      <div className="divide-y divide-gray-700/20">
-        {race.matches.map(match => (
-          <MatchCard
-            key={match.horse_id}
-            match={match}
-            bet={betsByHorse.get(`${raceId}:${match.horse_id}`)}
-            userBankroll={userBankroll}
-            needsSetup={needsSetup}
-            settled={settled}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
 
-// ─── Confidence Donut ────────────────────────────────────────────────────
+// ─── Confidence Gauge (AI Insider style) ─────────────────────────────────
 
-function ConfidenceDonut({ score }: { score: number }) {
-  const pct = Math.min(score, 100)
-  const r = 16
-  const circ = 2 * Math.PI * r
-  const offset = circ - (pct / 100) * circ
-  const color = pct >= 80 ? '#22c55e' : pct >= 60 ? '#eab308' : pct >= 40 ? '#f97316' : '#ef4444'
+function ConfidenceGauge({ score }: { score: number }) {
+  const radius = 40
+  const stroke = 6
+  const circumference = 2 * Math.PI * radius
+  const progress = (score / 100) * circumference
+  const color = score >= 70 ? '#22c55e' : score >= 50 ? '#eab308' : score >= 30 ? '#f97316' : '#ef4444'
 
   return (
-    <div className="relative w-12 h-12 flex-shrink-0">
-      <svg width="48" height="48" className="-rotate-90">
-        <circle cx="24" cy="24" r={r} fill="none" stroke="#374151" strokeWidth="3" />
-        <circle cx="24" cy="24" r={r} fill="none" stroke={color} strokeWidth="3"
-          strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" />
+    <div className="relative flex items-center justify-center flex-shrink-0">
+      <svg width="96" height="96" viewBox="0 0 96 96">
+        <circle cx="48" cy="48" r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} />
+        <circle cx="48" cy="48" r={radius} fill="none" stroke={color} strokeWidth={stroke}
+          strokeDasharray={`${progress} ${circumference - progress}`}
+          strokeDashoffset={circumference * 0.25}
+          strokeLinecap="round" className="transition-all duration-1000 ease-out" />
       </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-[10px] font-bold text-white">{Math.round(pct)}%</span>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-bold text-white">{Math.round(score)}</span>
+        <span className="text-[9px] text-gray-400 uppercase tracking-wider">Confidence</span>
       </div>
     </div>
   )
 }
 
-// ─── Match Card ──────────────────────────────────────────────────────────
+// ─── Signal Strength Bars ────────────────────────────────────────────────
+
+const SIGNAL_BAR_CONFIG = [
+  { key: 'ratings', label: 'Ratings', icon: Target, color: 'text-blue-400' },
+  { key: 'speed', label: 'Speed', icon: Activity, color: 'text-orange-400' },
+  { key: 'form', label: 'Form', icon: TrendingUp, color: 'text-green-400' },
+  { key: 'connections', label: 'Connections', icon: Brain, color: 'text-purple-400' },
+] as const
+
+function SignalBar({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: string }) {
+  const barColor = value >= 70 ? 'bg-green-500' : value >= 40 ? 'bg-amber-500' : 'bg-gray-600'
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className={`w-3.5 h-3.5 ${color} flex-shrink-0`} />
+      <span className="text-[11px] text-gray-400 w-20 flex-shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${barColor} transition-all duration-700 ease-out`}
+          style={{ width: `${Math.max(2, value)}%` }} />
+      </div>
+      <span className="text-[11px] text-gray-300 w-7 text-right font-mono">{value}</span>
+    </div>
+  )
+}
+
+// ─── Match Card (AI Insider style) ───────────────────────────────────────
 
 function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
   match: DynamicMatch
@@ -344,20 +349,17 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
   needsSetup: boolean
   settled?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const isAutoBet = !!bet
   const odds = match.current_odds || 0
   const fp = match.finishing_position
   const isSettled = fp != null && fp > 0
   const isWinner = fp === 1
+  const hasBet = !!bet
 
-  // Confidence score: weighted average of pattern strength
   const confidence = useMemo(() => {
     const combos = match.matching_combos
     if (!combos.length) return 0
     const statusW: Record<string, number> = { proven: 1.0, strong: 0.7, emerging: 0.4 }
-    let total = 0
-    let weights = 0
+    let total = 0, weights = 0
     for (const c of combos) {
       const w = statusW[c.status] ?? 0.3
       const wrScore = Math.min(c.win_rate / 40, 1) * 40
@@ -369,7 +371,6 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
     return weights > 0 ? Math.min(total / weights, 100) : 0
   }, [match.matching_combos])
 
-  // Kelly wager calculation
   const kellyInfo = useMemo(() => {
     if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
     const best = match.matching_combos[0]
@@ -381,217 +382,204 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
     const fraction = Math.min(kelly / 4, 0.05)
     const stake = Math.round(userBankroll * fraction * 100) / 100
     if (stake < 1) return null
-    return { stake, fraction, edge, patternWR: best.win_rate }
+    return { stake, fraction }
   }, [match.matching_combos, odds, userBankroll])
 
-  return (
-    <div className={`p-4 ${isAutoBet ? 'bg-purple-500/5' : ''} ${isSettled && isWinner ? 'bg-green-500/5' : ''} ${isSettled && !isWinner ? 'opacity-70' : ''}`}>
-      {/* Top row: horse + confidence + result */}
-      <div className="flex items-start gap-3">
-        <ConfidenceDonut score={confidence} />
+  const signalStrengths = useMemo(() => {
+    const sigs = new Set(match.active_signals)
+    const ratingsScore = (sigs.has('top_rpr') ? 35 : 0) + (sigs.has('top_ts') ? 35 : 0) + (sigs.has('top_ofr') ? 20 : 0) + (sigs.has('ratings_consensus') ? 10 : 0)
+    const speedScore = (sigs.has('top_speed_fig') ? 40 : 0) + (sigs.has('speed_standout_10') ? 30 : sigs.has('speed_standout_5') ? 15 : 0) + (sigs.has('improving_form') ? 20 : 0) + (sigs.has('low_avg_fp') ? 10 : 0)
+    const formScore = (sigs.has('cd_winner') ? 30 : 0) + (sigs.has('course_specialist') ? 25 : 0) + (sigs.has('distance_specialist') ? 20 : 0) +
+      (sigs.has('value_1_15') ? 25 : sigs.has('value_1_10') ? 15 : sigs.has('value_1_05') ? 8 : 0)
+    const connectionsScore = (sigs.has('trainer_21d_wr20') ? 30 : sigs.has('trainer_21d_wr15') ? 20 : sigs.has('trainer_21d_wr10') ? 10 : 0) +
+      (sigs.has('trainer_course_wr15') ? 20 : 0) + (sigs.has('jockey_21d_wr15') ? 25 : sigs.has('jockey_21d_wr10') ? 12 : 0) + (sigs.has('jockey_dist_wr15') ? 25 : 0)
+    return {
+      ratings: Math.min(ratingsScore, 100),
+      speed: Math.min(speedScore, 100),
+      form: Math.min(formScore, 100),
+      connections: Math.min(connectionsScore, 100),
+    }
+  }, [match.active_signals])
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+  const borderColor = isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : 'border-purple-500/30'
+
+  return (
+    <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
+      {/* Pattern signals header */}
+      <div className={`px-4 py-3 border-b ${isSettled && isWinner ? 'bg-gradient-to-r from-green-500/15 via-emerald-500/10 to-transparent border-green-500/20' : 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-transparent border-purple-500/20'}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className={`w-4 h-4 ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`} />
+            <span className={`text-xs font-semibold uppercase tracking-wider ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`}>
+              {match.matching_combos.length} Pattern{match.matching_combos.length !== 1 ? 's' : ''} Matched
+            </span>
+          </div>
+          {isSettled && (
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+              isWinner ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+            }`}>
+              {isWinner ? <><CheckCircle className="w-3 h-3" /> WON</> : fmtPos(fp)}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {match.matching_combos.slice(0, 6).map((combo, i) => {
+            const style = STATUS_BADGE[combo.status] || STATUS_BADGE.emerging
+            return (
+              <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${style.bg} ${style.text}`}>
+                <span className="truncate max-w-[130px]">{combo.combo_label}</span>
+                <span className="opacity-50">|</span>
+                <span>{combo.win_rate}% win</span>
+                <span className="opacity-50">|</span>
+                <span>{combo.roi_pct > 0 ? '+' : ''}{combo.roi_pct}%</span>
+                <span className="text-[9px] opacity-50">({combo.total_bets})</span>
+              </span>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="p-4 sm:p-5">
+        {/* Race context */}
+        <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+          <span className="font-medium text-gray-300">{match.course}</span>
+          <span>·</span>
+          <span>{match.off_time?.substring(0, 5)}</span>
+          <span>·</span>
+          <span className="uppercase">{match.race_type}</span>
+        </div>
+
+        <div className="flex gap-4">
+          {/* Left: Gauge */}
+          <ConfidenceGauge score={confidence} />
+
+          {/* Right: Horse info */}
+          <div className="flex-1 min-w-0">
             <HorseNameWithSilk
               horseName={match.horse_name}
               silkUrl={match.silk_url || undefined}
-              className="text-white text-sm font-semibold"
+              className="text-white font-bold text-base"
             />
-            {isAutoBet && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                <ShieldCheck className="w-2.5 h-2.5" />
-                AUTO
-              </span>
-            )}
-            {isSettled && (
-              <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                isWinner ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+
+            <div className="text-xs text-gray-400 mt-1 space-y-0.5">
+              <div className="flex items-center gap-1 flex-wrap">
+                <span>J: {match.jockey}</span>
+                {match.jockey_21d_wr >= 10 && (
+                  <span className="text-[10px] text-green-400">({match.jockey_21d_wr.toFixed(0)}% last 21d)</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 flex-wrap">
+                <span>T: {match.trainer}</span>
+                {match.trainer_course_wr > 0 && (
+                  <span className="text-[10px] text-purple-400">({match.trainer_course_wr.toFixed(0)}% at course)</span>
+                )}
+                {match.trainer_21d_wr >= 10 && (
+                  <span className="text-[10px] text-green-400">({match.trainer_21d_wr.toFixed(0)}% last 21d)</span>
+                )}
+              </div>
+            </div>
+
+            {/* Odds + Market movement */}
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <span className={`text-sm font-bold bg-gray-800 px-2 py-0.5 rounded ${
+                match.odds_movement === 'steaming' ? 'text-green-400' :
+                match.odds_movement === 'drifting' ? 'text-red-400' : 'text-white'
               }`}>
-                {isWinner ? <CheckCircle className="w-2.5 h-2.5" /> : <span>{fmtPos(fp)}</span>}
-                {isWinner ? 'WON' : fmtPos(fp)}
+                {formatOdds(String(odds))}
               </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-500">
-            {match.jockey && <span>{match.jockey}</span>}
-            {match.trainer && <><span>·</span><span>{match.trainer}</span></>}
-            {odds > 0 && (
-              <>
-                <span>·</span>
-                <span className={`font-mono ${
-                  match.odds_movement === 'steaming' ? 'text-green-400' :
-                  match.odds_movement === 'drifting' ? 'text-red-400' :
-                  'text-white'
-                }`}>{formatOdds(String(odds))}</span>
-              </>
-            )}
-            <MarketMovementBadge movement={match.odds_movement} pct={match.odds_movement_pct} />
-          </div>
-        </div>
-
-        {/* Settled P/L or Place Bet */}
-        <div className="flex-shrink-0 text-right">
-          {isSettled && bet ? (
-            <div>
-              <div className={`font-bold text-sm ${Number(bet.profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {Number(bet.profit) >= 0 ? '+' : '-'}£{Math.abs(Number(bet.profit)).toFixed(2)}
-              </div>
-              <div className="text-[10px] text-gray-500">SP: {formatOdds(String(odds))}</div>
-            </div>
-          ) : isSettled ? (
-            <div className="text-[10px] text-gray-500">SP: {formatOdds(String(odds))}</div>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Kelly + Place Bet row */}
-      {!isSettled && (
-        <div className="flex items-center gap-3 mt-3">
-          {kellyInfo && (
-            <div className="flex-1 bg-gray-800/60 border border-gray-700/40 rounded-lg px-3 py-2">
-              <div className="flex items-center gap-1.5">
-                <Gauge className="w-3 h-3 text-yellow-400" />
-                <span className="text-[10px] text-gray-500 uppercase">Kelly Wager</span>
-              </div>
-              <div className="text-sm font-bold text-yellow-400 mt-0.5">
-                £{kellyInfo.stake.toFixed(2)}
-                <span className="text-[10px] text-gray-500 font-normal ml-1">
-                  ({(kellyInfo.fraction * 100).toFixed(1)}% of bank)
+              <MarketMovementBadge movement={match.odds_movement} pct={match.odds_movement_pct} size="md" />
+              {kellyInfo && (
+                <span className="text-xs text-yellow-400 font-medium flex items-center gap-1">
+                  <Gauge className="w-3 h-3" />
+                  Kelly: £{kellyInfo.stake.toFixed(2)}
                 </span>
-              </div>
-            </div>
-          )}
-          {!needsSetup && (
-            <div className="flex-shrink-0">
-              {bet ? (
-                <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
-                  <CheckCircle className="w-4 h-4" />
-                  Bet Placed
-                </span>
-              ) : (
-                <PlaceBetButton
-                  horseName={match.horse_name}
-                  horseId={match.horse_id}
-                  raceId={match.race_id}
-                  raceContext={{ race_id: match.race_id, course_name: match.course, off_time: match.off_time }}
-                  odds={match.current_odds}
-                  jockeyName={match.jockey}
-                  trainerName={match.trainer}
-                  size="small"
-                />
               )}
             </div>
-          )}
+
+            {/* Ratings badges */}
+            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+              {match.rpr > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_rpr') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                  RPR {match.rpr}
+                </span>
+              )}
+              {match.ts > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_ts') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                  TS {match.ts}
+                </span>
+              )}
+              {match.best_speed > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_speed_fig') ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                  SPD {match.best_speed}
+                </span>
+              )}
+              {match.avg_fp > 0 && match.avg_fp <= 4 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.avg_fp <= 3 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                  Avg FP {match.avg_fp.toFixed(1)}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
-      )}
 
-      {/* Pattern badges */}
-      <div className="flex flex-wrap gap-1 mt-2">
-        {match.matching_combos.slice(0, 4).map((combo, i) => {
-          const style = STATUS_BADGE[combo.status] || STATUS_BADGE.emerging
-          return (
-            <span
-              key={i}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${style.bg} ${style.text}`}
-              title={`${combo.total_bets} bets, ${combo.win_rate}% WR, p=${combo.p_value?.toFixed(4) ?? '—'}`}
-            >
-              <span className="truncate max-w-[140px]">{combo.combo_label}</span>
-              <span className="opacity-60">·</span>
-              <span>{combo.win_rate}%</span>
-              <span className="opacity-60">·</span>
-              <span>{combo.roi_pct > 0 ? '+' : ''}{combo.roi_pct}%</span>
-            </span>
-          )
-        })}
-        {match.matching_combos.length > 4 && (
-          <span className="text-[10px] text-gray-500 self-center">+{match.matching_combos.length - 4} more</span>
-        )}
-      </div>
+        {/* Signal breakdown bars */}
+        <div className="mt-4 pt-3 border-t border-gray-800 space-y-1.5">
+          {SIGNAL_BAR_CONFIG.map(cfg => (
+            <SignalBar key={cfg.key} label={cfg.label} value={signalStrengths[cfg.key]} icon={cfg.icon} color={cfg.color} />
+          ))}
+        </div>
 
-      {/* Expand toggle */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1 mt-2 text-[11px] text-gray-500 hover:text-purple-400 transition-colors"
-      >
-        <Info className="w-3 h-3" />
-        {expanded ? 'Hide details' : 'Show details'}
-        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-      </button>
-
-      {/* Expanded metrics */}
-      {expanded && (
-        <div className="mt-3 pt-3 border-t border-gray-700/30 space-y-3">
-          {/* Comment */}
-          {match.comment && (
+        {/* Expert comment */}
+        {match.comment && (
+          <div className="mt-3 pt-3 border-t border-gray-800">
             <div className="flex items-start gap-2">
               <MessageSquare className="w-3.5 h-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-gray-400 italic leading-relaxed">{match.comment}</p>
+              <p className="text-xs text-gray-300 leading-relaxed italic">{match.comment}</p>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Ratings & Speed */}
-          <div className="grid grid-cols-3 gap-2">
-            {match.rpr > 0 && (
-              <MetricBox label="RPR" value={match.rpr.toString()} highlight={match.active_signals.includes('top_rpr')} />
-            )}
-            {match.ts > 0 && (
-              <MetricBox label="TS" value={match.ts.toString()} highlight={match.active_signals.includes('top_ts')} />
-            )}
-            {match.ofr > 0 && (
-              <MetricBox label="OFR" value={match.ofr.toString()} highlight={match.active_signals.includes('top_ofr')} />
-            )}
-            {match.best_speed > 0 && (
-              <MetricBox label="Best Speed" value={match.best_speed.toString()} highlight={match.active_signals.includes('top_speed_fig')} />
-            )}
-            {match.last_speed > 0 && (
-              <MetricBox label="Last Speed" value={match.last_speed.toString()} highlight={match.last_speed > match.mean_speed} />
-            )}
-            {match.avg_fp > 0 && (
-              <MetricBox label="Avg FP" value={match.avg_fp.toFixed(1)} highlight={match.avg_fp <= 3} />
+        {/* Action row: Place Bet / Bet Placed / Result */}
+        <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-between">
+          <div className="flex flex-wrap gap-1">
+            {match.active_signals.slice(0, 6).map(sig => (
+              <span key={sig} className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-700/60 text-gray-400 border border-gray-600/30">
+                {SIGNAL_LABELS[sig] || sig}
+              </span>
+            ))}
+            {match.active_signals.length > 6 && (
+              <span className="text-[9px] text-gray-500 self-center">+{match.active_signals.length - 6}</span>
             )}
           </div>
-
-          {/* Connections */}
-          <div className="grid grid-cols-2 gap-2">
-            {match.trainer_21d_wr > 0 && (
-              <MetricBox label="Trainer 21d WR" value={`${match.trainer_21d_wr.toFixed(0)}%`} highlight={match.trainer_21d_wr >= 15} />
-            )}
-            {match.trainer_course_wr > 0 && (
-              <MetricBox label="Trainer@Course" value={`${match.trainer_course_wr.toFixed(0)}%`} highlight={match.trainer_course_wr >= 15} />
-            )}
-            {match.jockey_21d_wr > 0 && (
-              <MetricBox label="Jockey 21d WR" value={`${match.jockey_21d_wr.toFixed(0)}%`} highlight={match.jockey_21d_wr >= 15} />
-            )}
-            {match.jockey_dist_wr > 0 && (
-              <MetricBox label="Jockey@Distance" value={`${match.jockey_dist_wr.toFixed(0)}%`} highlight={match.jockey_dist_wr >= 15} />
-            )}
-          </div>
-
-          {/* Active signals */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Activity className="w-3 h-3 text-gray-500" />
-              <span className="text-[10px] text-gray-500 uppercase">Active Signals</span>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {match.active_signals.map(sig => (
-                <span key={sig} className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-700/60 text-gray-400 border border-gray-600/30">
-                  {SIGNAL_LABELS[sig] || sig}
-                </span>
-              ))}
-            </div>
+          <div className="flex-shrink-0 ml-3">
+            {isSettled && bet ? (
+              <div className="text-right">
+                <div className={`font-bold text-sm ${Number(bet.potential_return) - Number(bet.bet_amount) >= 0 && bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
+                  {bet.status === 'won' ? '+' : '-'}£{bet.status === 'won' ? (Number(bet.potential_return) - Number(bet.bet_amount)).toFixed(2) : Number(bet.bet_amount).toFixed(2)}
+                </div>
+              </div>
+            ) : isSettled ? (
+              <span className="text-[10px] text-gray-500">SP: {formatOdds(String(odds))}</span>
+            ) : hasBet ? (
+              <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
+                <CheckCircle className="w-4 h-4" />
+                Bet Placed
+              </span>
+            ) : !needsSetup ? (
+              <PlaceBetButton
+                horseName={match.horse_name}
+                horseId={match.horse_id}
+                raceId={match.race_id}
+                raceContext={{ race_id: match.race_id, course_name: match.course, off_time: match.off_time }}
+                odds={match.current_odds}
+                jockeyName={match.jockey}
+                trainerName={match.trainer}
+                size="small"
+              />
+            ) : null}
           </div>
         </div>
-      )}
-    </div>
-  )
-}
-
-function MetricBox({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className={`px-2.5 py-1.5 rounded-lg border ${highlight ? 'bg-purple-500/10 border-purple-500/20' : 'bg-gray-800/50 border-gray-700/30'}`}>
-      <div className="text-[9px] text-gray-500 uppercase">{label}</div>
-      <div className={`text-sm font-bold ${highlight ? 'text-purple-300' : 'text-white'}`}>{value}</div>
+      </div>
     </div>
   )
 }
