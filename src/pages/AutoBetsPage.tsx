@@ -8,7 +8,6 @@ import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
-import { useDynamicSignals, type DynamicMatch } from '@/hooks/useDynamicSignals'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -27,30 +26,87 @@ import {
   Activity,
 } from 'lucide-react'
 
-const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
-  proven:   { bg: 'bg-green-500/20 border-green-500/40', text: 'text-green-400' },
-  strong:   { bg: 'bg-emerald-500/15 border-emerald-500/40', text: 'text-emerald-400' },
-  emerging: { bg: 'bg-amber-500/15 border-amber-500/40', text: 'text-amber-400' },
+interface TopPick {
+  race_id: string
+  horse_id: string
+  horse_name: string
+  course: string
+  off_time: string
+  race_type: string
+  current_odds: number
+  opening_odds: number
+  silk_url: string | null
+  number: number | null
+  jockey: string
+  trainer: string
+  ensemble_proba: number
+  benter_proba: number
+  rf_proba: number
+  xgboost_proba: number
+  rpr: number
+  ts: number
+  ofr: number
+  comment: string
+  best_speed: number
+  avg_fp: number
+  trainer_course_wr: number
+  trainer_21d_wr: number
+  jockey_21d_wr: number
+  jockey_dist_wr: number
+  finishing_position: number | null
+  edge: number
+  implied_prob: number
+  odds_movement: 'steaming' | 'drifting' | 'stable' | null
+  odds_movement_pct: number | null
+  model_agreement: number
 }
 
-const SIGNAL_LABELS: Record<string, string> = {
-  top_rpr: 'Top RPR', top_ts: 'Top TS', top_ofr: 'Top OFR', top_speed_fig: 'Top Speed',
-  ratings_consensus: 'Ratings Consensus', ml_top_pick: 'ML Pick', consensus_2plus: '2+ Models',
-  consensus_3plus: '3+ Models', consensus_4plus: '4+ Models', value_1_05: 'Value 1.05+',
-  value_1_10: 'Value 1.10+', value_1_15: 'Value 1.15+', steaming: 'Steaming',
-  drifting: 'Drifting', cd_winner: 'C&D Winner', course_specialist: 'Course Specialist',
-  distance_specialist: 'Distance Specialist', improving_form: 'Improving', trainer_21d_wr10: 'Trainer Hot',
-  trainer_21d_wr15: 'Trainer 15%+', trainer_21d_wr20: 'Trainer 20%+', trainer_course_wr15: 'Trainer@Course',
-  jockey_21d_wr10: 'Jockey Hot', jockey_21d_wr15: 'Jockey 15%+', jockey_dist_wr15: 'Jockey@Dist',
-  speed_standout_5: 'Speed +5%', speed_standout_10: 'Speed +10%', low_avg_fp: 'Low Avg FP',
-  odds_evs_to_3: 'Short Price', odds_3_to_6: 'Mid Price', odds_6_to_10: 'Each-Way', odds_10_plus: 'Big Price',
-}
+const MIN_EDGE = 0.03
 
 export function AutoBetsPage() {
   const { user } = useAuth()
   const todayUK = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
-  const { matches: dynamicMatches, meta, isLoading: loadingSignals } = useDynamicSignals()
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
+
+  const { data: entriesData, isLoading: loadingEntries } = useQuery({
+    queryKey: ['benter-top-picks', todayUK],
+    queryFn: async () => {
+      const { data: races, error: racesErr } = await supabase
+        .from('races')
+        .select('race_id, off_time, course_name, type, surface')
+        .eq('date', todayUK)
+      if (racesErr) throw racesErr
+      if (!races?.length) return { entries: [], raceMap: {} as Record<string, any> }
+
+      const raceMap: Record<string, any> = {}
+      for (const r of races) raceMap[r.race_id] = r
+
+      const raceIds = races.map(r => r.race_id)
+      let allEntries: any[] = []
+      const batchSize = 50
+      for (let i = 0; i < raceIds.length; i += batchSize) {
+        const batch = raceIds.slice(i, i + batchSize)
+        const { data: entries } = await supabase
+          .from('race_entries')
+          .select([
+            'race_id', 'horse_id', 'horse_name', 'current_odds', 'opening_odds',
+            'silk_url', 'number', 'jockey_name', 'trainer_name',
+            'ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba',
+            'rpr', 'ts', 'ofr', 'comment',
+            'best_speed_figure_at_distance', 'best_speed_figure_at_track',
+            'best_speed_figure_on_course_going_distance',
+            'avg_finishing_position',
+            'trainer_win_percentage_at_course', 'trainer_21_days_win_percentage',
+            'jockey_21_days_win_percentage', 'jockey_win_percentage_at_distance',
+            'finishing_position',
+          ].join(','))
+          .in('race_id', batch)
+        if (entries) allEntries = allEntries.concat(entries)
+      }
+      return { entries: allEntries, raceMap }
+    },
+    staleTime: 30_000,
+  })
 
   const { data: userBetsData } = useQuery({
     queryKey: ['user-bets-summary'],
@@ -78,38 +134,133 @@ export function AutoBetsPage() {
     }
   }, [userBetsData])
 
-  // Split matches into upcoming and settled
-  const { upcomingRaces, settledRaces } = useMemo(() => {
-    const grouped = new Map<string, { course: string; off_time: string; race_type: string; matches: DynamicMatch[] }>()
-    for (const m of dynamicMatches) {
-      if (!grouped.has(m.race_id)) {
-        grouped.set(m.race_id, { course: m.course, off_time: m.off_time, race_type: m.race_type, matches: [] })
-      }
-      grouped.get(m.race_id)!.matches.push(m)
+  const { picks, settledPicks } = useMemo(() => {
+    if (!entriesData?.entries?.length) return { picks: [] as TopPick[], settledPicks: [] as TopPick[] }
+    const { entries, raceMap } = entriesData
+
+    const byRace = new Map<string, any[]>()
+    for (const e of entries) {
+      if (!byRace.has(e.race_id)) byRace.set(e.race_id, [])
+      byRace.get(e.race_id)!.push(e)
     }
 
-    const upcoming: [string, typeof grouped extends Map<string, infer V> ? V : never][] = []
-    const settled: [string, typeof grouped extends Map<string, infer V> ? V : never][] = []
+    const upcoming: TopPick[] = []
+    const settled: TopPick[] = []
 
-    for (const [raceId, race] of grouped) {
-      const allSettled = race.matches.every(m => m.finishing_position != null && m.finishing_position > 0)
-      if (allSettled) {
-        settled.push([raceId, race])
-      } else {
-        const qualified = race.matches.filter(m => {
-          const o = m.current_odds || 0
-          return computeKelly(m, o, bankroll) !== null
-        })
-        if (qualified.length > 0) {
-          upcoming.push([raceId, { ...race, matches: qualified }])
+    for (const [raceId, raceEntries] of byRace) {
+      const race = raceMap[raceId]
+      if (!race) continue
+
+      let bestPick: TopPick | null = null
+
+      for (const e of raceEntries) {
+        const odds = Number(e.current_odds) || 0
+        const ensProba = Number(e.ensemble_proba) || 0
+        if (odds <= 1 || ensProba <= 0) continue
+
+        const impliedProb = 1 / odds
+        const edge = ensProba - impliedProb
+
+        const bestSpeed = Math.max(
+          Number(e.best_speed_figure_on_course_going_distance) || 0,
+          Number(e.best_speed_figure_at_distance) || 0,
+          Number(e.best_speed_figure_at_track) || 0,
+        )
+
+        const openOdds = Number(e.opening_odds) || 0
+        let oddsMovement: 'steaming' | 'drifting' | 'stable' | null = null
+        let oddsMovementPct: number | null = null
+        if (openOdds > 0 && odds > 0) {
+          const pctChange = ((odds - openOdds) / openOdds) * 100
+          oddsMovementPct = Math.abs(pctChange)
+          if (odds < openOdds * 0.85) oddsMovement = 'steaming'
+          else if (odds > openOdds * 1.15) oddsMovement = 'drifting'
+          else oddsMovement = 'stable'
+        }
+
+        let modelAgreement = 0
+        const probas = [
+          Number(e.ensemble_proba) || 0,
+          Number(e.benter_proba) || 0,
+          Number(e.rf_proba) || 0,
+          Number(e.xgboost_proba) || 0,
+        ]
+        for (const p of probas) {
+          if (p > 0) {
+            const isTopInRace = raceEntries.every(
+              (other: any) => (Number(other[Object.keys({ ensemble_proba: 1, benter_proba: 1, rf_proba: 1, xgboost_proba: 1 })[probas.indexOf(p)]) || 0) <= p
+            )
+            if (isTopInRace) modelAgreement++
+          }
+        }
+
+        const probaFields = ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const
+        modelAgreement = 0
+        for (const field of probaFields) {
+          const myVal = Number(e[field]) || 0
+          if (myVal <= 0) continue
+          const isTop = raceEntries.every((other: any) => (Number(other[field]) || 0) <= myVal)
+          if (isTop) modelAgreement++
+        }
+
+        const pick: TopPick = {
+          race_id: raceId,
+          horse_id: e.horse_id,
+          horse_name: e.horse_name || '',
+          course: race.course_name || '',
+          off_time: race.off_time || '',
+          race_type: race.type || '',
+          current_odds: odds,
+          opening_odds: openOdds,
+          silk_url: e.silk_url,
+          number: e.number,
+          jockey: e.jockey_name || '',
+          trainer: e.trainer_name || '',
+          ensemble_proba: ensProba,
+          benter_proba: Number(e.benter_proba) || 0,
+          rf_proba: Number(e.rf_proba) || 0,
+          xgboost_proba: Number(e.xgboost_proba) || 0,
+          rpr: Number(e.rpr) || 0,
+          ts: Number(e.ts) || 0,
+          ofr: Number(e.ofr) || 0,
+          comment: e.comment || '',
+          best_speed: bestSpeed,
+          avg_fp: Number(e.avg_finishing_position) || 0,
+          trainer_course_wr: Number(e.trainer_win_percentage_at_course) || 0,
+          trainer_21d_wr: Number(e.trainer_21_days_win_percentage) || 0,
+          jockey_21d_wr: Number(e.jockey_21_days_win_percentage) || 0,
+          jockey_dist_wr: Number(e.jockey_win_percentage_at_distance) || 0,
+          finishing_position: e.finishing_position ? Number(e.finishing_position) : null,
+          edge,
+          implied_prob: impliedProb,
+          odds_movement: oddsMovement,
+          odds_movement_pct: oddsMovementPct,
+          model_agreement: modelAgreement,
+        }
+
+        if (edge >= MIN_EDGE) {
+          if (!bestPick || edge > bestPick.edge) {
+            bestPick = pick
+          }
+        }
+      }
+
+      if (bestPick) {
+        const fp = bestPick.finishing_position
+        const isSettled = fp != null && fp > 0
+        if (isSettled) {
+          settled.push(bestPick)
+        } else {
+          const kelly = computeKelly(bestPick, bankroll)
+          if (kelly) upcoming.push(bestPick)
         }
       }
     }
 
-    upcoming.sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
-    settled.sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
-    return { upcomingRaces: upcoming, settledRaces: settled }
-  }, [dynamicMatches, bankroll])
+    upcoming.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
+    settled.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
+    return { picks: upcoming, settledPicks: settled }
+  }, [entriesData, bankroll])
 
   const betsByHorse = useMemo(() => {
     const map = new Map<string, any>()
@@ -119,7 +270,7 @@ export function AutoBetsPage() {
     return map
   }, [userBetsData])
 
-  const isLoading = loadingSignals
+  const isLoading = loadingEntries
 
   return (
     <AppLayout>
@@ -133,7 +284,7 @@ export function AutoBetsPage() {
             Top Picks
           </h1>
           <p className="text-gray-400 text-sm mt-1">
-            AI-discovered patterns matched to today's runners
+            Benter model edge picks — one per race, only genuine value
           </p>
         </div>
 
@@ -144,16 +295,11 @@ export function AutoBetsPage() {
             <span className="text-sm font-semibold text-purple-300">How Top Picks Work</span>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
-            Our system tests thousands of signal combinations against historical race data to find patterns that have been
-            <span className="text-green-400 font-medium"> statistically profitable</span>. Only horses with a genuine edge make the cut — if Kelly Criterion
-            doesn't recommend a bet, the horse is excluded. <span className="text-yellow-400 font-medium">Less is more</span>.
-            The <span className="text-purple-300 font-medium">confidence score</span> reflects signal quality and the <span className="text-yellow-400 font-medium">Kelly wager</span> is the mathematically optimal stake.
+            The <span className="text-purple-300 font-medium">Benter model</span> calculates each horse's true win probability
+            and compares it to the market odds. Only horses where the model sees a{' '}
+            <span className="text-green-400 font-medium">genuine edge</span> (probability &gt; implied odds) are shown.
+            One pick per race — the horse with the biggest edge. Kelly Criterion sizes the optimal stake.
           </p>
-          {meta && (
-            <p className="text-[11px] text-gray-500">
-              {meta.combos_available?.toLocaleString()} patterns analysed across {meta.today_entries?.toLocaleString()} entries in {meta.today_races} races today.
-            </p>
-          )}
         </div>
 
         {/* Your bankroll summary */}
@@ -204,79 +350,73 @@ export function AutoBetsPage() {
           <div className="flex justify-center py-12">
             <div className="flex items-center space-x-2">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-400" />
-              <span className="text-gray-400">Scanning patterns...</span>
+              <span className="text-gray-400">Analysing Benter model edges...</span>
             </div>
           </div>
         )}
 
-        {/* No matches */}
-        {!isLoading && upcomingRaces.length === 0 && settledRaces.length === 0 && (
+        {/* No picks */}
+        {!isLoading && picks.length === 0 && settledPicks.length === 0 && (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Brain className="w-8 h-8 text-gray-600" />
             </div>
-            <h3 className="text-lg font-medium text-gray-300 mb-2">No qualified picks today</h3>
+            <h3 className="text-lg font-medium text-gray-300 mb-2">No edge picks today</h3>
             <p className="text-gray-500 text-sm max-w-xs mx-auto">
-              Only horses with a genuine statistical edge are shown. Check back when more races are available.
+              The Benter model hasn't found any horses with a genuine edge over the market. Check back closer to race time.
             </p>
           </div>
         )}
 
-        {/* Upcoming / Live */}
-        {!isLoading && upcomingRaces.length > 0 && (
+        {/* Upcoming */}
+        {!isLoading && picks.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Clock className="w-4 h-4 text-purple-400" />
               <h2 className="text-sm font-semibold text-purple-400 uppercase tracking-wider">Upcoming</h2>
               <span className="text-xs text-gray-500">
-                {upcomingRaces.reduce((s, [, r]) => s + r.matches.length, 0)} picks across {upcomingRaces.length} races
+                {picks.length} {picks.length === 1 ? 'pick' : 'picks'} — one per race
               </span>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              {upcomingRaces.flatMap(([raceId, race]) =>
-                race.matches.map(match => (
-                  <MatchCard
-                    key={`${raceId}:${match.horse_id}`}
-                    match={match}
-                    bet={betsByHorse.get(`${raceId}:${match.horse_id}`)}
-                    userBankroll={bankroll}
-                    needsSetup={needsSetup}
-                  />
-                ))
-              )}
+              {picks.map(pick => (
+                <PickCard
+                  key={`${pick.race_id}:${pick.horse_id}`}
+                  pick={pick}
+                  bet={betsByHorse.get(`${pick.race_id}:${pick.horse_id}`)}
+                  userBankroll={bankroll}
+                  needsSetup={needsSetup}
+                />
+              ))}
             </div>
           </div>
         )}
 
         {/* Settled Results */}
-        {!isLoading && settledRaces.length > 0 && (
+        {!isLoading && settledPicks.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Trophy className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Results</h2>
-              <span className="text-xs text-gray-500">
-                {settledRaces.reduce((s, [, r]) => s + r.matches.length, 0)} settled
-              </span>
+              <span className="text-xs text-gray-500">{settledPicks.length} settled</span>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              {settledRaces.flatMap(([raceId, race]) =>
-                race.matches.map(match => (
-                  <MatchCard
-                    key={`${raceId}:${match.horse_id}`}
-                    match={match}
-                    bet={betsByHorse.get(`${raceId}:${match.horse_id}`)}
-                    userBankroll={bankroll}
-                    needsSetup={needsSetup}
-                    settled
-                  />
-                ))
-              )}
+              {settledPicks.map(pick => (
+                <PickCard
+                  key={`${pick.race_id}:${pick.horse_id}`}
+                  pick={pick}
+                  bet={betsByHorse.get(`${pick.race_id}:${pick.horse_id}`)}
+                  userBankroll={bankroll}
+                  needsSetup={needsSetup}
+                  settled
+                />
+              ))}
             </div>
           </div>
         )}
 
         {/* Performance link */}
-        {dynamicMatches.length > 0 && (
+        {(picks.length > 0 || settledPicks.length > 0) && (
           <Link
             to="/performance"
             className="flex items-center justify-between bg-gray-800/60 border border-gray-700 rounded-xl p-4 hover:border-purple-500/30 transition-colors group"
@@ -296,17 +436,31 @@ export function AutoBetsPage() {
   )
 }
 
-// ─── Race Group ──────────────────────────────────────────────────────────
+// ─── Kelly Criterion — uses Benter ensemble_proba ────────────────────────
 
+function computeKelly(pick: TopPick, userBankroll: number) {
+  const { ensemble_proba, current_odds: odds } = pick
+  if (odds <= 1 || userBankroll <= 0 || ensemble_proba <= 0) return null
+  const implied = 1 / odds
+  const edge = ensemble_proba - implied
+  if (edge <= 0.01) return null
+  const kelly = edge / (odds - 1)
+  const fraction = Math.min(kelly / 4, 0.03)
+  const stake = Math.round(userBankroll * fraction * 100) / 100
+  if (stake < 1) return null
+  return { stake, fraction, edge }
+}
 
-// ─── Confidence Gauge (AI Insider style) ─────────────────────────────────
+// ─── Edge Gauge ─────────────────────────────────────────────────────────
 
-function ConfidenceGauge({ score }: { score: number }) {
+function EdgeGauge({ edge, impliedProb, benterProba }: { edge: number; impliedProb: number; benterProba: number }) {
+  const edgePct = (edge * 100).toFixed(1)
   const radius = 40
   const stroke = 6
   const circumference = 2 * Math.PI * radius
-  const progress = (score / 100) * circumference
-  const color = score >= 60 ? '#22c55e' : score >= 40 ? '#eab308' : score >= 25 ? '#f97316' : '#ef4444'
+  const normScore = Math.min(edge / 0.30, 1) * 100
+  const progress = (normScore / 100) * circumference
+  const color = edge >= 0.15 ? '#22c55e' : edge >= 0.08 ? '#eab308' : '#f97316'
 
   return (
     <div className="relative flex items-center justify-center flex-shrink-0">
@@ -318,132 +472,60 @@ function ConfidenceGauge({ score }: { score: number }) {
           strokeLinecap="round" className="transition-all duration-1000 ease-out" />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold text-white">{Math.round(score)}</span>
-        <span className="text-[9px] text-gray-400 uppercase tracking-wider">Confidence</span>
+        <span className="text-xl font-bold text-white">+{edgePct}%</span>
+        <span className="text-[9px] text-gray-400 uppercase tracking-wider">Edge</span>
       </div>
     </div>
   )
 }
 
-// ─── Signal Strength Bars ────────────────────────────────────────────────
+// ─── Model Agreement Indicator ──────────────────────────────────────────
 
-const SIGNAL_BAR_CONFIG = [
-  { key: 'ratings', label: 'Ratings', icon: Target, color: 'text-blue-400' },
-  { key: 'speed', label: 'Speed', icon: Activity, color: 'text-orange-400' },
-  { key: 'form', label: 'Form', icon: TrendingUp, color: 'text-green-400' },
-  { key: 'connections', label: 'Connections', icon: Brain, color: 'text-purple-400' },
-] as const
-
-function SignalBar({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: string }) {
-  const barColor = value >= 70 ? 'bg-green-500' : value >= 40 ? 'bg-amber-500' : 'bg-gray-600'
+function ModelAgreement({ count }: { count: number }) {
+  const dots = [
+    { label: 'Benter', active: count >= 1 },
+    { label: 'LGBM', active: count >= 2 },
+    { label: 'RF', active: count >= 3 },
+    { label: 'XGB', active: count >= 4 },
+  ]
   return (
-    <div className="flex items-center gap-2">
-      <Icon className={`w-3.5 h-3.5 ${color} flex-shrink-0`} />
-      <span className="text-[11px] text-gray-400 w-20 flex-shrink-0">{label}</span>
-      <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${barColor} transition-all duration-700 ease-out`}
-          style={{ width: `${Math.max(2, value)}%` }} />
-      </div>
-      <span className="text-[11px] text-gray-300 w-7 text-right font-mono">{value}</span>
+    <div className="flex items-center gap-1">
+      {dots.map((d, i) => (
+        <div key={i} className={`w-2 h-2 rounded-full ${d.active ? 'bg-green-400' : 'bg-gray-700'}`}
+          title={`${d.label}: ${d.active ? 'Top pick' : 'Not top pick'}`} />
+      ))}
+      <span className="text-[10px] text-gray-500 ml-1">{count}/4 models agree</span>
     </div>
   )
 }
 
-// ─── Kelly Criterion Calculator ─────────────────────────────────────────
+// ─── Pick Card ──────────────────────────────────────────────────────────
 
-function computeKelly(match: DynamicMatch, odds: number, userBankroll: number) {
-  if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
-  const implied = 1 / odds
-  const rawWR = match.matching_combos[0].win_rate / 100
-  const cappedWR = Math.min(rawWR, implied * 3, 0.5)
-  const edge = cappedWR - implied
-  if (edge <= 0.01) return null
-  const kelly = edge / (odds - 1)
-  const fraction = Math.min(kelly / 4, 0.03)
-  const stake = Math.round(userBankroll * fraction * 100) / 100
-  if (stake < 1) return null
-  return { stake, fraction }
-}
-
-// ─── Match Card (AI Insider style) ───────────────────────────────────────
-
-function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
-  match: DynamicMatch
+function PickCard({ pick, bet, userBankroll, needsSetup, settled }: {
+  pick: TopPick
   bet: any | null
   userBankroll: number
   needsSetup: boolean
   settled?: boolean
 }) {
-  const odds = match.current_odds || 0
-  const fp = match.finishing_position
+  const fp = pick.finishing_position
   const isSettled = fp != null && fp > 0
   const isWinner = fp === 1
   const hasBet = !!bet
 
-  const confidence = useMemo(() => {
-    const combos = match.matching_combos
-    if (!combos.length || odds <= 1) return 0
-    const sigs = new Set(match.active_signals)
-
-    // Signal dimension score: based on the horse's actual data quality
-    let dimScore = 0
-    if (sigs.has('top_rpr') || sigs.has('top_ts') || sigs.has('top_ofr')) dimScore += 20
-    if (sigs.has('top_speed_fig') || sigs.has('speed_standout_10')) dimScore += 15
-    else if (sigs.has('speed_standout_5')) dimScore += 8
-    if (sigs.has('cd_winner') || sigs.has('course_specialist')) dimScore += 15
-    else if (sigs.has('distance_specialist')) dimScore += 8
-    if (sigs.has('trainer_21d_wr15') || sigs.has('trainer_21d_wr20')) dimScore += 10
-    else if (sigs.has('trainer_21d_wr10')) dimScore += 5
-    if (sigs.has('jockey_21d_wr15')) dimScore += 8
-    if (sigs.has('improving_form')) dimScore += 8
-    if (sigs.has('value_1_15')) dimScore += 8
-    else if (sigs.has('value_1_10')) dimScore += 5
-    else if (sigs.has('value_1_05')) dimScore += 3
-
-    // Pattern count bonus (diminishing returns)
-    const patternBonus = Math.min(Math.sqrt(combos.length) * 4, 12)
-
-    // Pattern quality: proven patterns worth more than emerging
-    const provenCount = combos.filter(c => c.status === 'proven').length
-    const strongCount = combos.filter(c => c.status === 'strong').length
-    const qualityBonus = Math.min(provenCount * 3 + strongCount * 1.5, 10)
-
-    // Odds penalty: longshots are inherently less likely to win
-    const oddsPenalty = Math.min(Math.log2(Math.max(odds, 2)) * 6, 45)
-
-    const raw = dimScore + patternBonus + qualityBonus - oddsPenalty
-    return Math.max(5, Math.min(Math.round(raw), 90))
-  }, [match.matching_combos, odds, match.active_signals])
-
-  const kellyInfo = useMemo(() => computeKelly(match, odds, userBankroll), [match, odds, userBankroll])
-
-  const signalStrengths = useMemo(() => {
-    const sigs = new Set(match.active_signals)
-    const ratingsScore = (sigs.has('top_rpr') ? 35 : 0) + (sigs.has('top_ts') ? 35 : 0) + (sigs.has('top_ofr') ? 20 : 0) + (sigs.has('ratings_consensus') ? 10 : 0)
-    const speedScore = (sigs.has('top_speed_fig') ? 40 : 0) + (sigs.has('speed_standout_10') ? 30 : sigs.has('speed_standout_5') ? 15 : 0) + (sigs.has('improving_form') ? 20 : 0) + (sigs.has('low_avg_fp') ? 10 : 0)
-    const formScore = (sigs.has('cd_winner') ? 30 : 0) + (sigs.has('course_specialist') ? 25 : 0) + (sigs.has('distance_specialist') ? 20 : 0) +
-      (sigs.has('value_1_15') ? 25 : sigs.has('value_1_10') ? 15 : sigs.has('value_1_05') ? 8 : 0)
-    const connectionsScore = (sigs.has('trainer_21d_wr20') ? 30 : sigs.has('trainer_21d_wr15') ? 20 : sigs.has('trainer_21d_wr10') ? 10 : 0) +
-      (sigs.has('trainer_course_wr15') ? 20 : 0) + (sigs.has('jockey_21d_wr15') ? 25 : sigs.has('jockey_21d_wr10') ? 12 : 0) + (sigs.has('jockey_dist_wr15') ? 25 : 0)
-    return {
-      ratings: Math.min(ratingsScore, 100),
-      speed: Math.min(speedScore, 100),
-      form: Math.min(formScore, 100),
-      connections: Math.min(connectionsScore, 100),
-    }
-  }, [match.active_signals])
+  const kellyInfo = useMemo(() => computeKelly(pick, userBankroll), [pick, userBankroll])
 
   const borderColor = isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : 'border-purple-500/30'
 
   return (
     <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
-      {/* Pattern signals header */}
+      {/* Edge header */}
       <div className={`px-4 py-3 border-b ${isSettled && isWinner ? 'bg-gradient-to-r from-green-500/15 via-emerald-500/10 to-transparent border-green-500/20' : 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-transparent border-purple-500/20'}`}>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
-            <Sparkles className={`w-4 h-4 ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`} />
+            <Target className={`w-4 h-4 ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`} />
             <span className={`text-xs font-semibold uppercase tracking-wider ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`}>
-              {match.matching_combos.length} Pattern{match.matching_combos.length !== 1 ? 's' : ''} Matched
+              Benter Edge: +{(pick.edge * 100).toFixed(1)}%
             </span>
           </div>
           {isSettled && (
@@ -454,55 +536,49 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
             </span>
           )}
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {match.matching_combos.slice(0, 6).map((combo, i) => {
-            const style = STATUS_BADGE[combo.status] || STATUS_BADGE.emerging
-            return (
-              <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${style.bg} ${style.text}`}>
-                <span className="truncate max-w-[180px]">{combo.combo_label}</span>
-                <span className="text-[9px] opacity-60 capitalize">{combo.status}</span>
-              </span>
-            )
-          })}
+        <div className="flex items-center gap-3 text-[10px] text-gray-400">
+          <span>Benter: {(pick.ensemble_proba * 100).toFixed(1)}%</span>
+          <span>Market: {(pick.implied_prob * 100).toFixed(1)}%</span>
+          <ModelAgreement count={pick.model_agreement} />
         </div>
       </div>
 
       <div className="p-4 sm:p-5">
         {/* Race context */}
         <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
-          <span className="font-medium text-gray-300">{match.course}</span>
+          <span className="font-medium text-gray-300">{pick.course}</span>
           <span>·</span>
-          <span>{match.off_time?.substring(0, 5)}</span>
+          <span>{pick.off_time?.substring(0, 5)}</span>
           <span>·</span>
-          <span className="uppercase">{match.race_type}</span>
+          <span className="uppercase">{pick.race_type}</span>
         </div>
 
         <div className="flex gap-4">
-          {/* Left: Gauge */}
-          <ConfidenceGauge score={confidence} />
+          {/* Left: Edge Gauge */}
+          <EdgeGauge edge={pick.edge} impliedProb={pick.implied_prob} benterProba={pick.ensemble_proba} />
 
           {/* Right: Horse info */}
           <div className="flex-1 min-w-0">
             <HorseNameWithSilk
-              horseName={match.horse_name}
-              silkUrl={match.silk_url || undefined}
+              horseName={pick.horse_name}
+              silkUrl={pick.silk_url || undefined}
               className="text-white font-bold text-base"
             />
 
             <div className="text-xs text-gray-400 mt-1 space-y-0.5">
               <div className="flex items-center gap-1 flex-wrap">
-                <span>J: {match.jockey}</span>
-                {match.jockey_21d_wr >= 10 && (
-                  <span className="text-[10px] text-green-400">({match.jockey_21d_wr.toFixed(0)}% last 21d)</span>
+                <span>J: {pick.jockey}</span>
+                {pick.jockey_21d_wr >= 10 && (
+                  <span className="text-[10px] text-green-400">({pick.jockey_21d_wr.toFixed(0)}% last 21d)</span>
                 )}
               </div>
               <div className="flex items-center gap-1 flex-wrap">
-                <span>T: {match.trainer}</span>
-                {match.trainer_course_wr > 0 && (
-                  <span className="text-[10px] text-purple-400">({match.trainer_course_wr.toFixed(0)}% at course)</span>
+                <span>T: {pick.trainer}</span>
+                {pick.trainer_course_wr > 0 && (
+                  <span className="text-[10px] text-purple-400">({pick.trainer_course_wr.toFixed(0)}% at course)</span>
                 )}
-                {match.trainer_21d_wr >= 10 && (
-                  <span className="text-[10px] text-green-400">({match.trainer_21d_wr.toFixed(0)}% last 21d)</span>
+                {pick.trainer_21d_wr >= 10 && (
+                  <span className="text-[10px] text-green-400">({pick.trainer_21d_wr.toFixed(0)}% last 21d)</span>
                 )}
               </div>
             </div>
@@ -510,12 +586,12 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
             {/* Odds + Market movement */}
             <div className="flex items-center gap-3 mt-2 flex-wrap">
               <span className={`text-sm font-bold bg-gray-800 px-2 py-0.5 rounded ${
-                match.odds_movement === 'steaming' ? 'text-green-400' :
-                match.odds_movement === 'drifting' ? 'text-red-400' : 'text-white'
+                pick.odds_movement === 'steaming' ? 'text-green-400' :
+                pick.odds_movement === 'drifting' ? 'text-red-400' : 'text-white'
               }`}>
-                {formatOdds(String(odds))}
+                {formatOdds(String(pick.current_odds))}
               </span>
-              <MarketMovementBadge movement={match.odds_movement} pct={match.odds_movement_pct} size="md" />
+              <MarketMovementBadge movement={pick.odds_movement} pct={pick.odds_movement_pct} size="md" />
               {kellyInfo && (
                 <span className="text-xs text-yellow-400 font-medium flex items-center gap-1">
                   <Gauge className="w-3 h-3" />
@@ -526,88 +602,95 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
 
             {/* Ratings badges */}
             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-              {match.rpr > 0 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_rpr') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  RPR {Math.round(match.rpr)}
+              {pick.rpr > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                  RPR {Math.round(pick.rpr)}
                 </span>
               )}
-              {match.ts > 0 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_ts') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  TS {Math.round(match.ts)}
+              {pick.ts > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                  TS {Math.round(pick.ts)}
                 </span>
               )}
-              {match.best_speed > 0 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_speed_fig') ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  SPD {Math.round(match.best_speed)}
+              {pick.best_speed > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                  SPD {Math.round(pick.best_speed)}
                 </span>
               )}
-              {match.avg_fp > 0 && match.avg_fp <= 4 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.avg_fp <= 3 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  Avg FP {Math.round(match.avg_fp)}
+              {pick.avg_fp > 0 && pick.avg_fp <= 4 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                  Avg FP {Math.round(pick.avg_fp)}
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Signal breakdown bars */}
+        {/* Model probabilities breakdown */}
         <div className="mt-4 pt-3 border-t border-gray-800 space-y-1.5">
-          {SIGNAL_BAR_CONFIG.map(cfg => (
-            <SignalBar key={cfg.key} label={cfg.label} value={signalStrengths[cfg.key]} icon={cfg.icon} color={cfg.color} />
-          ))}
+          <ProbBar label="Benter (main)" value={pick.ensemble_proba} color="text-purple-400" icon={Brain} />
+          <ProbBar label="LightGBM" value={pick.benter_proba} color="text-orange-400" icon={Activity} />
+          <ProbBar label="Random Forest" value={pick.rf_proba} color="text-green-400" icon={TrendingUp} />
+          <ProbBar label="XGBoost" value={pick.xgboost_proba} color="text-blue-400" icon={Target} />
         </div>
 
         {/* Expert comment */}
-        {match.comment && (
+        {pick.comment && (
           <div className="mt-3 pt-3 border-t border-gray-800">
             <div className="flex items-start gap-2">
               <MessageSquare className="w-3.5 h-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-gray-300 leading-relaxed italic">{match.comment}</p>
+              <p className="text-xs text-gray-300 leading-relaxed italic">{pick.comment}</p>
             </div>
           </div>
         )}
 
-        {/* Action row: Place Bet / Bet Placed / Result */}
-        <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-between">
-          <div className="flex flex-wrap gap-1">
-            {match.active_signals.slice(0, 6).map(sig => (
-              <span key={sig} className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-700/60 text-gray-400 border border-gray-600/30">
-                {SIGNAL_LABELS[sig] || sig}
-              </span>
-            ))}
-            {match.active_signals.length > 6 && (
-              <span className="text-[9px] text-gray-500 self-center">+{match.active_signals.length - 6}</span>
-            )}
-          </div>
-          <div className="flex-shrink-0 ml-3">
-            {isSettled && bet ? (
-              <div className="text-right">
-                <div className={`font-bold text-sm ${Number(bet.potential_return) - Number(bet.bet_amount) >= 0 && bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
-                  {bet.status === 'won' ? '+' : '-'}£{bet.status === 'won' ? (Number(bet.potential_return) - Number(bet.bet_amount)).toFixed(2) : Number(bet.bet_amount).toFixed(2)}
-                </div>
+        {/* Action row */}
+        <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-end">
+          {isSettled && bet ? (
+            <div className="text-right">
+              <div className={`font-bold text-sm ${Number(bet.potential_return) - Number(bet.bet_amount) >= 0 && bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
+                {bet.status === 'won' ? '+' : '-'}£{bet.status === 'won' ? (Number(bet.potential_return) - Number(bet.bet_amount)).toFixed(2) : Number(bet.bet_amount).toFixed(2)}
               </div>
-            ) : isSettled ? (
-              <span className="text-[10px] text-gray-500">SP: {formatOdds(String(odds))}</span>
-            ) : hasBet ? (
-              <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
-                <CheckCircle className="w-4 h-4" />
-                Bet Placed
-              </span>
-            ) : !needsSetup ? (
-              <PlaceBetButton
-                horseName={match.horse_name}
-                horseId={match.horse_id}
-                raceId={match.race_id}
-                raceContext={{ race_id: match.race_id, course_name: match.course, off_time: match.off_time }}
-                odds={match.current_odds}
-                jockeyName={match.jockey}
-                trainerName={match.trainer}
-                size="small"
-              />
-            ) : null}
-          </div>
+            </div>
+          ) : isSettled ? (
+            <span className="text-[10px] text-gray-500">SP: {formatOdds(String(pick.current_odds))}</span>
+          ) : hasBet ? (
+            <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
+              <CheckCircle className="w-4 h-4" />
+              Bet Placed
+            </span>
+          ) : !needsSetup ? (
+            <PlaceBetButton
+              horseName={pick.horse_name}
+              horseId={pick.horse_id}
+              raceId={pick.race_id}
+              raceContext={{ race_id: pick.race_id, course_name: pick.course, off_time: pick.off_time }}
+              odds={pick.current_odds}
+              jockeyName={pick.jockey}
+              trainerName={pick.trainer}
+              size="small"
+            />
+          ) : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Probability Bar ────────────────────────────────────────────────────
+
+function ProbBar({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: string }) {
+  const pct = Math.round(value * 100)
+  const barColor = value >= 0.3 ? 'bg-green-500' : value >= 0.15 ? 'bg-amber-500' : value > 0 ? 'bg-gray-500' : 'bg-gray-800'
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className={`w-3.5 h-3.5 ${color} flex-shrink-0`} />
+      <span className="text-[11px] text-gray-400 w-24 flex-shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${barColor} transition-all duration-700 ease-out`}
+          style={{ width: `${Math.max(2, Math.min(pct, 100))}%` }} />
+      </div>
+      <span className="text-[11px] text-gray-300 w-8 text-right font-mono">{pct > 0 ? `${pct}%` : '—'}</span>
     </div>
   )
 }
