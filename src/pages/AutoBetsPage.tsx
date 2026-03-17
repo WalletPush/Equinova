@@ -256,6 +256,9 @@ export function AutoBetsPage() {
       }
 
       if (bestPick) {
+        const kelly = computeKelly(bestPick, bankroll)
+        if (!kelly) continue
+
         const offTime = bestPick.off_time || ''
         const [rH, rM] = (offTime.substring(0, 5)).split(':').map(Number)
         const raceMinutes = (rH || 0) * 60 + (rM || 0)
@@ -274,8 +277,7 @@ export function AutoBetsPage() {
           bestPick.finishing_position = pos ?? null
           settled.push(bestPick)
         } else if (!raceFinished) {
-          const kelly = computeKelly(bestPick, bankroll)
-          if (kelly) upcoming.push(bestPick)
+          upcoming.push(bestPick)
         }
       }
     }
