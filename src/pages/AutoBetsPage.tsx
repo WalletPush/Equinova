@@ -61,7 +61,10 @@ interface TopPick {
   model_agreement: number
 }
 
-const MIN_EDGE = 0.03
+const MIN_EDGE = 0.05
+const MAX_ODDS = 12.0
+const MIN_ENSEMBLE_PROBA = 0.15
+const MIN_MODEL_AGREEMENT = 2
 
 export function AutoBetsPage() {
   const { user } = useAuth()
@@ -157,6 +160,8 @@ export function AutoBetsPage() {
         const odds = Number(e.current_odds) || 0
         const ensProba = Number(e.ensemble_proba) || 0
         if (odds <= 1 || ensProba <= 0) continue
+        if (odds > MAX_ODDS) continue
+        if (ensProba < MIN_ENSEMBLE_PROBA) continue
 
         const impliedProb = 1 / odds
         const edge = ensProba - impliedProb
@@ -238,7 +243,7 @@ export function AutoBetsPage() {
           model_agreement: modelAgreement,
         }
 
-        if (edge >= MIN_EDGE) {
+        if (edge >= MIN_EDGE && modelAgreement >= MIN_MODEL_AGREEMENT) {
           if (!bestPick || edge > bestPick.edge) {
             bestPick = pick
           }
@@ -296,9 +301,10 @@ export function AutoBetsPage() {
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
             The <span className="text-purple-300 font-medium">Benter model</span> calculates each horse's true win probability
-            and compares it to the market odds. Only horses where the model sees a{' '}
-            <span className="text-green-400 font-medium">genuine edge</span> (probability &gt; implied odds) are shown.
-            One pick per race — the horse with the biggest edge. Kelly Criterion sizes the optimal stake.
+            and compares it to the market odds. Only horses where{' '}
+            <span className="text-green-400 font-medium">at least 2 models agree</span>, the edge exceeds 5%,
+            odds are under 12/1, and Benter probability is at least 15% are shown.
+            One pick per race. Kelly Criterion sizes the optimal stake.
           </p>
         </div>
 
