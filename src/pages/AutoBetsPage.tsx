@@ -297,7 +297,7 @@ function ConfidenceGauge({ score }: { score: number }) {
   const stroke = 6
   const circumference = 2 * Math.PI * radius
   const progress = (score / 100) * circumference
-  const color = score >= 70 ? '#22c55e' : score >= 50 ? '#eab308' : score >= 30 ? '#f97316' : '#ef4444'
+  const color = score >= 60 ? '#22c55e' : score >= 40 ? '#eab308' : score >= 25 ? '#f97316' : '#ef4444'
 
   return (
     <div className="relative flex items-center justify-center flex-shrink-0">
@@ -357,29 +357,51 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
 
   const confidence = useMemo(() => {
     const combos = match.matching_combos
-    if (!combos.length) return 0
-    const statusW: Record<string, number> = { proven: 1.0, strong: 0.7, emerging: 0.4 }
-    let total = 0, weights = 0
-    for (const c of combos) {
-      const w = statusW[c.status] ?? 0.3
-      const wrScore = Math.min(c.win_rate / 40, 1) * 40
-      const roiScore = Math.min(c.roi_pct / 200, 1) * 30
-      const countBonus = Math.min(combos.length / 5, 1) * 30
-      total += (wrScore + roiScore + countBonus) * w
-      weights += w
-    }
-    return weights > 0 ? Math.min(total / weights, 100) : 0
-  }, [match.matching_combos])
+    if (!combos.length || odds <= 1) return 0
+    const sigs = new Set(match.active_signals)
+
+    // Signal dimension score: based on the horse's actual data quality
+    let dimScore = 0
+    if (sigs.has('top_rpr') || sigs.has('top_ts') || sigs.has('top_ofr')) dimScore += 20
+    if (sigs.has('top_speed_fig') || sigs.has('speed_standout_10')) dimScore += 15
+    else if (sigs.has('speed_standout_5')) dimScore += 8
+    if (sigs.has('cd_winner') || sigs.has('course_specialist')) dimScore += 15
+    else if (sigs.has('distance_specialist')) dimScore += 8
+    if (sigs.has('trainer_21d_wr15') || sigs.has('trainer_21d_wr20')) dimScore += 10
+    else if (sigs.has('trainer_21d_wr10')) dimScore += 5
+    if (sigs.has('jockey_21d_wr15')) dimScore += 8
+    if (sigs.has('improving_form')) dimScore += 8
+    if (sigs.has('value_1_15')) dimScore += 8
+    else if (sigs.has('value_1_10')) dimScore += 5
+    else if (sigs.has('value_1_05')) dimScore += 3
+
+    // Pattern count bonus (diminishing returns)
+    const patternBonus = Math.min(Math.sqrt(combos.length) * 4, 12)
+
+    // Pattern quality: proven patterns worth more than emerging
+    const provenCount = combos.filter(c => c.status === 'proven').length
+    const strongCount = combos.filter(c => c.status === 'strong').length
+    const qualityBonus = Math.min(provenCount * 3 + strongCount * 1.5, 10)
+
+    // Odds penalty: longshots are inherently less likely to win
+    const oddsPenalty = Math.min(Math.log2(Math.max(odds, 2)) * 6, 45)
+
+    const raw = dimScore + patternBonus + qualityBonus - oddsPenalty
+    return Math.max(5, Math.min(Math.round(raw), 90))
+  }, [match.matching_combos, odds, match.active_signals])
 
   const kellyInfo = useMemo(() => {
     if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
-    const best = match.matching_combos[0]
-    const patternWR = best.win_rate / 100
     const implied = 1 / odds
-    const edge = patternWR - implied
-    if (edge <= 0) return null
+    // Use a conservative estimate: cap pattern WR at 3x implied probability
+    // to guard against overfitted historical data
+    const rawWR = match.matching_combos[0].win_rate / 100
+    const cappedWR = Math.min(rawWR, implied * 3, 0.5)
+    const edge = cappedWR - implied
+    if (edge <= 0.01) return null
     const kelly = edge / (odds - 1)
-    const fraction = Math.min(kelly / 4, 0.05)
+    // Quarter-Kelly for safety, max 3% of bankroll
+    const fraction = Math.min(kelly / 4, 0.03)
     const stake = Math.round(userBankroll * fraction * 100) / 100
     if (stake < 1) return null
     return { stake, fraction }
