@@ -523,7 +523,8 @@ function computeKelly(pick: TopPick, userBankroll: number) {
   if (edge <= 0.01) return null
   const kelly = edge / (odds - 1)
   const fraction = Math.min(kelly / 4, 0.03)
-  const stake = Math.round(userBankroll * fraction * 100) / 100
+  const rawStake = userBankroll * fraction
+  const stake = Math.round(rawStake * 2) / 2
   if (stake < 1) return null
   return { stake, fraction, edge }
 }
