@@ -97,7 +97,7 @@ export function AutoBetsPage() {
         settled.push([raceId, race])
       } else {
         const qualified = race.matches.filter(m => {
-          const o = parseFloat(String(m.odds)) || 0
+          const o = m.current_odds || 0
           return computeKelly(m, o, bankroll) !== null
         })
         if (qualified.length > 0) {
