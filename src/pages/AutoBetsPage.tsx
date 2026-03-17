@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
@@ -10,7 +10,7 @@ import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
-import { getUKTime } from '@/lib/dateUtils'
+import { getUKTime, getUKDate } from '@/lib/dateUtils'
 import {
   Trophy,
   Clock,
@@ -19,12 +19,14 @@ import {
   TrendingUp,
   Target,
   Wallet,
+  ChevronLeft,
   ChevronRight,
   Brain,
   Sparkles,
   Gauge,
   MessageSquare,
   Activity,
+  Calendar,
 } from 'lucide-react'
 
 interface TopPick {
@@ -69,16 +71,35 @@ const MIN_MODEL_AGREEMENT = 2
 
 export function AutoBetsPage() {
   const { user } = useAuth()
-  const todayUK = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+  const ukToday = getUKDate()
+  const [selectedDate, setSelectedDate] = useState(ukToday)
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
 
+  const goToPreviousDay = () => {
+    const d = new Date(selectedDate + 'T12:00:00')
+    d.setDate(d.getDate() - 1)
+    setSelectedDate(d.toLocaleDateString('en-CA'))
+  }
+  const goToNextDay = () => {
+    if (selectedDate < ukToday) {
+      const d = new Date(selectedDate + 'T12:00:00')
+      d.setDate(d.getDate() + 1)
+      setSelectedDate(d.toLocaleDateString('en-CA'))
+    }
+  }
+  const canGoNext = selectedDate < ukToday
+  const formatDate = (ds: string) =>
+    new Date(ds + 'T12:00:00').toLocaleDateString('en-GB', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    })
+
   const { data: entriesData, isLoading: loadingEntries } = useQuery({
-    queryKey: ['benter-top-picks', todayUK],
+    queryKey: ['benter-top-picks', selectedDate],
     queryFn: async () => {
       const { data: races, error: racesErr } = await supabase
         .from('races')
         .select('race_id, off_time, course_name, type, surface')
-        .eq('date', todayUK)
+        .eq('date', selectedDate)
       if (racesErr) throw racesErr
       if (!races?.length) return { entries: [], raceMap: {} as Record<string, any> }
 
@@ -158,6 +179,7 @@ export function AutoBetsPage() {
     if (!entriesData?.entries?.length) return { picks: [] as TopPick[], settledPicks: [] as TopPick[] }
     const { entries, raceMap, resultsByRace } = entriesData
 
+    const isPastDate = selectedDate < ukToday
     const ukTime = getUKTime()
     const [curH, curM] = ukTime.split(':').map(Number)
     const curMinutes = curH * 60 + curM
@@ -263,7 +285,7 @@ export function AutoBetsPage() {
         const [rH, rM] = (offTime.substring(0, 5)).split(':').map(Number)
         const raceMinutes = (rH || 0) * 60 + (rM || 0)
         const hasResults = !!resultsByRace[bestPick.race_id]
-        const raceFinished = raceMinutes > 0 && (curMinutes - raceMinutes) > 10
+        const raceFinished = isPastDate || (raceMinutes > 0 && (curMinutes - raceMinutes) > 10)
 
         if (hasResults && raceFinished) {
           const racePositions = resultsByRace[bestPick.race_id]
@@ -285,7 +307,7 @@ export function AutoBetsPage() {
     upcoming.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     settled.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     return { picks: upcoming, settledPicks: settled }
-  }, [entriesData, bankroll])
+  }, [entriesData, bankroll, selectedDate, ukToday])
 
   const betsByHorse = useMemo(() => {
     const map = new Map<string, any>()
@@ -311,6 +333,35 @@ export function AutoBetsPage() {
           <p className="text-gray-400 text-sm mt-1">
             Benter model edge picks — one per race, only genuine value
           </p>
+        </div>
+
+        {/* Date selector */}
+        <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-3">
+          <div className="flex items-center justify-between">
+            <button onClick={goToPreviousDay} className="p-2 text-gray-400 hover:text-white transition-colors">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-white flex items-center gap-2 justify-center">
+                <Calendar className="w-4 h-4 text-purple-400" />
+                {formatDate(selectedDate)}
+              </div>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                max={ukToday}
+                className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1 text-white text-xs mt-1 focus:border-purple-400 focus:ring-1 focus:ring-purple-400"
+              />
+            </div>
+            <button
+              onClick={goToNextDay}
+              disabled={!canGoNext}
+              className={`p-2 transition-colors ${canGoNext ? 'text-gray-400 hover:text-white' : 'text-gray-600 cursor-not-allowed'}`}
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* How it works banner */}
