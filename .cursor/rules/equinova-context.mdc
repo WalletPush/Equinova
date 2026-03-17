@@ -55,7 +55,7 @@ Two separate codebases work together:
 | `train_random_forest_v2.py` | Trains Random Forest per segment |
 | `train_benter_v2.py` | Trains Benter two-stage model (Conditional Logit + Market Integration) |
 | `update_live_odds.py` | Fetches live odds from Racing API and updates `current_odds` in Supabase |
-| `odds_updater_loop.py` | Runs `update_live_odds.py` every 30 min during UK racing hours (10:00–21:00) |
+| `odds_updater_loop.py` | Pre-race odds snapper — pulls today's schedule, then fires `update_live_odds.py` 5 minutes before each race off-time |
 | `retrain_v2_with_recent.py` | Fast retraining orchestrator (reuses stored hyperparams, no Optuna) |
 | `backfill_prediction_ledger.py` | Rebuilds prediction_ledger.db from all daily .db files |
 | `training_utils.py` | Shared utilities: data loading, feature selection, preprocessing, calibration, evaluation |
@@ -124,8 +124,8 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 ## Market Movement Architecture
 
 - `opening_odds` is set on first push via `push_to_supabase.py` and protected by a DB trigger (`trg_preserve_opening_odds`) that prevents overwriting on UPDATE
-- `current_odds` is updated every 30 minutes during UK racing hours (10:00–21:00) by `update_live_odds.py` (fetches live odds from Racing API)
-- `odds_updater_loop.py` runs as a background process launched by the daily runner
+- `current_odds` is updated 5 minutes before each race off-time by `update_live_odds.py` (fetches live odds from Racing API), capturing late money movements
+- `odds_updater_loop.py` pulls today's race schedule from Supabase at startup, then sleeps until 5 min before each race and fires the odds pull — launched by the daily runner as a background process
 - `race-data` edge function computes market movement inline: `opening_odds` vs `current_odds` → steaming/drifting/stable
 - Top Picks page also computes movement directly from `race_entries.opening_odds` vs `current_odds`
 - The `horse_market_movement` Supabase table is legacy — no longer used for market movement display

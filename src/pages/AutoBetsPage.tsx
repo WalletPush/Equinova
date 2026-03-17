@@ -317,6 +317,23 @@ export function AutoBetsPage() {
     return map
   }, [userBetsData])
 
+  const settledSummary = useMemo(() => {
+    if (!settledPicks.length) return null
+    let wins = 0, losses = 0, dayPL = 0
+    for (const p of settledPicks) {
+      const kelly = computeKelly(p, bankroll)
+      const stake = kelly?.stake ?? 0
+      if (p.finishing_position === 1) {
+        wins++
+        dayPL += stake * (p.current_odds - 1)
+      } else {
+        losses++
+        dayPL -= stake
+      }
+    }
+    return { wins, losses, dayPL }
+  }, [settledPicks, bankroll])
+
   const isLoading = loadingEntries
 
   return (
@@ -472,10 +489,24 @@ export function AutoBetsPage() {
         {/* Settled Results */}
         {!isLoading && settledPicks.length > 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <Trophy className="w-4 h-4 text-gray-400" />
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Results</h2>
-              <span className="text-xs text-gray-500">{settledPicks.length} settled</span>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-gray-400" />
+                <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Results</h2>
+                <span className="text-xs text-gray-500">{settledPicks.length} settled</span>
+              </div>
+              {settledSummary && (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium">
+                    <span className="text-green-400">{settledSummary.wins}W</span>
+                    <span className="text-gray-600 mx-1">/</span>
+                    <span className="text-red-400">{settledSummary.losses}L</span>
+                  </span>
+                  <span className={`text-sm font-bold ${settledSummary.dayPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {settledSummary.dayPL >= 0 ? '+' : '-'}£{Math.abs(settledSummary.dayPL).toFixed(2)}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               {settledPicks.map(pick => (
