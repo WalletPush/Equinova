@@ -221,6 +221,10 @@ export function TodaysRacesPage() {
     return sorted
   }, [racesData, isToday])
 
+  // ── User bankroll + bets ───────────────────────────────────────
+  const { user } = useAuth()
+  const { bankroll } = useBankroll()
+
   // ── Value Bet Scanner ──────────────────────────────────────────────
   const [showValueScan, setShowValueScan] = useState(false)
 
@@ -235,63 +239,84 @@ export function TodaysRacesPage() {
     silk_url: string
     number: number
     current_odds: number
-    normProb: number
+    ensembleProba: number
     impliedProb: number
     edge: number
-    valueScore: number
+    modelAgreement: number
+    kellyStake: number
     entry: any
   }
 
   const valueBets = useMemo<ValueBetResult[]>(() => {
     if (!races.length) return []
 
+    const MIN_EDGE = 0.05
+    const MAX_ODDS = 12.0
+    const MIN_ENSEMBLE_PROBA = 0.15
+    const MIN_MODEL_AGREEMENT = 2
+
     const results: ValueBetResult[] = []
 
     for (const race of races) {
       if (!race.topEntries?.length) continue
 
-      // Normalize ensemble proba across this race's field
-      const normMap = normalizeField(race.topEntries, 'ensemble_proba', 'horse_id')
+      let bestPick: ValueBetResult | null = null
 
       for (const entry of race.topEntries) {
-        const odds = Number(entry.current_odds)
-        if (!odds || odds <= 0 || !entry.ensemble_proba || entry.ensemble_proba <= 0) continue
+        const odds = Number(entry.current_odds) || 0
+        const ens = Number(entry.ensemble_proba) || 0
+        if (odds <= 1 || ens <= 0 || odds > MAX_ODDS || ens < MIN_ENSEMBLE_PROBA) continue
 
-        const normProb = normMap.get(String(entry.horse_id)) ?? 0
         const impliedProb = 1 / odds
-        const edge = normProb - impliedProb
-        const valueScore = normProb * odds
+        const edge = ens - impliedProb
+        if (edge < MIN_EDGE) continue
 
-        if (valueScore > 1.05) {
-          results.push({
-            horse_name: entry.horse_name,
-            horse_id: entry.horse_id,
-            race_id: race.race_id,
-            course_name: race.course_name,
-            off_time: race.off_time,
-            jockey_name: entry.jockey_name,
-            trainer_name: entry.trainer_name,
-            silk_url: entry.silk_url,
-            number: entry.number,
-            current_odds: odds,
-            normProb,
-            impliedProb,
-            edge,
-            valueScore,
-            entry,
-          })
+        let modelAgreement = 0
+        for (const field of ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const) {
+          const myVal = Number(entry[field]) || 0
+          if (myVal <= 0) continue
+          const isTop = race.topEntries.every((other: any) => (Number(other[field]) || 0) <= myVal)
+          if (isTop) modelAgreement++
+        }
+        if (modelAgreement < MIN_MODEL_AGREEMENT) continue
+
+        const kelly = edge / (odds - 1)
+        const fraction = Math.min(kelly / 4, 0.03)
+        const rawStake = bankroll * fraction
+        const stake = Math.round(rawStake * 2) / 2
+        if (stake < 1 || bankroll <= 0) continue
+
+        const pick: ValueBetResult = {
+          horse_name: entry.horse_name,
+          horse_id: entry.horse_id,
+          race_id: race.race_id,
+          course_name: race.course_name,
+          off_time: race.off_time,
+          jockey_name: entry.jockey_name,
+          trainer_name: entry.trainer_name,
+          silk_url: entry.silk_url,
+          number: entry.number,
+          current_odds: odds,
+          ensembleProba: ens,
+          impliedProb,
+          edge,
+          modelAgreement,
+          kellyStake: stake,
+          entry,
+        }
+
+        if (!bestPick || edge > bestPick.edge) {
+          bestPick = pick
         }
       }
+
+      if (bestPick) results.push(bestPick)
     }
 
-    results.sort((a, b) => b.valueScore - a.valueScore)
+    results.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
 
     return results
-  }, [races])
-
-  // ── User bankroll + bets ───────────────────────────────────────
-  const { user } = useAuth()
-  const { bankroll } = useBankroll()
+  }, [races, bankroll])
 
   const { data: userBetsData } = useQuery({
     queryKey: ['user-bets-today-page'],
@@ -551,9 +576,9 @@ export function TodaysRacesPage() {
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
                 <div className="flex items-center gap-2">
                   <Zap className="w-5 h-5 text-green-400" />
-                  <h3 className="text-white font-bold text-sm">Value Bet Scanner</h3>
+                  <h3 className="text-white font-bold text-sm">Top Picks</h3>
                   <span className="text-gray-400 text-xs">
-                    {valueBets.length} value bets ({'>'}1.05x) across {races.length} races
+                    {valueBets.length} {valueBets.length === 1 ? 'pick' : 'picks'} — Benter edge, one per race
                   </span>
                 </div>
                 <button
@@ -568,8 +593,8 @@ export function TodaysRacesPage() {
               {valueBets.length === 0 ? (
                 <div className="text-center py-8 px-4">
                   <Search className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-400 font-medium">No value bets found</p>
-                  <p className="text-gray-500 text-sm mt-1">No horses currently have a Benter value score above 1.05x</p>
+                  <p className="text-gray-400 font-medium">No top picks today</p>
+                  <p className="text-gray-500 text-sm mt-1">No horses meet the Benter edge criteria (5%+ edge, 2+ models agree, Kelly-qualified)</p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-700/50 max-h-[60vh] overflow-y-auto">
@@ -623,19 +648,19 @@ export function TodaysRacesPage() {
                           </div>
                         </div>
 
-                        {/* Right: value score + odds + action */}
+                        {/* Right: edge + Kelly + odds + action */}
                         <div className="flex items-center gap-3 flex-shrink-0">
-                          {/* Value Score */}
+                          {/* Edge + Kelly */}
                           <div className="text-right">
                             <div className={`font-bold text-sm ${
-                              vb.valueScore >= 1.3 ? 'text-green-400' :
-                              vb.valueScore >= 1.15 ? 'text-emerald-400' :
+                              vb.edge >= 0.15 ? 'text-green-400' :
+                              vb.edge >= 0.08 ? 'text-emerald-400' :
                               'text-yellow-400'
                             }`}>
-                              {vb.valueScore.toFixed(2)}x
+                              +{(vb.edge * 100).toFixed(1)}% edge
                             </div>
                             <div className="text-[10px] text-gray-500">
-                              {formatNormalized(vb.normProb)} AI · {formatNormalized(vb.impliedProb)} mkt
+                              Benter {(vb.ensembleProba * 100).toFixed(1)}% · Kelly £{vb.kellyStake.toFixed(2)}
                             </div>
                           </div>
 
