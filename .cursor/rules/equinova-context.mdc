@@ -25,15 +25,17 @@ Two separate codebases work together:
 - **Database:** SQLite files per day (`race_data_YYYY_MM_DD.db`) in `~/EquiNOVA/database/daily/`
 - **Prediction ledger:** `~/EquiNOVA/scripts/prediction_ledger.db` — aggregated historical data with results
 
-## ML Models (5 total, each split by 5 race-type segments)
+## ML Models (4 independent + Benter as main, split by 5 race-type segments)
 
-| Model | File prefix | Feature profile |
-|-------|------------|-----------------|
-| LightGBM | `lgbm_` | broad |
-| XGBoost | `xgb_` | broad |
-| Random Forest | `rf_` | medium |
-| MLP (Neural Net) | `mlp_` | tight |
-| Fusion (Ensemble) | `fusion_` | meta-model on top of base 4 |
+| Model | File prefix | Role |
+|-------|------------|------|
+| LightGBM | `lgbm_` | Independent base model (observation only) |
+| XGBoost | `xgb_` | Independent base model (observation only) |
+| Random Forest | `rf_` | Independent base model (observation only) |
+| Benter (Conditional Logit + Market Integration) | `benter_` | **MAIN MODEL** — drives `ensemble_proba`, Kelly sizing, Top Picks |
+
+**Dropped:** MLP model and Fusion/naive ensemble averaging.
+**Architecture:** Base models run independently for display. Benter model is a two-stage system (Stage 1: Conditional Logit for raw probabilities, Stage 2: Market Integration combining with implied odds). After ~1 month of results, proven signals from base models can be fed as features into Benter Stage 1.
 
 **Segments:** Flat Turf, Flat AW, Hurdle Turf, Chase Turf, NH Flat Turf
 
@@ -45,14 +47,15 @@ Two separate codebases work together:
 |--------|---------|
 | `backfill_pipeline.py` | Backfills historical data: API collection → feature engineering → predictions → results. Default range: 2025-04-01 to 2026-03-16. Skips dates with existing .db files. |
 | `equinova_daily_runner.py` | Daily pipeline: collect today's data → features → predict → push to Supabase. Runs at 9 AM via cron. |
-| `predict_v2.py` | Generates predictions for a given date using all 4 base models + fusion |
+| `predict_v2.py` | Generates predictions for a given date using base models (LGBM, XGB, RF) + Benter (main) |
 | `push_to_supabase.py` | Uploads predictions from local .db to Supabase `race_entries` table |
 | `signal_permutation_scanner.py` | Tests all 2-way and 3-way signal combinations on historical data, identifies profitable patterns, pushes to `dynamic_signal_combos` table |
 | `train_lightgbm_v2.py` | Trains LightGBM per segment with Optuna hyperparameter tuning |
 | `train_xgboost_v2.py` | Trains XGBoost per segment |
 | `train_random_forest_v2.py` | Trains Random Forest per segment |
-| `train_mlp_v2.py` | Trains MLP per segment |
-| `train_fusion_model.py` | Trains fusion/ensemble meta-model from prediction_ledger.db |
+| `train_benter_v2.py` | Trains Benter two-stage model (Conditional Logit + Market Integration) |
+| `update_live_odds.py` | Fetches live odds from Racing API and updates `current_odds` in Supabase |
+| `odds_updater_loop.py` | Runs `update_live_odds.py` every 30 min during UK racing hours (10:00–21:00) |
 | `retrain_v2_with_recent.py` | Fast retraining orchestrator (reuses stored hyperparams, no Optuna) |
 | `backfill_prediction_ledger.py` | Rebuilds prediction_ledger.db from all daily .db files |
 | `training_utils.py` | Shared utilities: data loading, feature selection, preprocessing, calibration, evaluation |
@@ -74,7 +77,7 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 | Table | Purpose |
 |-------|---------|
 | `races` | Race metadata (course, time, class, distance, going) |
-| `race_entries` | Per-horse data including ML predictions (`mlp_proba`, `rf_proba`, `xgboost_proba`, `benter_proba`, `ensemble_proba`) |
+| `race_entries` | Per-horse data including ML predictions (`rf_proba`, `xgboost_proba`, `benter_proba`, `ensemble_proba`), `opening_odds` (protected by trigger), `current_odds` (updated live) |
 | `race_results` | Race result metadata |
 | `race_runners` | Per-horse finishing positions |
 | `dynamic_signal_combos` | Profitable signal patterns discovered by scanner |
@@ -82,7 +85,7 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 | `user_bankroll` | User's bankroll balance |
 | `auto_bet_ledger` | System auto-bets (DO NOT use for user-facing stats) |
 | `ml_model_race_results` | Model prediction tracking |
-| `horse_market_movement` | Live odds movement data |
+| `horse_market_movement` | Legacy odds movement data (superseded by race_entries.opening_odds/current_odds) |
 
 ## Frontend Pages
 
@@ -118,9 +121,27 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 | `auto-place-bets` | System auto-betting driven by dynamic signals + Kelly staking |
 | `complete-csv-import` | Imports predictions CSV into Supabase |
 
+## Market Movement Architecture
+
+- `opening_odds` is set on first push via `push_to_supabase.py` and protected by a DB trigger (`trg_preserve_opening_odds`) that prevents overwriting on UPDATE
+- `current_odds` is updated every 30 minutes during UK racing hours (10:00–21:00) by `update_live_odds.py` (fetches live odds from Racing API)
+- `odds_updater_loop.py` runs as a background process launched by the daily runner
+- `race-data` edge function computes market movement inline: `opening_odds` vs `current_odds` → steaming/drifting/stable
+- Top Picks page also computes movement directly from `race_entries.opening_odds` vs `current_odds`
+- The `horse_market_movement` Supabase table is legacy — no longer used for market movement display
+
+## Top Picks Selection Criteria
+
+- Benter edge >= 5% (`ensemble_proba` vs market implied probability)
+- Odds <= 12/1 (decimal 13.0)
+- Benter probability >= 15% (`ensemble_proba >= 0.15`)
+- At least 2 models agree (LGBM, XGB, RF, Benter top pick)
+- One pick per race (highest edge)
+- Kelly-qualified: stake must be >= £1 after rounding to nearest 50p
+
 ## Current State (as of March 2026)
 
 - Backfill pipeline running from 2025-04-24 to 2026-03-16 (~327 days)
 - Results for Feb-Mar 2026 already synced from Supabase to local .db files
-- Models last retrained Mar 17, 2026 (on limited data)
+- Models last retrained Mar 17, 2026 (on limited data: 2025-04-01 to 2025-06-11)
 - Once backfill completes: rebuild prediction ledger → retrain all models on full dataset → push new predictions
