@@ -10,6 +10,7 @@ import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
+import { getUKTime } from '@/lib/dateUtils'
 import {
   Trophy,
   Clock,
@@ -86,6 +87,7 @@ export function AutoBetsPage() {
 
       const raceIds = races.map(r => r.race_id)
       let allEntries: any[] = []
+      let allRunners: any[] = []
       const batchSize = 50
       for (let i = 0; i < raceIds.length; i += batchSize) {
         const batch = raceIds.slice(i, i + batchSize)
@@ -101,12 +103,27 @@ export function AutoBetsPage() {
             'avg_finishing_position',
             'trainer_win_percentage_at_course', 'trainer_21_days_win_percentage',
             'jockey_21_days_win_percentage', 'jockey_win_percentage_at_distance',
-            'finishing_position',
           ].join(','))
           .in('race_id', batch)
         if (entries) allEntries = allEntries.concat(entries)
+
+        const { data: runners } = await supabase
+          .from('race_runners')
+          .select('race_id, horse, position')
+          .in('race_id', batch)
+          .not('position', 'is', null)
+          .gt('position', 0)
+        if (runners) allRunners = allRunners.concat(runners)
       }
-      return { entries: allEntries, raceMap }
+
+      const resultsByRace: Record<string, Record<string, number>> = {}
+      for (const r of allRunners) {
+        if (!resultsByRace[r.race_id]) resultsByRace[r.race_id] = {}
+        const bare = (r.horse || '').replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+        resultsByRace[r.race_id][bare] = Number(r.position)
+      }
+
+      return { entries: allEntries, raceMap, resultsByRace }
     },
     staleTime: 30_000,
   })
@@ -139,7 +156,11 @@ export function AutoBetsPage() {
 
   const { picks, settledPicks } = useMemo(() => {
     if (!entriesData?.entries?.length) return { picks: [] as TopPick[], settledPicks: [] as TopPick[] }
-    const { entries, raceMap } = entriesData
+    const { entries, raceMap, resultsByRace } = entriesData
+
+    const ukTime = getUKTime()
+    const [curH, curM] = ukTime.split(':').map(Number)
+    const curMinutes = curH * 60 + curM
 
     const byRace = new Map<string, any[]>()
     for (const e of entries) {
@@ -219,7 +240,7 @@ export function AutoBetsPage() {
           trainer_21d_wr: Number(e.trainer_21_days_win_percentage) || 0,
           jockey_21d_wr: Number(e.jockey_21_days_win_percentage) || 0,
           jockey_dist_wr: Number(e.jockey_win_percentage_at_distance) || 0,
-          finishing_position: e.finishing_position ? Number(e.finishing_position) : null,
+          finishing_position: null,
           edge,
           implied_prob: impliedProb,
           odds_movement: oddsMovement,
@@ -235,11 +256,24 @@ export function AutoBetsPage() {
       }
 
       if (bestPick) {
-        const fp = bestPick.finishing_position
-        const isSettled = fp != null && fp > 0
-        if (isSettled) {
+        const offTime = bestPick.off_time || ''
+        const [rH, rM] = (offTime.substring(0, 5)).split(':').map(Number)
+        const raceMinutes = (rH || 0) * 60 + (rM || 0)
+        const hasResults = !!resultsByRace[bestPick.race_id]
+        const raceFinished = raceMinutes > 0 && (curMinutes - raceMinutes) > 10
+
+        if (hasResults && raceFinished) {
+          const racePositions = resultsByRace[bestPick.race_id]
+          const bareName = bestPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+          let pos = racePositions[bareName]
+          if (pos === undefined) {
+            for (const [name, p] of Object.entries(racePositions)) {
+              if (name.startsWith(bareName) || bareName.startsWith(name)) { pos = p; break }
+            }
+          }
+          bestPick.finishing_position = pos ?? null
           settled.push(bestPick)
-        } else {
+        } else if (!raceFinished) {
           const kelly = computeKelly(bestPick, bankroll)
           if (kelly) upcoming.push(bestPick)
         }
