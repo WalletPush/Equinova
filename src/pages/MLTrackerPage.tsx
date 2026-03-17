@@ -70,7 +70,7 @@ interface MLTrackerData {
   abandoned_count: number
 }
 
-const MODEL_NAMES = ['mlp', 'rf', 'xgboost', 'benter', 'ensemble'] as const
+const MODEL_NAMES = ['rf', 'xgboost', 'benter', 'ensemble'] as const
 type ModelName = typeof MODEL_NAMES[number]
 
 const modelConfig: Record<ModelName, {
@@ -80,13 +80,6 @@ const modelConfig: Record<ModelName, {
   bgColor: string
   borderColor: string
 }> = {
-  mlp: {
-    full_name: 'Multi-Layer Perceptron',
-    icon: Brain,
-    color: 'from-blue-500 to-blue-600',
-    bgColor: 'bg-blue-500/10',
-    borderColor: 'border-blue-500/30'
-  },
   rf: {
     full_name: 'Random Forest',
     icon: BarChart3,
@@ -118,7 +111,6 @@ const modelConfig: Record<ModelName, {
 }
 
 const PROBA_FIELDS: Record<ModelName, string> = {
-  mlp: 'mlp_proba',
   rf: 'rf_proba',
   xgboost: 'xgboost_proba',
   benter: 'benter_proba',
@@ -247,7 +239,7 @@ export function MLTrackerPage() {
         const batch = raceIds.slice(i, i + batchSize)
         const { data: entries, error: entriesError } = await supabase
           .from('race_entries')
-          .select('race_id, horse_id, horse_name, trainer_name, jockey_name, current_odds, silk_url, number, mlp_proba, rf_proba, xgboost_proba, benter_proba, ensemble_proba')
+          .select('race_id, horse_id, horse_name, trainer_name, jockey_name, current_odds, silk_url, number, rf_proba, xgboost_proba, benter_proba, ensemble_proba')
           .in('race_id', batch)
         if (!entriesError && entries) allEntries = allEntries.concat(entries)
       }
@@ -728,7 +720,7 @@ export function MLTrackerPage() {
               <div>
                 <p className="text-gray-400 text-sm">Active Models</p>
                 <p className="text-2xl font-bold text-white">
-                  {mlTrackerData?.models?.length || 0}/5
+                  {mlTrackerData?.models?.length || 0}/4
                 </p>
               </div>
             </div>

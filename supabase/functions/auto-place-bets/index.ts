@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
     const ENTRY_COLS = [
       'race_id', 'horse_id', 'horse_name', 'finishing_position',
       'current_odds', 'opening_odds', 'jockey_name', 'trainer_name', 'silk_url', 'number',
-      'mlp_proba', 'rf_proba', 'xgboost_proba', 'benter_proba', 'ensemble_proba',
+      'rf_proba', 'xgboost_proba', 'benter_proba', 'ensemble_proba',
       'rpr', 'ts', 'ofr',
       'horse_win_percentage_at_distance',
       'trainer_win_percentage_at_course', 'trainer_21_days_win_percentage',
@@ -439,7 +439,7 @@ function groupBy(arr: any[], key: string): Record<string, any[]> {
 
 const MF = [
   { f: 'ensemble_proba', n: 'ensemble' }, { f: 'benter_proba', n: 'benter' },
-  { f: 'mlp_proba', n: 'mlp' }, { f: 'rf_proba', n: 'rf' }, { f: 'xgboost_proba', n: 'xgboost' },
+  { f: 'rf_proba', n: 'rf' }, { f: 'xgboost_proba', n: 'xgboost' },
 ];
 
 function getModelPicks(re: any[]): Map<string, string[]> {
