@@ -184,23 +184,7 @@ export function AutoBetsPage() {
         }
 
         let modelAgreement = 0
-        const probas = [
-          Number(e.ensemble_proba) || 0,
-          Number(e.benter_proba) || 0,
-          Number(e.rf_proba) || 0,
-          Number(e.xgboost_proba) || 0,
-        ]
-        for (const p of probas) {
-          if (p > 0) {
-            const isTopInRace = raceEntries.every(
-              (other: any) => (Number(other[Object.keys({ ensemble_proba: 1, benter_proba: 1, rf_proba: 1, xgboost_proba: 1 })[probas.indexOf(p)]) || 0) <= p
-            )
-            if (isTopInRace) modelAgreement++
-          }
-        }
-
         const probaFields = ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const
-        modelAgreement = 0
         for (const field of probaFields) {
           const myVal = Number(e[field]) || 0
           if (myVal <= 0) continue
