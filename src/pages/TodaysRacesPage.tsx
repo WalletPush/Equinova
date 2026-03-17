@@ -459,7 +459,7 @@ export function TodaysRacesPage() {
                 const won = bet.status === 'won'
                 const lost = bet.status === 'lost'
                 const pending = bet.status === 'pending'
-                const pl = won ? Number(bet.potential_return) - Number(bet.bet_amount) : lost ? -Number(bet.bet_amount) : 0
+                const pl = won ? Number(bet.potential_return) : lost ? -Number(bet.bet_amount) : 0
                 return (
                   <div key={bet.id} className="px-4 py-2 flex items-center gap-3 text-xs">
                     <div className="flex-shrink-0">

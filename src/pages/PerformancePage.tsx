@@ -469,7 +469,7 @@ function BetRow({ bet, showDate = false }: { bet: UserBet; showDate?: boolean })
   const potentialReturn = Number(bet.potential_return)
 
   let pl = 0
-  if (bet.status === 'won') pl = potentialReturn - amount
+  if (bet.status === 'won') pl = potentialReturn
   else if (bet.status === 'lost') pl = -amount
 
   return (

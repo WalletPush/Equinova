@@ -726,8 +726,8 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled }: {
         <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-end">
           {isSettled && bet ? (
             <div className="text-right">
-              <div className={`font-bold text-sm ${Number(bet.potential_return) - Number(bet.bet_amount) >= 0 && bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
-                {bet.status === 'won' ? '+' : '-'}£{bet.status === 'won' ? (Number(bet.potential_return) - Number(bet.bet_amount)).toFixed(2) : Number(bet.bet_amount).toFixed(2)}
+              <div className={`font-bold text-sm ${bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
+                {bet.status === 'won' ? '+' : '-'}£{bet.status === 'won' ? Number(bet.potential_return).toFixed(2) : Number(bet.bet_amount).toFixed(2)}
               </div>
             </div>
           ) : isSettled ? (
