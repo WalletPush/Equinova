@@ -393,17 +393,14 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
   const kellyInfo = useMemo(() => {
     if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
     const implied = 1 / odds
-    // Use a conservative estimate: cap pattern WR at 3x implied probability
-    // to guard against overfitted historical data
-    const rawWR = match.matching_combos[0].win_rate / 100
-    const cappedWR = Math.min(rawWR, implied * 3, 0.5)
-    const edge = cappedWR - implied
-    if (edge <= 0.01) return null
+    // Conservative estimate: assume pattern gives 1.5x edge over market
+    const estimatedWR = Math.min(implied * 1.5, 0.4)
+    const edge = estimatedWR - implied
+    if (edge <= 0) return null
     const kelly = edge / (odds - 1)
     // Quarter-Kelly for safety, max 3% of bankroll
     const fraction = Math.min(kelly / 4, 0.03)
-    const stake = Math.round(userBankroll * fraction * 100) / 100
-    if (stake < 1) return null
+    const stake = Math.max(Math.round(userBankroll * fraction * 100) / 100, 1)
     return { stake, fraction }
   }, [match.matching_combos, odds, userBankroll])
 
@@ -449,12 +446,8 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
             const style = STATUS_BADGE[combo.status] || STATUS_BADGE.emerging
             return (
               <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${style.bg} ${style.text}`}>
-                <span className="truncate max-w-[130px]">{combo.combo_label}</span>
-                <span className="opacity-50">|</span>
-                <span>{combo.win_rate}% win</span>
-                <span className="opacity-50">|</span>
-                <span>{combo.roi_pct > 0 ? '+' : ''}{combo.roi_pct}%</span>
-                <span className="text-[9px] opacity-50">({combo.total_bets})</span>
+                <span className="truncate max-w-[180px]">{combo.combo_label}</span>
+                <span className="text-[9px] opacity-60 capitalize">{combo.status}</span>
               </span>
             )
           })}
@@ -522,22 +515,22 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
               {match.rpr > 0 && (
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_rpr') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  RPR {match.rpr}
+                  RPR {Math.round(match.rpr)}
                 </span>
               )}
               {match.ts > 0 && (
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_ts') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  TS {match.ts}
+                  TS {Math.round(match.ts)}
                 </span>
               )}
               {match.best_speed > 0 && (
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.active_signals.includes('top_speed_fig') ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  SPD {match.best_speed}
+                  SPD {Math.round(match.best_speed)}
                 </span>
               )}
               {match.avg_fp > 0 && match.avg_fp <= 4 && (
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${match.avg_fp <= 3 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
-                  Avg FP {match.avg_fp.toFixed(1)}
+                  Avg FP {Math.round(match.avg_fp)}
                 </span>
               )}
             </div>
