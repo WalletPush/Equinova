@@ -93,14 +93,23 @@ export function AutoBetsPage() {
 
     for (const [raceId, race] of grouped) {
       const allSettled = race.matches.every(m => m.finishing_position != null && m.finishing_position > 0)
-      if (allSettled) settled.push([raceId, race])
-      else upcoming.push([raceId, race])
+      if (allSettled) {
+        settled.push([raceId, race])
+      } else {
+        const qualified = race.matches.filter(m => {
+          const o = parseFloat(String(m.odds)) || 0
+          return computeKelly(m, o, bankroll) !== null
+        })
+        if (qualified.length > 0) {
+          upcoming.push([raceId, { ...race, matches: qualified }])
+        }
+      }
     }
 
     upcoming.sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
     settled.sort(([, a], [, b]) => (a.off_time || '').localeCompare(b.off_time || ''))
     return { upcomingRaces: upcoming, settledRaces: settled }
-  }, [dynamicMatches])
+  }, [dynamicMatches, bankroll])
 
   const betsByHorse = useMemo(() => {
     const map = new Map<string, any>()
@@ -136,9 +145,9 @@ export function AutoBetsPage() {
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
             Our system tests thousands of signal combinations against historical race data to find patterns that have been
-            <span className="text-green-400 font-medium"> statistically profitable</span>. Each horse below matches at least one proven pattern.
-            The <span className="text-purple-300 font-medium">confidence score</span> reflects how many patterns match and their historical strength.
-            The <span className="text-yellow-400 font-medium">Kelly wager</span> is the mathematically optimal stake based on the pattern's edge.
+            <span className="text-green-400 font-medium"> statistically profitable</span>. Only horses with a genuine edge make the cut — if Kelly Criterion
+            doesn't recommend a bet, the horse is excluded. <span className="text-yellow-400 font-medium">Less is more</span>.
+            The <span className="text-purple-300 font-medium">confidence score</span> reflects signal quality and the <span className="text-yellow-400 font-medium">Kelly wager</span> is the mathematically optimal stake.
           </p>
           {meta && (
             <p className="text-[11px] text-gray-500">
@@ -201,14 +210,14 @@ export function AutoBetsPage() {
         )}
 
         {/* No matches */}
-        {!isLoading && dynamicMatches.length === 0 && (
+        {!isLoading && upcomingRaces.length === 0 && settledRaces.length === 0 && (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Brain className="w-8 h-8 text-gray-600" />
             </div>
-            <h3 className="text-lg font-medium text-gray-300 mb-2">No pattern matches today</h3>
+            <h3 className="text-lg font-medium text-gray-300 mb-2">No qualified picks today</h3>
             <p className="text-gray-500 text-sm max-w-xs mx-auto">
-              The system will highlight picks when horses match historically profitable signal combinations
+              Only horses with a genuine statistical edge are shown. Check back when more races are available.
             </p>
           </div>
         )}
@@ -340,6 +349,22 @@ function SignalBar({ label, value, icon: Icon, color }: { label: string; value: 
   )
 }
 
+// ─── Kelly Criterion Calculator ─────────────────────────────────────────
+
+function computeKelly(match: DynamicMatch, odds: number, userBankroll: number) {
+  if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
+  const implied = 1 / odds
+  const rawWR = match.matching_combos[0].win_rate / 100
+  const cappedWR = Math.min(rawWR, implied * 3, 0.5)
+  const edge = cappedWR - implied
+  if (edge <= 0.01) return null
+  const kelly = edge / (odds - 1)
+  const fraction = Math.min(kelly / 4, 0.03)
+  const stake = Math.round(userBankroll * fraction * 100) / 100
+  if (stake < 1) return null
+  return { stake, fraction }
+}
+
 // ─── Match Card (AI Insider style) ───────────────────────────────────────
 
 function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
@@ -390,19 +415,7 @@ function MatchCard({ match, bet, userBankroll, needsSetup, settled }: {
     return Math.max(5, Math.min(Math.round(raw), 90))
   }, [match.matching_combos, odds, match.active_signals])
 
-  const kellyInfo = useMemo(() => {
-    if (!match.matching_combos.length || odds <= 1 || userBankroll <= 0) return null
-    const implied = 1 / odds
-    // Conservative estimate: assume pattern gives 1.5x edge over market
-    const estimatedWR = Math.min(implied * 1.5, 0.4)
-    const edge = estimatedWR - implied
-    if (edge <= 0) return null
-    const kelly = edge / (odds - 1)
-    // Quarter-Kelly for safety, max 3% of bankroll
-    const fraction = Math.min(kelly / 4, 0.03)
-    const stake = Math.max(Math.round(userBankroll * fraction * 100) / 100, 1)
-    return { stake, fraction }
-  }, [match.matching_combos, odds, userBankroll])
+  const kellyInfo = useMemo(() => computeKelly(match, odds, userBankroll), [match, odds, userBankroll])
 
   const signalStrengths = useMemo(() => {
     const sigs = new Set(match.active_signals)
