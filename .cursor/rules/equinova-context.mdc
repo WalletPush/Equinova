@@ -1,0 +1,126 @@
+---
+description: Core project context for EquiNOVA — architecture, data pipeline, key files, and conventions
+alwaysApply: true
+---
+
+# EquiNOVA Project Context
+
+## What This Is
+
+EquiNOVA is a self-learning horse racing prediction and betting platform. It uses 5 ML models trained on historical UK/IRE race data, a dynamic signal permutation scanner that discovers profitable betting patterns, and a React frontend that presents picks to the user.
+
+## Architecture Overview
+
+Two separate codebases work together:
+
+### 1. Frontend + Edge Functions (`~/Desktop/equinova/`)
+- **Frontend:** React + TypeScript + Vite + TailwindCSS + TanStack Query
+- **Backend:** Supabase (PostgreSQL) + Edge Functions (Deno/TypeScript)
+- **Auth:** Supabase Auth
+- **Hosting:** GitHub repo `WalletPush/Equinova`, deployed via Vercel
+
+### 2. ML Training Pipeline (`~/EquiNOVA/scripts/`)
+- **Language:** Python 3 (scikit-learn, LightGBM, XGBoost, pandas, numpy, scipy)
+- **Data source:** TheRacingAPI (`api.theracingapi.com`)
+- **Database:** SQLite files per day (`race_data_YYYY_MM_DD.db`) in `~/EquiNOVA/database/daily/`
+- **Prediction ledger:** `~/EquiNOVA/scripts/prediction_ledger.db` — aggregated historical data with results
+
+## ML Models (5 total, each split by 5 race-type segments)
+
+| Model | File prefix | Feature profile |
+|-------|------------|-----------------|
+| LightGBM | `lgbm_` | broad |
+| XGBoost | `xgb_` | broad |
+| Random Forest | `rf_` | medium |
+| MLP (Neural Net) | `mlp_` | tight |
+| Fusion (Ensemble) | `fusion_` | meta-model on top of base 4 |
+
+**Segments:** Flat Turf, Flat AW, Hurdle Turf, Chase Turf, NH Flat Turf
+
+**Model artifacts:** `~/EquiNOVA/scripts/{model}_{Segment}.joblib` + `_calibrator.joblib` + `_metadata.json`
+
+## Key Scripts (~/EquiNOVA/scripts/)
+
+| Script | Purpose |
+|--------|---------|
+| `backfill_pipeline.py` | Backfills historical data: API collection → feature engineering → predictions → results. Default range: 2025-04-01 to 2026-03-16. Skips dates with existing .db files. |
+| `equinova_daily_runner.py` | Daily pipeline: collect today's data → features → predict → push to Supabase. Runs at 9 AM via cron. |
+| `predict_v2.py` | Generates predictions for a given date using all 4 base models + fusion |
+| `push_to_supabase.py` | Uploads predictions from local .db to Supabase `race_entries` table |
+| `signal_permutation_scanner.py` | Tests all 2-way and 3-way signal combinations on historical data, identifies profitable patterns, pushes to `dynamic_signal_combos` table |
+| `train_lightgbm_v2.py` | Trains LightGBM per segment with Optuna hyperparameter tuning |
+| `train_xgboost_v2.py` | Trains XGBoost per segment |
+| `train_random_forest_v2.py` | Trains Random Forest per segment |
+| `train_mlp_v2.py` | Trains MLP per segment |
+| `train_fusion_model.py` | Trains fusion/ensemble meta-model from prediction_ledger.db |
+| `retrain_v2_with_recent.py` | Fast retraining orchestrator (reuses stored hyperparams, no Optuna) |
+| `backfill_prediction_ledger.py` | Rebuilds prediction_ledger.db from all daily .db files |
+| `training_utils.py` | Shared utilities: data loading, feature selection, preprocessing, calibration, evaluation |
+| `feature_selection_analysis.py` | Runs feature selection per segment, outputs `feature_selection_report.json` |
+| `Z1-Z8` scripts | Data collection from TheRacingAPI (racecards, horse form, distance, jockey/trainer stats) |
+
+## Data Pipeline Flow
+
+```
+TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
+    → 01-08a feature engineering scripts → model_training_data table
+    → predict_v2.py → predictions written to .db
+    → push_to_supabase.py → Supabase race_entries table
+    → Frontend reads from Supabase
+```
+
+## Supabase Tables (key ones)
+
+| Table | Purpose |
+|-------|---------|
+| `races` | Race metadata (course, time, class, distance, going) |
+| `race_entries` | Per-horse data including ML predictions (`mlp_proba`, `rf_proba`, `xgboost_proba`, `benter_proba`, `ensemble_proba`) |
+| `race_results` | Race result metadata |
+| `race_runners` | Per-horse finishing positions |
+| `dynamic_signal_combos` | Profitable signal patterns discovered by scanner |
+| `bets` | User's manual bets (placed via frontend) |
+| `user_bankroll` | User's bankroll balance |
+| `auto_bet_ledger` | System auto-bets (DO NOT use for user-facing stats) |
+| `ml_model_race_results` | Model prediction tracking |
+| `horse_market_movement` | Live odds movement data |
+
+## Frontend Pages
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| Today's Races | `/` | Daily races with AI predictions, market movement, user bankroll summary |
+| Top Picks | `/auto-bets` | AI-discovered profitable patterns matched to today's runners (card-style, AI Insider design) |
+| Results | `/results` | Historical race results |
+| Performance | `/performance` | User's betting performance, equity curve, bankroll management |
+
+**Bottom nav order:** Today → Top Picks → Results → Performance
+
+## Critical Conventions
+
+- **User data comes from `bets` table and `user_bankroll`, NEVER from `auto_bet_ledger`**
+- User bankroll is fetched via `useBankroll()` hook → `get-user-bankroll` edge function
+- User bets are fetched via `get-user-bets` edge function
+- `BankrollSetupModal` prompts user for initial bankroll if none exists
+- Top Picks cards use the AI Insider card style (large confidence gauge, signal breakdown bars, gradient headers)
+- Edge functions are deployed via Supabase MCP tool, NOT via `npx supabase functions deploy` (which hangs)
+- `vite build` often hangs — verify with `npx tsc --noEmit` instead
+
+## Edge Functions (key ones)
+
+| Function | Purpose |
+|----------|---------|
+| `combo-scanner` | Fetches today's entries, computes atomic signals, matches against `dynamic_signal_combos` |
+| `race-data` | Returns races + entries for a given date |
+| `get-user-bankroll` | Returns user bankroll (returns `has_bankroll: false` if none exists) |
+| `add-bankroll-amount` | Adds funds to user bankroll |
+| `get-user-bets` | Returns user's bets from `bets` table |
+| `place-bet` | Places a bet for the user |
+| `auto-place-bets` | System auto-betting driven by dynamic signals + Kelly staking |
+| `complete-csv-import` | Imports predictions CSV into Supabase |
+
+## Current State (as of March 2026)
+
+- Backfill pipeline running from 2025-04-24 to 2026-03-16 (~327 days)
+- Results for Feb-Mar 2026 already synced from Supabase to local .db files
+- Models last retrained Mar 17, 2026 (on limited data)
+- Once backfill completes: rebuild prediction ledger → retrain all models on full dataset → push new predictions
