@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## What This Is
 
-EquiNOVA is a self-learning horse racing prediction and betting platform. It uses 5 ML models trained on historical UK/IRE race data, a dynamic signal permutation scanner that discovers profitable betting patterns, and a React frontend that presents picks to the user.
+EquiNOVA is a self-learning horse racing prediction and betting platform. It uses 4 ML models (3 independent base models + 1 main Benter model) trained on historical UK/IRE race data, a dynamic signal permutation scanner that discovers profitable betting patterns, and a React frontend that presents picks to the user.
 
 ## Architecture Overview
 
@@ -35,7 +35,12 @@ Two separate codebases work together:
 | Benter (Conditional Logit + Market Integration) | `benter_` | **MAIN MODEL** — drives `ensemble_proba`, Kelly sizing, Top Picks |
 
 **Dropped:** MLP model and Fusion/naive ensemble averaging.
-**Architecture:** Base models run independently for display. Benter model is a two-stage system (Stage 1: Conditional Logit for raw probabilities, Stage 2: Market Integration combining with implied odds). After ~1 month of results, proven signals from base models can be fed as features into Benter Stage 1.
+
+**CRITICAL — Model identity:**
+- `ensemble_proba` IS the Benter model output. The "Ensemble" card on the Results page IS the Benter model. NEVER confuse this.
+- The Benter model is a two-stage system: Stage 1 (Conditional Logit for raw probabilities) → Stage 2 (Market Integration combining with implied odds via racewise softmax). Its output is stored as `ensemble_proba`.
+- LightGBM, XGBoost, and Random Forest are independent base models for observation/display ONLY. They do NOT influence picks, Kelly sizing, or `ensemble_proba`.
+- After ~1 month of live results, proven signals from base models can be fed as additional features into Benter Stage 1.
 
 **Segments:** Flat Turf, Flat AW, Hurdle Turf, Chase Turf, NH Flat Turf
 
@@ -139,9 +144,27 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 - One pick per race (highest edge)
 - Kelly-qualified: stake must be >= £1 after rounding to nearest 50p
 
+## Top Picks & Value Bets — Opening Odds Lock-in
+
+- Edge calculation and Kelly sizing use `opening_odds` (morning price), NOT `current_odds`
+- This prevents picks from disappearing when odds shorten during the day
+- The bettor takes the morning price, so qualification must be based on that price
+- `current_odds` is still displayed for market movement tracking (steaming/drifting badges)
+- Same logic applies to Value Bets on the Today page
+
+## Bankroll Logic
+
+- User started with £200 bankroll
+- When a bet is placed via the app, `place-bet` edge function deducts the stake
+- When a bet settles as WON, `update-race-results-and-bets` adds the full return (`potential_return` = stake × odds) back to bankroll
+- Lost bets need no further adjustment (stake was already deducted on placement)
+- NEVER insert bets directly into the `bets` table without also adjusting `user_bankroll` — this causes bankroll corruption
+
 ## Current State (as of March 2026)
 
 - Backfill pipeline running from 2025-04-24 to 2026-03-16 (~327 days)
 - Results for Feb-Mar 2026 already synced from Supabase to local .db files
-- Models last retrained Mar 17, 2026 (on limited data: 2025-04-01 to 2025-06-11)
+- Models last retrained Mar 18, 2026 (train: Nov 2023–May 2025, val: Jun 2025, holdout: Feb–Mar 2026)
 - Once backfill completes: rebuild prediction ledger → retrain all models on full dataset → push new predictions
+- Daily predictions run automatically at 9 AM via cron (`equinova_daily_runner.py`)
+- Live results so far: 50% win rate on Top Picks with positive P/L (Kelly sizing working correctly)
