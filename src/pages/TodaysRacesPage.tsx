@@ -263,7 +263,9 @@ export function TodaysRacesPage() {
       let bestPick: ValueBetResult | null = null
 
       for (const entry of race.topEntries) {
-        const odds = Number(entry.current_odds) || 0
+        const liveOdds = Number(entry.current_odds) || 0
+        const openOdds = Number(entry.opening_odds) || 0
+        const odds = openOdds > 1 ? openOdds : liveOdds
         const ens = Number(entry.ensemble_proba) || 0
         if (odds <= 1 || ens <= 0 || odds > MAX_ODDS || ens < MIN_ENSEMBLE_PROBA) continue
 

@@ -200,7 +200,12 @@ export function AutoBetsPage() {
       let bestPick: TopPick | null = null
 
       for (const e of raceEntries) {
-        const odds = Number(e.current_odds) || 0
+        const liveOdds = Number(e.current_odds) || 0
+        const openOddsRaw = Number(e.opening_odds) || 0
+        // Use opening odds for qualification — that's the price available
+        // when picks are first shown in the morning. Picks don't disappear
+        // if odds shorten during the day.
+        const odds = openOddsRaw > 1 ? openOddsRaw : liveOdds
         const ensProba = Number(e.ensemble_proba) || 0
         if (odds <= 1 || ensProba <= 0) continue
         if (odds > MAX_ODDS) continue
@@ -215,14 +220,13 @@ export function AutoBetsPage() {
           Number(e.best_speed_figure_at_track) || 0,
         )
 
-        const openOdds = Number(e.opening_odds) || 0
         let oddsMovement: 'steaming' | 'drifting' | 'stable' | null = null
         let oddsMovementPct: number | null = null
-        if (openOdds > 0 && odds > 0) {
-          const pctChange = ((odds - openOdds) / openOdds) * 100
+        if (openOddsRaw > 0 && liveOdds > 0) {
+          const pctChange = ((liveOdds - openOddsRaw) / openOddsRaw) * 100
           oddsMovementPct = Math.abs(pctChange)
-          if (odds < openOdds * 0.85) oddsMovement = 'steaming'
-          else if (odds > openOdds * 1.15) oddsMovement = 'drifting'
+          if (liveOdds < openOddsRaw * 0.85) oddsMovement = 'steaming'
+          else if (liveOdds > openOddsRaw * 1.15) oddsMovement = 'drifting'
           else oddsMovement = 'stable'
         }
 
@@ -242,8 +246,8 @@ export function AutoBetsPage() {
           course: race.course_name || '',
           off_time: race.off_time || '',
           race_type: race.type || '',
-          current_odds: odds,
-          opening_odds: openOdds,
+          current_odds: liveOdds > 0 ? liveOdds : odds,
+          opening_odds: openOddsRaw,
           silk_url: e.silk_url,
           number: e.number,
           jockey: e.jockey_name || '',
@@ -547,7 +551,11 @@ export function AutoBetsPage() {
 // ─── Kelly Criterion — uses Benter ensemble_proba ────────────────────────
 
 function computeKelly(pick: TopPick, userBankroll: number) {
-  const { ensemble_proba, current_odds: odds } = pick
+  const { ensemble_proba } = pick
+  // Use opening odds for Kelly sizing — that's the price locked in
+  // when the morning predictions are pushed. Current odds may have
+  // shortened, but you bet at the morning price.
+  const odds = (pick.opening_odds > 1 ? pick.opening_odds : pick.current_odds)
   if (odds <= 1 || userBankroll <= 0 || ensemble_proba <= 0) return null
   const implied = 1 / odds
   const edge = ensemble_proba - implied
