@@ -11,7 +11,7 @@ import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
-import { getUKTime, getUKDate } from '@/lib/dateUtils'
+import { getUKTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
 import type { Selection } from '@/lib/exoticKelly'
 import {
   Trophy,
@@ -309,9 +309,7 @@ export function AutoBetsPage() {
         const kelly = computeKelly(bestPick, bankroll)
         if (!kelly) continue
 
-        const offTime = bestPick.off_time || ''
-        const [rH, rM] = (offTime.substring(0, 5)).split(':').map(Number)
-        const raceMinutes = (rH || 0) * 60 + (rM || 0)
+        const raceMinutes = raceTimeToMinutes(bestPick.off_time || '')
         const hasResults = !!resultsByRace[bestPick.race_id]
         const raceFinished = isPastDate || (raceMinutes > 0 && (curMinutes - raceMinutes) > 10)
 
@@ -325,6 +323,8 @@ export function AutoBetsPage() {
             }
           }
           bestPick.finishing_position = pos ?? null
+          settled.push(bestPick)
+        } else if (raceFinished && !hasResults) {
           settled.push(bestPick)
         } else if (!raceFinished) {
           upcoming.push(bestPick)

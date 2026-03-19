@@ -25,6 +25,13 @@ Two separate codebases work together:
 - **Database:** SQLite files per day (`race_data_YYYY_MM_DD.db`) in `~/EquiNOVA/database/daily/`
 - **Prediction ledger:** `~/EquiNOVA/scripts/prediction_ledger.db` — aggregated historical data with results
 
+### ⚠️ CRITICAL — Python Virtual Environment
+- **ALWAYS use `~/aiwinnersenclosure/venv/bin/python3`** for ALL Python script execution
+- **NEVER use `~/EquiNOVA/env/bin/python`** — this venv is INCOMPLETE and missing lightgbm, xgboost, requests, and other critical packages
+- The daily runner (`equinova_daily_runner.py`) correctly uses `~/aiwinnersenclosure/venv/bin/python3` — match this ALWAYS
+- When running scripts manually, ALWAYS prefix with `/Users/davidsambor/aiwinnersenclosure/venv/bin/python3`
+- ALL data collection scripts (racecards, horse form, jockey, trainer, owner, distance, market movements) are CRITICAL — every single one feeds features into the prediction models. If ANY fail, the predictions will have NULL values and Top Picks won't work (requires 2+ models to agree)
+
 ## ML Models (4 independent + Benter as main, split by 5 race-type segments)
 
 | Model | File prefix | Role |
@@ -79,9 +86,13 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 
 ## Supabase Tables (key ones)
 
+**Column names for filtering/deleting:**
+- `races` uses `date` column (not `race_date`) — e.g. `?date=eq.2026-03-19`
+- `race_entries` has NO date column — delete by `race_id` (get race_ids from `races` first)
+
 | Table | Purpose |
 |-------|---------|
-| `races` | Race metadata (course, time, class, distance, going) |
+| `races` | Race metadata (course, time, class, distance, going) — date column is `date` |
 | `race_entries` | Per-horse data including ML predictions (`rf_proba`, `xgboost_proba`, `benter_proba`, `ensemble_proba`), `opening_odds` (protected by trigger), `current_odds` (updated live) |
 | `race_results` | Race result metadata |
 | `race_runners` | Per-horse finishing positions |
@@ -112,6 +123,17 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 - Top Picks cards use the AI Insider card style (large confidence gauge, signal breakdown bars, gradient headers)
 - Edge functions are deployed via Supabase MCP tool, NOT via `npx supabase functions deploy` (which hangs)
 - `vite build` often hangs — verify with `npx tsc --noEmit` instead
+
+## ⛔ DO NOT BREAK RULES — Lessons Learned
+
+1. **NEVER use `~/EquiNOVA/env/`** — it is missing lightgbm, xgboost, requests, and other packages. ALWAYS use `~/aiwinnersenclosure/venv/bin/python3`.
+2. **NEVER modify `data_collection.py` or `equinova_daily_runner.py`** without explicit user approval. These scripts are battle-tested and run daily via cron. Any change risks breaking the entire pipeline.
+3. **NEVER push data to Supabase without first verifying the local .db file is complete** — check that trainer, jockey, lgbm_proba, xgboost_proba, rf_proba, benter_proba, ensemble_proba columns are ALL populated (not NULL). If any are NULL the data is garbage.
+4. **NEVER claim a Supabase operation succeeded without checking the HTTP status code.** Status 400 = FAILED. Status 204 = success. Read the response body on failure.
+5. **NEVER delete or modify production Supabase data without verifying the correct column names first.** The `races` table uses `date` (not `race_date`). The `race_entries` table has NO date column — delete via `race_id`.
+6. **NEVER run the pipeline scripts (data_collection, 10_model_scheduler, predict_v2, push_to_supabase) with any venv other than `~/aiwinnersenclosure/venv/bin/python3`.** Match what `equinova_daily_runner.py` uses.
+7. **ALL 9 data collection sub-scripts are CRITICAL.** Every single one (racecards, horse form, horse distance, jockey distance, trainer distance, trainer results, jockey results, owner results, market movements) feeds features into the prediction models. If ANY fail or are skipped, predictions will have NULLs and Top Picks won't work.
+8. **VERIFY before reporting.** Never tell the user something is done unless you have confirmed it with evidence (correct status codes, row counts, file sizes, etc.).
 
 ## Edge Functions (key ones)
 
