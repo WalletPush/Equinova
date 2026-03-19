@@ -337,7 +337,7 @@ export function PreviousRacesPage() {
       const won = position === 1
       const sp = runner?.sp || ''
       const spProfit = won ? spToProfit(sp) : 0
-      const pnl = won ? stake + stake * spProfit : -stake
+      const pnl = won ? stake * spProfit : -stake
 
       picks.push({
         horse: bestPick.entry.horse_name,

@@ -117,7 +117,7 @@ export function PerformancePage() {
 
       let dayPL = 0
       for (const b of dayBets) {
-        if (b.status === 'won') dayPL += Number(b.potential_return)
+        if (b.status === 'won') dayPL += Number(b.potential_return) - Number(b.bet_amount)
         else if (b.status === 'lost') dayPL -= Number(b.bet_amount)
       }
 
@@ -134,7 +134,7 @@ export function PerformancePage() {
     const totalStaked = bets.reduce((s, b) => s + Number(b.bet_amount), 0)
     let totalPL = 0
     for (const b of bets) {
-      if (b.status === 'won') totalPL += Number(b.potential_return)
+      if (b.status === 'won') totalPL += Number(b.potential_return) - Number(b.bet_amount)
       else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
     }
     const roi = totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0

@@ -336,7 +336,7 @@ export function TodaysRacesPage() {
     for (const b of bets) {
       const amt = Number(b.bet_amount)
       totalStaked += amt
-      if (b.status === 'won') { totalPL += Number(b.potential_return); wins++; settled++ }
+      if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
       else if (b.status === 'lost') { totalPL -= amt; settled++ }
     }
     return {
@@ -354,7 +354,7 @@ export function TodaysRacesPage() {
   const todayPL = useMemo(() => {
     let pl = 0
     for (const b of todayBets) {
-      if (b.status === 'won') pl += Number(b.potential_return)
+      if (b.status === 'won') pl += Number(b.potential_return) - Number(b.bet_amount)
       else if (b.status === 'lost') pl -= Number(b.bet_amount)
     }
     return pl
