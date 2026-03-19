@@ -1,16 +1,18 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { BankrollSetupModal } from '@/components/BankrollSetupModal'
+import { BetSlip } from '@/components/BetSlip'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
 import { getUKTime, getUKDate } from '@/lib/dateUtils'
+import type { Selection } from '@/lib/exoticKelly'
 import {
   Trophy,
   Clock,
@@ -27,6 +29,8 @@ import {
   MessageSquare,
   Activity,
   Calendar,
+  Plus,
+  Minus,
 } from 'lucide-react'
 
 interface TopPick {
@@ -74,6 +78,26 @@ export function AutoBetsPage() {
   const ukToday = getUKDate()
   const [selectedDate, setSelectedDate] = useState(ukToday)
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
+  const [slipHorseIds, setSlipHorseIds] = useState<Set<string>>(new Set())
+
+  const toggleSlip = useCallback((horseId: string) => {
+    setSlipHorseIds(prev => {
+      const next = new Set(prev)
+      if (next.has(horseId)) next.delete(horseId)
+      else if (next.size < 4) next.add(horseId)
+      return next
+    })
+  }, [])
+
+  const removeFromSlip = useCallback((horseId: string) => {
+    setSlipHorseIds(prev => {
+      const next = new Set(prev)
+      next.delete(horseId)
+      return next
+    })
+  }, [])
+
+  const clearSlip = useCallback(() => setSlipHorseIds(new Set()), [])
 
   const goToPreviousDay = () => {
     const d = new Date(selectedDate + 'T12:00:00')
@@ -338,7 +362,25 @@ export function AutoBetsPage() {
     return { wins, losses, dayPL }
   }, [settledPicks, bankroll])
 
+  const slipSelections = useMemo<Selection[]>(() => {
+    if (slipHorseIds.size === 0) return []
+    return picks
+      .filter(p => slipHorseIds.has(p.horse_id))
+      .map(p => ({
+        horse_id: p.horse_id,
+        race_id: p.race_id,
+        horse_name: p.horse_name,
+        course: p.course,
+        off_time: p.off_time,
+        jockey: p.jockey,
+        trainer: p.trainer,
+        odds: p.opening_odds > 1 ? p.opening_odds : p.current_odds,
+        ensemble_proba: p.ensemble_proba,
+      }))
+  }, [picks, slipHorseIds])
+
   const isLoading = loadingEntries
+  const isToday = selectedDate === ukToday
 
   return (
     <AppLayout>
@@ -476,6 +518,11 @@ export function AutoBetsPage() {
                 {picks.length} {picks.length === 1 ? 'pick' : 'picks'} — one per race
               </span>
             </div>
+            {isToday && picks.length >= 2 && (
+              <p className="text-[10px] text-gray-500 -mt-1 mb-1">
+                Tap + to add picks to the bet slip for Doubles, Patents, or Lucky 15s (max 4)
+              </p>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               {picks.map(pick => (
                 <PickCard
@@ -484,6 +531,9 @@ export function AutoBetsPage() {
                   bet={betsByHorse.get(`${pick.race_id}:${pick.horse_id}`)}
                   userBankroll={bankroll}
                   needsSetup={needsSetup}
+                  inSlip={slipHorseIds.has(pick.horse_id)}
+                  onToggleSlip={isToday ? () => toggleSlip(pick.horse_id) : undefined}
+                  slipFull={slipHorseIds.size >= 4}
                 />
               ))}
             </div>
@@ -544,6 +594,15 @@ export function AutoBetsPage() {
           </Link>
         )}
       </div>
+
+      {isToday && slipSelections.length >= 2 && (
+        <BetSlip
+          selections={slipSelections}
+          bankroll={bankroll}
+          onRemove={removeFromSlip}
+          onClear={clearSlip}
+        />
+      )}
     </AppLayout>
   )
 }
@@ -618,12 +677,15 @@ function ModelAgreement({ count }: { count: number }) {
 
 // ─── Pick Card ──────────────────────────────────────────────────────────
 
-function PickCard({ pick, bet, userBankroll, needsSetup, settled }: {
+function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onToggleSlip, slipFull }: {
   pick: TopPick
   bet: any | null
   userBankroll: number
   needsSetup: boolean
   settled?: boolean
+  inSlip?: boolean
+  onToggleSlip?: () => void
+  slipFull?: boolean
 }) {
   const fp = pick.finishing_position
   const isSettled = fp != null && fp > 0
@@ -632,7 +694,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled }: {
 
   const kellyInfo = useMemo(() => computeKelly(pick, userBankroll), [pick, userBankroll])
 
-  const borderColor = isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : 'border-purple-500/30'
+  const borderColor = inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : 'border-purple-500/30'
 
   return (
     <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
@@ -762,7 +824,30 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled }: {
         )}
 
         {/* Action row */}
-        <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-end">
+        <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-between">
+          {/* Slip toggle — left side */}
+          <div>
+            {onToggleSlip && !isSettled && !hasBet && (
+              <button
+                onClick={onToggleSlip}
+                disabled={!inSlip && slipFull}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  inSlip
+                    ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                    : slipFull
+                    ? 'bg-gray-800 text-gray-600 border border-gray-700 cursor-not-allowed'
+                    : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-yellow-500/30 hover:text-yellow-400'
+                }`}
+                title={inSlip ? 'Remove from slip' : slipFull ? 'Slip full (max 4)' : 'Add to bet slip'}
+              >
+                {inSlip ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                {inSlip ? 'In Slip' : 'Add to Slip'}
+              </button>
+            )}
+          </div>
+
+          {/* Place bet / status — right side */}
+          <div>
           {isSettled && bet ? (
             <div className="text-right">
               <div className={`font-bold text-sm ${bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
@@ -788,6 +873,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled }: {
               size="small"
             />
           ) : null}
+          </div>
         </div>
       </div>
     </div>
