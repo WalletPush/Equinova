@@ -189,7 +189,7 @@ export function AutoBetsPage() {
     for (const b of bets) {
       const amt = Number(b.bet_amount)
       totalStaked += amt
-      if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
+      if (b.status === 'won') { totalPL += Number(b.potential_return); wins++; settled++ }
       else if (b.status === 'lost') { totalPL -= amt; settled++ }
     }
     return {
@@ -353,7 +353,7 @@ export function AutoBetsPage() {
       const stake = kelly?.stake ?? 0
       if (p.finishing_position === 1) {
         wins++
-        dayPL += stake * (p.current_odds - 1)
+        dayPL += stake * p.current_odds
       } else {
         losses++
         dayPL -= stake
