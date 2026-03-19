@@ -103,6 +103,18 @@ export function PerformancePage() {
       byDay.set(date, arr)
     }
 
+    const totalWins = bets.filter(b => b.status === 'won').length
+    const totalLosses = bets.filter(b => b.status === 'lost').length
+    const totalPending = bets.filter(b => b.status === 'pending').length
+    const totalStaked = bets.reduce((s, b) => s + Number(b.bet_amount), 0)
+    let totalPL = 0
+    for (const b of bets) {
+      if (b.status === 'won') totalPL += Number(b.potential_return) - Number(b.bet_amount)
+      else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
+    }
+    const startingBankroll = bankroll - totalPL
+    const roi = startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0
+
     let runningPL = 0
     let runningStaked = 0
     const summaries: DaySummary[] = []
@@ -123,21 +135,10 @@ export function PerformancePage() {
 
       runningPL += dayPL
       runningStaked += dayStaked
-      const runningROI = runningStaked > 0 ? (runningPL / runningStaked) * 100 : 0
+      const runningROI = startingBankroll > 0 ? (runningPL / startingBankroll) * 100 : 0
 
       summaries.push({ date, bets: dayBets, wins, losses, pending, dayPL, dayStaked, runningPL, runningStaked, runningROI })
     }
-
-    const totalWins = bets.filter(b => b.status === 'won').length
-    const totalLosses = bets.filter(b => b.status === 'lost').length
-    const totalPending = bets.filter(b => b.status === 'pending').length
-    const totalStaked = bets.reduce((s, b) => s + Number(b.bet_amount), 0)
-    let totalPL = 0
-    for (const b of bets) {
-      if (b.status === 'won') totalPL += Number(b.potential_return) - Number(b.bet_amount)
-      else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
-    }
-    const roi = totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0
     const winRate = (totalWins + totalLosses) > 0 ? (totalWins / (totalWins + totalLosses)) * 100 : 0
     const winningDays = summaries.filter(d => d.dayPL > 0).length
     const losingDays = summaries.filter(d => d.dayPL < 0).length
