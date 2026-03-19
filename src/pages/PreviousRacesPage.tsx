@@ -337,7 +337,7 @@ export function PreviousRacesPage() {
       const won = position === 1
       const sp = runner?.sp || ''
       const spProfit = won ? spToProfit(sp) : 0
-      const pnl = won ? stake * spProfit : -stake
+      const pnl = won ? stake + stake * spProfit : -stake
 
       picks.push({
         horse: bestPick.entry.horse_name,
@@ -550,7 +550,7 @@ export function PreviousRacesPage() {
                         <span className="text-xs text-gray-500">£{p.kellyStake.toFixed(2)}</span>
                         {p.sp && <span className="text-sm font-mono text-gray-300 min-w-[40px] text-right">{p.sp}</span>}
                         <span className={`text-sm font-semibold min-w-[60px] text-right ${p.won ? 'text-green-400' : 'text-red-400'}`}>
-                          {p.won ? `+£${(p.kellyStake + p.kellyStake * spToProfit(p.sp)).toFixed(2)}` : `-£${p.kellyStake.toFixed(2)}`}
+                          {p.pnl >= 0 ? '+' : ''}£{Math.abs(p.pnl).toFixed(2)}
                         </span>
                       </div>
                     </div>
