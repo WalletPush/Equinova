@@ -3,11 +3,9 @@ import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
-import { ProfitableSignalBadges } from '@/components/ProfitableSignalBadges'
 import { supabase, Race, type RaceEntry } from '@/lib/supabase'
-import { detectProfitableSignals, type ProfitableSignal } from '@/lib/confluenceScore'
-import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { formatTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
+import { useBankroll } from '@/hooks/useBankroll'
 import { 
   Calendar,
   Clock,
@@ -150,7 +148,7 @@ export function PreviousRacesPage() {
   const [selectedDate, setSelectedDate] = useState(() => getUKDate())
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedRaces, setExpandedRaces] = useState<Set<string>>(new Set())
-  const lifetimeSignalStats = useLifetimeSignalStats()
+  const { bankroll } = useBankroll()
 
   // ─── Live UK clock (ticks every second when viewing today) ──────
   const [ukTime, setUkTime] = useState(() =>
@@ -250,6 +248,118 @@ export function PreviousRacesPage() {
 
     return { completed: done, pending: waiting }
   }, [allRaces, searchTerm])
+
+  // ─── Benter Picks — same criteria as Top Picks ─────────────────
+  const MIN_EDGE = 0.05
+  const MAX_ODDS = 12.0
+  const MIN_ENSEMBLE_PROBA = 0.15
+  const MIN_MODEL_AGREEMENT = 2
+
+  interface BenterPick {
+    horse: string
+    course: string
+    offTime: string
+    sp: string
+    position: number | null
+    edge: number
+    kellyStake: number
+    pnl: number
+    modelsAgree: number
+    won: boolean
+  }
+
+  function computeKelly(ensProba: number, odds: number, bk: number) {
+    if (odds <= 1 || bk <= 0 || ensProba <= 0) return 0
+    const implied = 1 / odds
+    const edge = ensProba - implied
+    if (edge <= 0.01) return 0
+    const kelly = edge / (odds - 1)
+    const fraction = Math.min(kelly / 4, 0.03)
+    const raw = bk * fraction
+    const stake = Math.round(raw * 2) / 2
+    return stake >= 1 ? stake : 0
+  }
+
+  const benterPicks = useMemo(() => {
+    if (!completed.length) return { picks: [] as BenterPick[], wins: 0, losses: 0, totalPL: 0 }
+
+    const picks: BenterPick[] = []
+
+    for (const race of completed) {
+      const entries = race.topEntries || []
+      if (entries.length === 0) continue
+
+      let bestPick: { entry: RaceEntry; edge: number; modelsAgree: number } | null = null
+
+      for (const e of entries) {
+        const openOdds = Number(e.opening_odds) || 0
+        const liveOdds = Number(e.current_odds) || 0
+        const odds = openOdds > 1 ? openOdds : liveOdds
+        const ens = Number(e.ensemble_proba) || 0
+
+        if (odds <= 1 || ens <= 0 || odds > MAX_ODDS || ens < MIN_ENSEMBLE_PROBA) continue
+
+        const edge = ens - 1 / odds
+        if (edge < MIN_EDGE) continue
+
+        let modelsAgree = 0
+        const probaFields = ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const
+        for (const field of probaFields) {
+          const myVal = Number((e as any)[field]) || 0
+          if (myVal <= 0) continue
+          const isTop = entries.every((other: any) => (Number(other[field]) || 0) <= myVal)
+          if (isTop) modelsAgree++
+        }
+
+        if (modelsAgree < MIN_MODEL_AGREEMENT) continue
+
+        if (!bestPick || edge > bestPick.edge) {
+          bestPick = { entry: e, edge, modelsAgree }
+        }
+      }
+
+      if (!bestPick) continue
+
+      const openOdds = Number(bestPick.entry.opening_odds) || 0
+      const liveOdds = Number(bestPick.entry.current_odds) || 0
+      const odds = openOdds > 1 ? openOdds : liveOdds
+      const stake = computeKelly(Number(bestPick.entry.ensemble_proba) || 0, odds, bankroll)
+      if (stake <= 0) continue
+
+      const runners = race.runners || []
+      const bareName = bareHorseName(bestPick.entry.horse_name)
+      let runner = runners.find(r => bareHorseName(r.horse) === bareName)
+      if (!runner) {
+        runner = runners.find(r => bareHorseName(r.horse).startsWith(bareName) || bareName.startsWith(bareHorseName(r.horse)))
+      }
+
+      const position = runner?.position ?? null
+      const won = position === 1
+      const sp = runner?.sp || ''
+      const spProfit = won ? spToProfit(sp) : 0
+      const pnl = won ? stake * spProfit : -stake
+
+      picks.push({
+        horse: bestPick.entry.horse_name,
+        course: race.course_name,
+        offTime: race.off_time,
+        sp,
+        position,
+        edge: bestPick.edge,
+        kellyStake: stake,
+        pnl,
+        modelsAgree: bestPick.modelsAgree,
+        won,
+      })
+    }
+
+    picks.sort((a, b) => raceTimeToMinutes(a.offTime) - raceTimeToMinutes(b.offTime))
+    const wins = picks.filter(p => p.won).length
+    const losses = picks.filter(p => !p.won).length
+    const totalPL = picks.reduce((sum, p) => sum + p.pnl, 0)
+
+    return { picks, wins, losses, totalPL }
+  }, [completed, bankroll])
 
   // ─── Toggle expand/collapse ─────────────────────────────────────
   const toggleExpand = (raceId: string) => {
@@ -391,108 +501,74 @@ export function PreviousRacesPage() {
           )}
         </div>
 
-        {/* ── Profitable Winners Brief ─────────────────────────── */}
-        {completed.length > 0 && (() => {
-          const profitableWinners: { horse: string; course: string; offTime: string; sp: string; profit: number; models: string[]; signals: ProfitableSignal[] }[] = []
-
-          for (const race of completed) {
-            const runners = race.runners || []
-            const winner = runners.find(r => r.position === 1)
-            if (!winner) continue
-            const picks = getModelPicksMap(race.topEntries, race.runners)
-            const bn = bareHorseName(winner.horse)
-            const models = picks.get(bn) || []
-            if (models.length === 0) continue
-
-            let signals: ProfitableSignal[] = []
-            if (lifetimeSignalStats && race.topEntries) {
-              const entry = race.topEntries.find(e => bareHorseName(e.horse_name) === bn)
-              if (entry) {
-                signals = detectProfitableSignals(entry, race.topEntries, models, undefined, lifetimeSignalStats, 'lifetime')
-              }
-            }
-
-            if (signals.length === 0) continue
-
-            profitableWinners.push({
-              horse: winner.horse,
-              course: race.course_name,
-              offTime: race.off_time,
-              sp: winner.sp || '',
-              profit: spToProfit(winner.sp),
-              models: models.map(m => m.label),
-              signals,
-            })
-          }
-
-          profitableWinners.sort((a, b) => raceTimeToMinutes(a.offTime) - raceTimeToMinutes(b.offTime))
-          const totalProfit = profitableWinners.reduce((s, w) => s + w.profit, 0)
-          const totalBets = completed.length
-          const netProfit = totalProfit - (totalBets - profitableWinners.length)
-
-          if (profitableWinners.length === 0) return null
-
-          return (
-            <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-2">
-                  <Trophy className="w-5 h-5 text-yellow-400" />
-                  <h2 className="text-base font-semibold text-white">
-                    Profitable Winners
-                    <span className="ml-2 text-sm font-normal text-green-400">
-                      {profitableWinners.length} winner{profitableWinners.length !== 1 ? 's' : ''} from {totalBets} race{totalBets !== 1 ? 's' : ''}
-                    </span>
-                  </h2>
-                </div>
-                <div className="text-right">
-                  <div className={`text-lg font-bold ${totalProfit > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    +£{totalProfit.toFixed(2)}
-                  </div>
-                  <div className="text-[10px] text-gray-500">total returns</div>
-                </div>
+        {/* ── Benter Picks — same criteria as Top Picks ────────── */}
+        {benterPicks.picks.length > 0 && (
+          <div className={`border rounded-xl p-4 ${
+            benterPicks.totalPL >= 0
+              ? 'bg-gradient-to-r from-green-500/10 to-emerald-500/10 border-green-500/30'
+              : 'bg-gradient-to-r from-red-500/5 to-gray-800/50 border-gray-700'
+          }`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <Trophy className="w-5 h-5 text-yellow-400" />
+                <h2 className="text-base font-semibold text-white">
+                  Benter Picks
+                  <span className="ml-2 text-sm font-normal text-gray-400">
+                    {benterPicks.wins}W {benterPicks.losses}L from {benterPicks.picks.length} pick{benterPicks.picks.length !== 1 ? 's' : ''}
+                  </span>
+                </h2>
               </div>
+              <div className="text-right">
+                <div className={`text-lg font-bold ${benterPicks.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {benterPicks.totalPL >= 0 ? '+' : ''}£{benterPicks.totalPL.toFixed(2)}
+                </div>
+                <div className="text-[10px] text-gray-500">Kelly P&amp;L</div>
+              </div>
+            </div>
 
-              <div className="space-y-2">
-                {profitableWinners.map((w, i) => (
-                  <div key={i} className="py-2 px-3 bg-gray-800/50 rounded-lg">
+            <div className="space-y-2">
+              {benterPicks.picks.map((p, i) => {
+                const badge = positionBadge(p.position)
+                return (
+                  <div key={i} className={`py-2 px-3 rounded-lg ${p.won ? 'bg-green-500/10' : 'bg-gray-800/50'}`}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3 min-w-0">
-                        <div className="w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
-                          <Trophy className="w-3 h-3 text-gray-900" />
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                          p.won ? 'bg-yellow-500 text-gray-900' : badge.bg + ' ' + badge.text
+                        }`}>
+                          {p.won ? <Trophy className="w-3.5 h-3.5" /> : (p.position ?? '-')}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-medium text-white truncate">{w.horse}</div>
-                          <div className="text-[10px] text-gray-500">{w.course} · {formatTime(w.offTime)}</div>
+                          <div className="text-sm font-medium text-white truncate">{p.horse}</div>
+                          <div className="text-[10px] text-gray-500">{p.course} · {formatTime(p.offTime)}</div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-3 flex-shrink-0">
-                        <div className="flex items-center gap-1">
-                          {w.models.map(m => (
-                            <span key={m} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">{m}</span>
-                          ))}
-                        </div>
-                        <span className="text-sm font-mono text-gray-300 min-w-[40px] text-right">{w.sp}</span>
-                        <span className="text-sm font-semibold text-green-400 min-w-[56px] text-right">+£{w.profit.toFixed(2)}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">
+                          +{(p.edge * 100).toFixed(1)}% edge
+                        </span>
+                        <span className="text-xs text-gray-500">£{p.kellyStake.toFixed(2)}</span>
+                        {p.sp && <span className="text-sm font-mono text-gray-300 min-w-[40px] text-right">{p.sp}</span>}
+                        <span className={`text-sm font-semibold min-w-[60px] text-right ${p.won ? 'text-green-400' : 'text-red-400'}`}>
+                          {p.pnl >= 0 ? '+' : ''}£{p.pnl.toFixed(2)}
+                        </span>
                       </div>
                     </div>
-                    {w.signals.length > 0 && (
-                      <div className="mt-1.5 ml-9">
-                        <ProfitableSignalBadges signals={w.signals} compact />
-                      </div>
-                    )}
                   </div>
-                ))}
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-green-500/20 flex items-center justify-between text-xs">
-                <span className="text-gray-400">£1 level stakes across {totalBets} races</span>
-                <span className={`font-semibold ${netProfit > 0 ? 'text-green-400' : netProfit < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                  Net P&L: {netProfit > 0 ? '+' : ''}£{netProfit.toFixed(2)}
-                </span>
-              </div>
+                )
+              })}
             </div>
-          )
-        })()}
+
+            <div className="mt-3 pt-3 border-t border-gray-700/50 flex items-center justify-between text-xs">
+              <span className="text-gray-400">
+                Kelly stakes · {benterPicks.picks.length} qualified picks
+              </span>
+              <span className={`font-semibold ${benterPicks.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                Net P&amp;L: {benterPicks.totalPL >= 0 ? '+' : ''}£{benterPicks.totalPL.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* ── Daily Intelligence Panel ─────────────────────────── */}
         {completed.length > 0 && (
@@ -807,16 +883,6 @@ export function PreviousRacesPage() {
                       const bn = bareHorseName(runner.horse)
                       const modelPicks = modelPicksMap.get(bn) || []
 
-                      // Detect profitable signals for this runner
-                      let runnerSignals: ProfitableSignal[] = []
-                      if (lifetimeSignalStats && race.topEntries) {
-                        const entry = race.topEntries.find(e => bareHorseName(e.horse_name) === bn)
-                        if (entry) {
-                          const badges = modelPicksMap.get(bn) || []
-                          runnerSignals = detectProfitableSignals(entry, race.topEntries, badges, undefined, lifetimeSignalStats, 'lifetime')
-                        }
-                      }
-
                       return (
                         <div key={runner.id} className="py-1.5 px-3 bg-gray-700/30 rounded-lg">
                           <div className="flex items-center justify-between">
@@ -856,11 +922,6 @@ export function PreviousRacesPage() {
                               )}
                             </div>
                           </div>
-                          {runnerSignals.length > 0 && (
-                            <div className="mt-1 ml-10">
-                              <ProfitableSignalBadges signals={runnerSignals} compact />
-                            </div>
-                          )}
                         </div>
                       )
                     })}
