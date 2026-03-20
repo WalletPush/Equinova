@@ -11,6 +11,7 @@ import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
+import { useNotifications } from '@/contexts/NotificationContext'
 import { getUKTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
 import type { Selection } from '@/lib/exoticKelly'
 import {
@@ -102,7 +103,9 @@ export function AutoBetsPage() {
   const [selectedDate, setSelectedDate] = useState(ukToday)
   const isToday = selectedDate === ukToday
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
+  const { isSupported: pushSupported, permission: pushPermission, isSubscribed: pushSubscribed, requestPermission, subscribe } = useNotifications()
   const [slipHorseIds, setSlipHorseIds] = useState<Set<string>>(new Set())
+  const [pushDismissed, setPushDismissed] = useState(() => sessionStorage.getItem('push-dismissed') === '1')
 
   const toggleSlip = useCallback((horseId: string) => {
     setSlipHorseIds(prev => {
@@ -505,6 +508,36 @@ export function AutoBetsPage() {
             One pick per race. Kelly Criterion sizes the optimal stake.
           </p>
         </div>
+
+        {/* Push notification prompt */}
+        {pushSupported && !pushSubscribed && !pushDismissed && (
+          <div className="bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/20 rounded-xl p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <Bell className="w-5 h-5 text-amber-400 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-300">Enable Push Notifications</p>
+                <p className="text-xs text-gray-400">Get instant alerts for Smart Money moves and new picks</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={async () => {
+                  const ok = await requestPermission()
+                  if (ok) await subscribe()
+                }}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-gray-900 rounded-lg text-xs font-bold transition-colors"
+              >
+                Enable
+              </button>
+              <button
+                onClick={() => { setPushDismissed(true); sessionStorage.setItem('push-dismissed', '1') }}
+                className="text-gray-500 hover:text-gray-300 text-xs"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Smart Money Toast */}
         {smartMoneyToast && (
