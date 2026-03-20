@@ -1,6 +1,6 @@
 // supabase/functions/recalc-stage2/index.ts
 //
-// Live Benter Stage 2 recalculation.
+// Live Benter Stage 2 recalculation + Smart Money detection.
 //
 // Stage 1 (conditional logit) runs once at 9am and is fixed for the day.
 // Stage 2 combines Stage 1 output with market probabilities:
@@ -8,9 +8,9 @@
 //   u_i = model_weight × log(stage1_proba_i) + market_weight × log(market_prob_i)
 //   P(i wins) = exp(u_i) / Σ_j exp(u_j)          [racewise softmax]
 //
-// When odds move (horse is backed / drifts), market_prob changes, so
-// the softmax output changes. This function recalculates ensemble_proba
-// for all races on a given date using the latest current_odds.
+// After recalculating ensemble_proba, scans for "Smart Money" triggers:
+// horses where Benter edge AND market backing converge. Inserts alerts
+// into smart_money_alerts table.
 //
 // Segment weights (from trained Benter bundles):
 //   Flat_Turf:    a=1.9527, b=0.5468
@@ -21,6 +21,27 @@
 //
 // Called by the market-monitor cron after it updates current_odds,
 // or on-demand via POST { date?: "YYYY-MM-DD" }.
+
+interface EntryRow {
+  race_id: string;
+  horse_id: string;
+  horse_name: string | null;
+  stage1_proba: string | null;
+  current_odds: string | null;
+  opening_odds: string | null;
+  ensemble_proba: string | null;
+  benter_proba: string | null;  // actually LightGBM (legacy naming)
+  rf_proba: string | null;
+  xgboost_proba: string | null;
+}
+
+interface RaceRow {
+  race_id: string;
+  type: string;
+  surface: string;
+  course: string;
+  off_time: string;
+}
 
 Deno.serve(async (req) => {
   const CORS = {
@@ -52,7 +73,6 @@ Deno.serve(async (req) => {
       ? await req.json().catch(() => ({}))
       : {};
 
-    // Default to today's UK date
     const ukNow = new Date(
       new Date().toLocaleString("en-US", { timeZone: "Europe/London" })
     );
@@ -66,7 +86,6 @@ Deno.serve(async (req) => {
       "Content-Type": "application/json",
     };
 
-    // ── Segment weights from trained Benter models ──────────────────────
     const SEGMENT_WEIGHTS: Record<string, { a: number; b: number }> = {
       Flat_Turf: { a: 1.9526746421597867, b: 0.5468448239024457 },
       Flat_AW: { a: 2.364569392693001, b: 0.15805944852676032 },
@@ -75,40 +94,36 @@ Deno.serve(async (req) => {
       NH_Flat_Turf: { a: 0.5874636542265078, b: 0.331126154869991 },
     };
 
-    // ── 1) Fetch races for this date (need type + surface for segment) ──
+    // ── 1) Fetch races for this date ─────────────────────────────────────
     const racesUrl =
-      `${SUPABASE_URL}/rest/v1/races?date=eq.${targetDate}&select=race_id,type,surface`;
+      `${SUPABASE_URL}/rest/v1/races?date=eq.${targetDate}&select=race_id,type,surface,course,off_time`;
     const racesResp = await fetch(racesUrl, { headers: restHeaders });
     if (!racesResp.ok) throw new Error(`Races fetch failed: ${racesResp.status}`);
-    const races: { race_id: string; type: string; surface: string }[] =
-      await racesResp.json();
+    const races: RaceRow[] = await racesResp.json();
 
     if (!races.length) {
       return json({ success: true, message: "No races for date", date: targetDate, updated: 0 });
     }
 
-    // Map race_id → segment
     const raceSegment = new Map<string, string>();
+    const raceInfo = new Map<string, { course: string; off_time: string }>();
     for (const r of races) {
       const seg = `${(r.type || "").replace(/ /g, "_")}_${r.surface || ""}`;
       raceSegment.set(r.race_id, seg);
+      raceInfo.set(r.race_id, { course: r.course || "", off_time: r.off_time || "" });
     }
 
-    // ── 2) Fetch all entries for these races ────────────────────────────
+    // ── 2) Fetch all entries (with extra fields for smart money) ─────────
     const raceIds = races.map((r) => r.race_id);
-    let allEntries: {
-      race_id: string;
-      horse_id: string;
-      stage1_proba: string | null;
-      current_odds: string | null;
-    }[] = [];
+    let allEntries: EntryRow[] = [];
 
     const BATCH = 50;
+    const entryCols = "race_id,horse_id,horse_name,stage1_proba,current_odds,opening_odds,ensemble_proba,benter_proba,rf_proba,xgboost_proba";
     for (let i = 0; i < raceIds.length; i += BATCH) {
       const batch = raceIds.slice(i, i + BATCH);
       const inList = batch.map(encodeURIComponent).join(",");
       const url =
-        `${SUPABASE_URL}/rest/v1/race_entries?race_id=in.(${inList})&select=race_id,horse_id,stage1_proba,current_odds`;
+        `${SUPABASE_URL}/rest/v1/race_entries?race_id=in.(${inList})&select=${entryCols}`;
       const resp = await fetch(url, { headers: restHeaders });
       if (!resp.ok) throw new Error(`Entries fetch failed: ${resp.status}`);
       const data = await resp.json();
@@ -116,7 +131,7 @@ Deno.serve(async (req) => {
     }
 
     // ── 3) Group by race and recalculate Stage 2 ────────────────────────
-    const byRace = new Map<string, typeof allEntries>();
+    const byRace = new Map<string, EntryRow[]>();
     for (const e of allEntries) {
       if (!byRace.has(e.race_id)) byRace.set(e.race_id, []);
       byRace.get(e.race_id)!.push(e);
@@ -124,6 +139,8 @@ Deno.serve(async (req) => {
 
     const EPS = 1e-8;
     const updates: { race_id: string; horse_id: string; ensemble_proba: number }[] = [];
+    // Store old ensemble_proba per horse for smart money "morning edge" comparison
+    const morningEnsemble = new Map<string, number>();
     let skippedNoS1 = 0;
     let skippedNoWeights = 0;
     let recalcedRaces = 0;
@@ -137,7 +154,6 @@ Deno.serve(async (req) => {
 
       const { a, b } = SEGMENT_WEIGHTS[segment];
 
-      // Check all runners have stage1_proba
       const hasS1 = entries.every(
         (e) => e.stage1_proba !== null && e.stage1_proba !== undefined
       );
@@ -146,13 +162,18 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Parse Stage 1 probabilities
+      // Store pre-recalc ensemble_proba as "morning" value
+      for (const e of entries) {
+        const key = `${e.race_id}::${e.horse_id}`;
+        const oldVal = Number(e.ensemble_proba);
+        morningEnsemble.set(key, Number.isFinite(oldVal) ? oldVal : 0);
+      }
+
       const s1 = entries.map((e) => {
         const v = Number(e.stage1_proba);
         return Number.isFinite(v) && v > 0 ? v : EPS;
       });
 
-      // Parse current odds → market probabilities (remove overround per race)
       const rawMarket = entries.map((e) => {
         const odds = Number(e.current_odds);
         return Number.isFinite(odds) && odds > 1 ? 1.0 / odds : 0;
@@ -162,14 +183,12 @@ Deno.serve(async (req) => {
         ? rawMarket.map((v) => v / marketSum)
         : rawMarket;
 
-      // Racewise softmax: u_i = a*log(s1_i) + b*log(market_i)
       const u = entries.map((_, idx) => {
         const logS1 = Math.log(Math.max(s1[idx], EPS));
         const logM = Math.log(Math.max(marketProb[idx], EPS));
         return a * logS1 + b * logM;
       });
 
-      // Numerical stability: subtract max
       const maxU = Math.max(...u);
       const expU = u.map((v) => Math.exp(v - maxU));
       const sumExp = expU.reduce((s, v) => s + v, 0);
@@ -207,6 +226,133 @@ Deno.serve(async (req) => {
       await Promise.all(promises);
     }
 
+    // ── 5) Smart Money Detection ────────────────────────────────────────
+    // After recalculation, scan for horses where:
+    // - Already a Top Pick candidate (edge>=5%, odds<=13, ensemble>=15%, 2+ models)
+    // - Backed >=15% from opening (current_odds < opening_odds * 0.85)
+    // - Live edge still >=10% (double the base threshold)
+    // - Kelly-qualified (>=£1 after rounding to nearest 50p)
+    // - Race still upcoming
+
+    const ukNowMs = ukNow.getTime();
+    const smartAlerts: {
+      race_id: string;
+      horse_id: string;
+      horse_name: string;
+      course: string;
+      off_time: string;
+      date: string;
+      opening_odds: number;
+      current_odds: number;
+      pct_backed: number;
+      morning_ensemble: number;
+      live_ensemble: number;
+      morning_edge: number;
+      live_edge: number;
+      kelly_stake: number;
+    }[] = [];
+
+    // Build a lookup from updates for the new ensemble_proba
+    const newEnsembleMap = new Map<string, number>();
+    for (const u of updates) {
+      newEnsembleMap.set(`${u.race_id}::${u.horse_id}`, u.ensemble_proba);
+    }
+
+    // Use a reasonable bankroll estimate for Kelly (£200 default — matches user's starting bankroll)
+    const KELLY_BANKROLL = 200;
+
+    for (const e of allEntries) {
+      const key = `${e.race_id}::${e.horse_id}`;
+      const liveEnsemble = newEnsembleMap.get(key);
+      if (liveEnsemble === undefined) continue;
+
+      const openOdds = Number(e.opening_odds);
+      const curOdds = Number(e.current_odds);
+      if (!Number.isFinite(openOdds) || openOdds <= 1) continue;
+      if (!Number.isFinite(curOdds) || curOdds <= 1) continue;
+
+      // Max odds 12/1 = decimal 13
+      if (curOdds > 13) continue;
+
+      // Minimum ensemble probability 15%
+      if (liveEnsemble < 0.15) continue;
+
+      // Model agreement: count how many of the 3 independent models agree
+      const impliedProb = 1 / curOdds;
+      let modelAgreement = 0;
+      const lgbm = Number(e.benter_proba);
+      const rf = Number(e.rf_proba);
+      const xgb = Number(e.xgboost_proba);
+      if (Number.isFinite(lgbm) && lgbm > impliedProb) modelAgreement++;
+      if (Number.isFinite(rf) && rf > impliedProb) modelAgreement++;
+      if (Number.isFinite(xgb) && xgb > impliedProb) modelAgreement++;
+      if (modelAgreement < 2) continue;
+
+      // Edge checks
+      const liveEdge = liveEnsemble - impliedProb;
+      if (liveEdge < 0.10) continue; // must be 10%+ edge for smart money
+
+      // Backing check: current_odds < opening_odds * 0.85 means backed >=15%
+      if (curOdds >= openOdds * 0.85) continue;
+      const pctBacked = ((openOdds - curOdds) / openOdds) * 100;
+
+      // Kelly sizing
+      const kellyFraction = liveEdge / (curOdds - 1);
+      const quarterKelly = Math.min(kellyFraction / 4, 0.03);
+      const rawStake = KELLY_BANKROLL * quarterKelly;
+      const stake = Math.round(rawStake * 2) / 2; // nearest 50p
+      if (stake < 1) continue;
+
+      // Race still upcoming? (compare off_time against UK now)
+      const ri = raceInfo.get(e.race_id);
+      if (ri?.off_time) {
+        const [h, m] = (ri.off_time.substring(0, 5)).split(":").map(Number);
+        if (!isNaN(h) && !isNaN(m)) {
+          const raceDate = new Date(ukNow);
+          raceDate.setHours(h, m, 0, 0);
+          if (raceDate.getTime() <= ukNowMs) continue; // race already off
+        }
+      }
+
+      const morningEns = morningEnsemble.get(key) ?? 0;
+      const morningImplied = openOdds > 1 ? 1 / openOdds : 0;
+      const morningEdge = morningEns - morningImplied;
+
+      smartAlerts.push({
+        race_id: e.race_id,
+        horse_id: e.horse_id,
+        horse_name: e.horse_name || "Unknown",
+        course: ri?.course || "",
+        off_time: ri?.off_time || "",
+        date: targetDate,
+        opening_odds: openOdds,
+        current_odds: curOdds,
+        pct_backed: pctBacked,
+        morning_ensemble: morningEns,
+        live_ensemble: liveEnsemble,
+        morning_edge: morningEdge,
+        live_edge: liveEdge,
+        kelly_stake: stake,
+      });
+    }
+
+    // ── 6) Upsert smart money alerts ────────────────────────────────────
+    let alertsInserted = 0;
+    for (const alert of smartAlerts) {
+      try {
+        const upsertUrl = `${SUPABASE_URL}/rest/v1/smart_money_alerts`;
+        const resp = await fetch(upsertUrl, {
+          method: "POST",
+          headers: {
+            ...restHeaders,
+            Prefer: "resolution=merge-duplicates,return=minimal",
+          },
+          body: JSON.stringify(alert),
+        });
+        if (resp.ok) alertsInserted++;
+      } catch { /* non-fatal */ }
+    }
+
     return json({
       success: true,
       date: targetDate,
@@ -215,6 +361,8 @@ Deno.serve(async (req) => {
       entries_total: updates.length,
       skipped_no_stage1: skippedNoS1,
       skipped_no_segment_weights: skippedNoWeights,
+      smart_money_alerts: alertsInserted,
+      smart_money_candidates: smartAlerts.length,
     });
   } catch (error) {
     console.error("recalc-stage2 error:", error);

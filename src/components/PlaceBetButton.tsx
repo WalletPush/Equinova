@@ -22,6 +22,7 @@ interface PlaceBetButtonProps {
   customRaceEntryId?: string
   raceId?: string
   horseId?: string
+  kellyStake?: number | null
 }
 
 export function PlaceBetButton({ 
@@ -34,7 +35,8 @@ export function PlaceBetButton({
   onSuccess,
   customRaceEntryId,
   raceId,
-  horseId
+  horseId,
+  kellyStake,
 }: PlaceBetButtonProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isBetPlaced, setIsBetPlaced] = useState(false)
@@ -111,6 +113,9 @@ export function PlaceBetButton({
     if (!horseId) {
       setError('Cannot place bet: missing race_entries.horse_id. Please shortlist from AI Insider or use a selection with a valid horse_id.')
       return
+    }
+    if (kellyStake && kellyStake > 0) {
+      setBetAmount(kellyStake.toFixed(2))
     }
     setShowBettingModal(true)
     setError(null)
@@ -190,6 +195,12 @@ export function PlaceBetButton({
                     <span className="text-yellow-400 font-medium">{odds}</span>
                   </div>
                 )}
+                {kellyStake != null && kellyStake > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span>Kelly suggests:</span>
+                    <span className="text-yellow-400 font-medium">£{kellyStake.toFixed(2)}</span>
+                  </div>
+                )}
               </div>
             </div>
             
@@ -205,7 +216,7 @@ export function PlaceBetButton({
                 value={betAmount}
                 onChange={(e) => setBetAmount(e.target.value)}
                 className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-yellow-400"
-                placeholder="Enter bet amount"
+                placeholder={kellyStake && kellyStake > 0 ? `Kelly: £${kellyStake.toFixed(2)}` : 'Enter bet amount'}
                 autoFocus
               />
             </div>

@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useCallback } from 'react'
+import React, { useMemo, useState, useCallback, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { PlaceBetButton } from '@/components/PlaceBetButton'
@@ -31,7 +31,30 @@ import {
   Calendar,
   Plus,
   Minus,
+  Zap,
+  Bell,
+  Flame,
 } from 'lucide-react'
+
+interface SmartMoneyAlert {
+  id: string
+  race_id: string
+  horse_id: string
+  horse_name: string
+  course: string
+  off_time: string
+  date: string
+  opening_odds: number
+  current_odds: number
+  pct_backed: number
+  morning_ensemble: number
+  live_ensemble: number
+  morning_edge: number
+  live_edge: number
+  kelly_stake: number
+  triggered_at: string
+  notified: boolean
+}
 
 interface TopPick {
   race_id: string
@@ -77,6 +100,7 @@ export function AutoBetsPage() {
   const { user } = useAuth()
   const ukToday = getUKDate()
   const [selectedDate, setSelectedDate] = useState(ukToday)
+  const isToday = selectedDate === ukToday
   const { bankroll, needsSetup, addFunds, isAddingFunds } = useBankroll()
   const [slipHorseIds, setSlipHorseIds] = useState<Set<string>>(new Set())
 
@@ -182,6 +206,45 @@ export function AutoBetsPage() {
     enabled: !!user,
     staleTime: 30_000,
   })
+
+  // Smart Money Alerts
+  const qc = useQueryClient()
+  const [smartMoneyToast, setSmartMoneyToast] = useState<SmartMoneyAlert | null>(null)
+
+  const { data: smartAlerts = [] } = useQuery<SmartMoneyAlert[]>({
+    queryKey: ['smart-money-alerts', selectedDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('smart_money_alerts')
+        .select('*')
+        .eq('date', selectedDate)
+        .order('triggered_at', { ascending: false })
+      if (error) throw error
+      return (data ?? []) as SmartMoneyAlert[]
+    },
+    staleTime: 15_000,
+    refetchInterval: isToday ? 60_000 : false,
+  })
+
+  useEffect(() => {
+    if (!isToday) return
+    const channel = supabase
+      .channel('smart-money-realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'smart_money_alerts',
+      }, (payload) => {
+        const alert = payload.new as SmartMoneyAlert
+        if (alert.date === ukToday) {
+          qc.invalidateQueries({ queryKey: ['smart-money-alerts', ukToday] })
+          setSmartMoneyToast(alert)
+          setTimeout(() => setSmartMoneyToast(null), 12_000)
+        }
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [isToday, ukToday, qc])
 
   const userBets = useMemo(() => {
     const bets = userBetsData ?? []
@@ -382,7 +445,6 @@ export function AutoBetsPage() {
   }, [picks, slipHorseIds])
 
   const isLoading = loadingEntries
-  const isToday = selectedDate === ukToday
 
   return (
     <AppLayout>
@@ -443,6 +505,48 @@ export function AutoBetsPage() {
             One pick per race. Kelly Criterion sizes the optimal stake.
           </p>
         </div>
+
+        {/* Smart Money Toast */}
+        {smartMoneyToast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9998] animate-bounce">
+            <div className="bg-gradient-to-r from-amber-600 to-orange-600 border-2 border-yellow-400 rounded-xl px-5 py-3 shadow-2xl shadow-amber-500/30 flex items-center gap-3 max-w-sm">
+              <Flame className="w-5 h-5 text-yellow-200 animate-pulse flex-shrink-0" />
+              <div>
+                <div className="text-xs font-bold text-yellow-100 uppercase tracking-wider">Smart Money Alert</div>
+                <div className="text-sm font-semibold text-white">
+                  {smartMoneyToast.horse_name} — {smartMoneyToast.course} {smartMoneyToast.off_time?.substring(0, 5)}
+                </div>
+                <div className="text-[10px] text-yellow-200">
+                  Edge +{(smartMoneyToast.live_edge * 100).toFixed(1)}% · Backed {smartMoneyToast.pct_backed.toFixed(0)}% · Kelly £{smartMoneyToast.kelly_stake.toFixed(2)}
+                </div>
+              </div>
+              <button onClick={() => setSmartMoneyToast(null)} className="text-yellow-200 hover:text-white ml-1">
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Smart Money Confirmed Section */}
+        {smartAlerts.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wider">Smart Money Confirmed</h2>
+              <span className="text-xs text-gray-500">{smartAlerts.length} alert{smartAlerts.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {smartAlerts.map(alert => (
+                <SmartMoneyCard
+                  key={alert.id}
+                  alert={alert}
+                  bet={betsByHorse.get(`${alert.race_id}:${alert.horse_id}`)}
+                  needsSetup={needsSetup}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Your bankroll summary */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -873,6 +977,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
               jockeyName={pick.jockey}
               trainerName={pick.trainer}
               size="small"
+              kellyStake={kellyInfo?.stake ?? null}
             />
           ) : null}
           </div>
@@ -906,4 +1011,90 @@ function fmtPos(p: number | null) {
   if (p === 2) return '2nd'
   if (p === 3) return '3rd'
   return `${p}th`
+}
+
+// ─── Smart Money Card ───────────────────────────────────────────────────
+
+function SmartMoneyCard({ alert, bet, needsSetup }: {
+  alert: SmartMoneyAlert
+  bet?: any
+  needsSetup: boolean
+}) {
+  const hasBet = !!bet
+
+  return (
+    <div className="relative bg-gray-900/90 backdrop-blur-sm border-2 border-amber-500/40 rounded-2xl overflow-hidden animate-[pulse_3s_ease-in-out_infinite]"
+      style={{ boxShadow: '0 0 20px rgba(245,158,11,0.15), inset 0 1px 0 rgba(245,158,11,0.1)' }}>
+      <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-orange-500/5 pointer-events-none" />
+
+      <div className="px-4 py-3 border-b border-amber-500/20 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+              Smart Money Confirmed
+            </span>
+          </div>
+          <span className="text-[10px] text-amber-400/70">
+            {new Date(alert.triggered_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
+
+      <div className="p-4 relative">
+        <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+          <span className="font-medium text-gray-300">{alert.course}</span>
+          <span>·</span>
+          <span>{alert.off_time?.substring(0, 5)}</span>
+        </div>
+
+        <h3 className="text-lg font-bold text-white mb-3">{alert.horse_name}</h3>
+
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="bg-gray-800/80 rounded-lg p-2.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Live Edge</div>
+            <div className="text-sm font-bold text-green-400">+{(alert.live_edge * 100).toFixed(1)}%</div>
+          </div>
+          <div className="bg-gray-800/80 rounded-lg p-2.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Backed</div>
+            <div className="text-sm font-bold text-amber-400">{alert.pct_backed.toFixed(0)}%</div>
+          </div>
+          <div className="bg-gray-800/80 rounded-lg p-2.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Odds</div>
+            <div className="text-sm font-bold text-white">
+              <span className="text-gray-500 line-through text-[10px] mr-1">{formatOdds(String(alert.opening_odds))}</span>
+              {formatOdds(String(alert.current_odds))}
+            </div>
+          </div>
+          <div className="bg-gray-800/80 rounded-lg p-2.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Kelly Stake</div>
+            <div className="text-sm font-bold text-yellow-400">£{alert.kelly_stake.toFixed(2)}</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-[10px] text-gray-500 mb-3">
+          <span>Morning: {(alert.morning_ensemble * 100).toFixed(1)}%</span>
+          <span>→</span>
+          <span className="text-green-400">Live: {(alert.live_ensemble * 100).toFixed(1)}%</span>
+        </div>
+
+        {hasBet ? (
+          <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30 w-full justify-center">
+            <CheckCircle className="w-4 h-4" />
+            Bet Placed
+          </span>
+        ) : !needsSetup ? (
+          <PlaceBetButton
+            horseName={alert.horse_name}
+            horseId={alert.horse_id}
+            raceId={alert.race_id}
+            raceContext={{ race_id: alert.race_id, course_name: alert.course, off_time: alert.off_time }}
+            odds={alert.current_odds}
+            size="normal"
+            kellyStake={alert.kelly_stake}
+          />
+        ) : null}
+      </div>
+    </div>
+  )
 }
