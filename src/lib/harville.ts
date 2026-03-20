@@ -394,7 +394,64 @@ export function computeRaceExotics(
   const trifectas = computeTrifectas(runners, bankroll, 3)
     .filter(t => t.total_stake > 0)
 
-  if (forecasts.length === 0 && tricasts.length === 0 && exactas.length === 0 && trifectas.length === 0) return null
+  // Deduplicate: for each pair/trio, keep only the bet style with higher EV/£
+  const pairKey = (a: string, b: string) => [a, b].sort().join(':')
+  const trioKey = (a: string, b: string, c: string) => [a, b, c].sort().join(':')
+
+  // --- Forecasts vs Exactas ---
+  // Build map of best straight forecast EV per unordered pair
+  const straightPairEV = new Map<string, number>()
+  for (const fc of forecasts) {
+    const key = pairKey(fc.first.horse_id, fc.second.horse_id)
+    const ev = fc.harville_prob * fc.estimated_market_odds - 1
+    const existing = straightPairEV.get(key)
+    if (existing === undefined || ev > existing) straightPairEV.set(key, ev)
+  }
+
+  const pairsWonByExacta = new Set<string>()
+  const dedupedExactas = exactas.filter(ex => {
+    const key = pairKey(ex.horses[0].horse_id, ex.horses[1].horse_id)
+    const exactaEV = ex.harville_prob * (ex.estimated_market_odds / ex.num_lines) - 1
+    const bestStraightEV = straightPairEV.get(key) ?? -Infinity
+    if (exactaEV > bestStraightEV) {
+      pairsWonByExacta.add(key)
+      return true
+    }
+    return false
+  })
+
+  const dedupedForecasts = forecasts.filter(fc => {
+    const key = pairKey(fc.first.horse_id, fc.second.horse_id)
+    return !pairsWonByExacta.has(key)
+  })
+
+  // --- Tricasts vs Trifectas ---
+  const straightTrioEV = new Map<string, number>()
+  for (const tc of tricasts) {
+    const key = trioKey(tc.first.horse_id, tc.second.horse_id, tc.third.horse_id)
+    const ev = tc.harville_prob * tc.estimated_market_odds - 1
+    const existing = straightTrioEV.get(key)
+    if (existing === undefined || ev > existing) straightTrioEV.set(key, ev)
+  }
+
+  const triosWonByTrifecta = new Set<string>()
+  const dedupedTrifectas = trifectas.filter(tf => {
+    const key = trioKey(tf.horses[0].horse_id, tf.horses[1].horse_id, tf.horses[2].horse_id)
+    const trifectaEV = tf.harville_prob * (tf.estimated_market_odds / tf.num_lines) - 1
+    const bestStraightEV = straightTrioEV.get(key) ?? -Infinity
+    if (trifectaEV > bestStraightEV) {
+      triosWonByTrifecta.add(key)
+      return true
+    }
+    return false
+  })
+
+  const dedupedTricasts = tricasts.filter(tc => {
+    const key = trioKey(tc.first.horse_id, tc.second.horse_id, tc.third.horse_id)
+    return !triosWonByTrifecta.has(key)
+  })
+
+  if (dedupedForecasts.length === 0 && dedupedTricasts.length === 0 && dedupedExactas.length === 0 && dedupedTrifectas.length === 0) return null
 
   return {
     race_id,
@@ -402,9 +459,9 @@ export function computeRaceExotics(
     off_time,
     race_type,
     field_size: runners.length,
-    forecasts,
-    tricasts,
-    exactas,
-    trifectas,
+    forecasts: dedupedForecasts,
+    tricasts: dedupedTricasts,
+    exactas: dedupedExactas,
+    trifectas: dedupedTrifectas,
   }
 }
