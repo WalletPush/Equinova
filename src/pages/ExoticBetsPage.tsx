@@ -12,7 +12,6 @@ import {
   computeRaceExotics,
   type Runner, type RaceExotics,
   type ForecastPick, type TricastPick,
-  type ExactaPick, type TrifectaPick,
 } from '@/lib/harville'
 import {
   Trophy,
@@ -30,7 +29,6 @@ import {
   Loader2,
   X,
   XCircle,
-  Shuffle,
 } from 'lucide-react'
 
 type SettledResult = 'won' | 'lost' | null
@@ -38,8 +36,6 @@ type SettledResult = 'won' | 'lost' | null
 interface ExoticRaceWithResults extends RaceExotics {
   forecastResults: SettledResult[]
   tricastResults: SettledResult[]
-  exactaResults: SettledResult[]
-  trifectaResults: SettledResult[]
 }
 
 export function ExoticBetsPage() {
@@ -235,26 +231,7 @@ export function ExoticBetsPage() {
         return (pos1 === 1 && pos2 === 2 && pos3 === 3) ? 'won' : 'lost'
       })
 
-      const exactaResults: SettledResult[] = exotics.exactas.map(ex => {
-        if (!hasResults || !raceFinished) return null
-        const posA = lookupPos(ex.horses[0].horse_name)
-        const posB = lookupPos(ex.horses[1].horse_name)
-        if (posA === null || posB === null) return null
-        const top2 = new Set([posA, posB])
-        return (top2.has(1) && top2.has(2)) ? 'won' : 'lost'
-      })
-
-      const trifectaResults: SettledResult[] = exotics.trifectas.map(tf => {
-        if (!hasResults || !raceFinished) return null
-        const posA = lookupPos(tf.horses[0].horse_name)
-        const posB = lookupPos(tf.horses[1].horse_name)
-        const posC = lookupPos(tf.horses[2].horse_name)
-        if (posA === null || posB === null || posC === null) return null
-        const top3 = new Set([posA, posB, posC])
-        return (top3.has(1) && top3.has(2) && top3.has(3)) ? 'won' : 'lost'
-      })
-
-      results.push({ ...exotics, forecastResults, tricastResults, exactaResults, trifectaResults })
+      results.push({ ...exotics, forecastResults, tricastResults })
     }
 
     results.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
@@ -263,14 +240,12 @@ export function ExoticBetsPage() {
 
   const totalForecasts = exoticRaces.reduce((s, r) => s + r.forecasts.length, 0)
   const totalTricasts = exoticRaces.reduce((s, r) => s + r.tricasts.length, 0)
-  const totalExactas = exoticRaces.reduce((s, r) => s + r.exactas.length, 0)
-  const totalTrifectas = exoticRaces.reduce((s, r) => s + r.trifectas.length, 0)
 
   const { upcomingRaces, settledRaces } = useMemo(() => {
     const upcoming: ExoticRaceWithResults[] = []
     const settled: ExoticRaceWithResults[] = []
     for (const race of exoticRaces) {
-      const allResults = [...race.forecastResults, ...race.tricastResults, ...race.exactaResults, ...race.trifectaResults]
+      const allResults = [...race.forecastResults, ...race.tricastResults]
       const isSettled = allResults.some(r => r !== null)
       if (isSettled) settled.push(race)
       else upcoming.push(race)
@@ -302,28 +277,6 @@ export function ExoticBetsPage() {
         } else {
           losses++
           dayPL -= tc.kelly_stake
-        }
-      })
-      race.exactaResults.forEach((result, i) => {
-        if (result === null) return
-        const ex = race.exactas[i]
-        if (result === 'won') {
-          wins++
-          dayPL += ex.total_stake * (ex.estimated_market_odds / ex.num_lines - 1)
-        } else {
-          losses++
-          dayPL -= ex.total_stake
-        }
-      })
-      race.trifectaResults.forEach((result, i) => {
-        if (result === null) return
-        const tf = race.trifectas[i]
-        if (result === 'won') {
-          wins++
-          dayPL += tf.total_stake * (tf.estimated_market_odds / tf.num_lines - 1)
-        } else {
-          losses++
-          dayPL -= tf.total_stake
         }
       })
     }
@@ -375,10 +328,7 @@ export function ExoticBetsPage() {
             </p>
             <p className="text-xs text-gray-400 leading-relaxed mb-2">
               <span className="text-amber-300 font-medium">Forecast</span> = predict 1st and 2nd in exact order.{' '}
-              <span className="text-amber-300 font-medium">Tricast</span> = predict 1st, 2nd, and 3rd in exact order.{' '}
-              <span className="text-amber-300 font-medium">Exacta</span> = predict 1st and 2nd in any order (2 lines).{' '}
-              <span className="text-amber-300 font-medium">Trifecta</span> = predict 1st, 2nd, and 3rd in any order (6 lines).
-              All bets are Kelly-qualified — only shown when the model finds genuine edge.
+              <span className="text-amber-300 font-medium">Tricast</span> = predict 1st, 2nd, and 3rd in exact order.
             </p>
             <p className="text-xs text-gray-400 leading-relaxed">
               The <span className="text-amber-300 font-medium">Harville formula</span> derives these probabilities from
@@ -407,26 +357,18 @@ export function ExoticBetsPage() {
         </div>
 
         {/* Summary stats */}
-        <div className="grid grid-cols-5 gap-2">
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-2.5 text-center">
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Races</div>
-            <div className="text-base font-bold text-white">{exoticRaces.length}</div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Races</div>
+            <div className="text-lg font-bold text-white">{exoticRaces.length}</div>
           </div>
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-2.5 text-center">
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Forecasts</div>
-            <div className="text-base font-bold text-amber-400">{totalForecasts}</div>
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Forecasts</div>
+            <div className="text-lg font-bold text-amber-400">{totalForecasts}</div>
           </div>
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-2.5 text-center">
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Tricasts</div>
-            <div className="text-base font-bold text-purple-400">{totalTricasts}</div>
-          </div>
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-2.5 text-center">
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Exactas</div>
-            <div className="text-base font-bold text-cyan-400">{totalExactas}</div>
-          </div>
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-2.5 text-center">
-            <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Trifectas</div>
-            <div className="text-base font-bold text-pink-400">{totalTrifectas}</div>
+          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Tricasts</div>
+            <div className="text-lg font-bold text-purple-400">{totalTricasts}</div>
           </div>
         </div>
 
@@ -444,7 +386,7 @@ export function ExoticBetsPage() {
               <Target className="w-4 h-4 text-amber-400" />
               <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Upcoming</h2>
               <span className="text-xs text-gray-500">
-                {upcomingRaces.reduce((s, r) => s + r.forecasts.length + r.tricasts.length + r.exactas.length + r.trifectas.length, 0)} picks
+                {upcomingRaces.reduce((s, r) => s + r.forecasts.length + r.tricasts.length, 0)} picks
               </span>
             </div>
             <div className="space-y-4">
@@ -471,7 +413,7 @@ export function ExoticBetsPage() {
                 <Trophy className="w-4 h-4 text-gray-400" />
                 <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Results</h2>
                 <span className="text-xs text-gray-500">
-                  {settledRaces.reduce((s, r) => s + r.forecasts.length + r.tricasts.length + r.exactas.length + r.trifectas.length, 0)} settled
+                  {settledRaces.reduce((s, r) => s + r.forecasts.length + r.tricasts.length, 0)} settled
                 </span>
               </div>
               {settledSummary && (
@@ -518,7 +460,7 @@ function RaceCard({ race, isExpanded, onToggle, placedBetKeys, betsByKey, needsS
   needsSetup: boolean
 }) {
   const bestForecast = race.forecasts[0]
-  const allResults = [...race.forecastResults, ...race.tricastResults, ...race.exactaResults, ...race.trifectaResults]
+  const allResults = [...race.forecastResults, ...race.tricastResults]
   const raceWins = allResults.filter(r => r === 'won').length
   const raceLosses = allResults.filter(r => r === 'lost').length
   const isSettled = raceWins > 0 || raceLosses > 0
@@ -546,18 +488,6 @@ function RaceCard({ race, isExpanded, onToggle, placedBetKeys, betsByKey, needsS
               <span className="text-[10px] text-purple-400 flex items-center gap-1">
                 <Trophy className="w-3 h-3" />
                 {race.tricasts.length} tricast{race.tricasts.length !== 1 ? 's' : ''}
-              </span>
-            )}
-            {race.exactas.length > 0 && (
-              <span className="text-[10px] text-cyan-400 flex items-center gap-1">
-                <Shuffle className="w-3 h-3" />
-                {race.exactas.length} exacta{race.exactas.length !== 1 ? 's' : ''}
-              </span>
-            )}
-            {race.trifectas.length > 0 && (
-              <span className="text-[10px] text-pink-400 flex items-center gap-1">
-                <Shuffle className="w-3 h-3" />
-                {race.trifectas.length} trifecta{race.trifectas.length !== 1 ? 's' : ''}
               </span>
             )}
             {bestForecast && !isSettled && (
@@ -625,62 +555,6 @@ function RaceCard({ race, isExpanded, onToggle, placedBetKeys, betsByKey, needsS
                     needsSetup={needsSetup}
                   />
                 ))}
-              </div>
-            </div>
-          )}
-
-          {race.exactas.length > 0 && (
-            <div>
-              <h3 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Shuffle className="w-3.5 h-3.5" />
-                Exactas (1st + 2nd in any order — 2 lines)
-              </h3>
-              <div className="space-y-3">
-                {race.exactas.map((ex, i) => {
-                  const nameKey = `${ex.horses[0].horse_name} & ${ex.horses[1].horse_name} (Exacta)`
-                  return (
-                    <ExactaCard
-                      key={i}
-                      pick={ex}
-                      rank={i + 1}
-                      raceId={race.race_id}
-                      course={race.course}
-                      offTime={race.off_time}
-                      result={race.exactaResults[i]}
-                      bet={betsByKey.get(`${race.race_id}:${nameKey}`)}
-                      isPlaced={placedBetKeys.has(`${race.race_id}:${nameKey}`)}
-                      needsSetup={needsSetup}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {race.trifectas.length > 0 && (
-            <div>
-              <h3 className="text-xs font-semibold text-pink-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Shuffle className="w-3.5 h-3.5" />
-                Trifectas (1st + 2nd + 3rd in any order — 6 lines)
-              </h3>
-              <div className="space-y-3">
-                {race.trifectas.map((tf, i) => {
-                  const nameKey = `${tf.horses[0].horse_name} & ${tf.horses[1].horse_name} & ${tf.horses[2].horse_name} (Trifecta)`
-                  return (
-                    <TrifectaCard
-                      key={i}
-                      pick={tf}
-                      rank={i + 1}
-                      raceId={race.race_id}
-                      course={race.course}
-                      offTime={race.off_time}
-                      result={race.trifectaResults[i]}
-                      bet={betsByKey.get(`${race.race_id}:${nameKey}`)}
-                      isPlaced={placedBetKeys.has(`${race.race_id}:${nameKey}`)}
-                      needsSetup={needsSetup}
-                    />
-                  )
-                })}
               </div>
             </div>
           )}
@@ -1034,160 +908,6 @@ function TricastCard({ pick, rank, raceId, course, offTime, result, bet, isPlace
             offTime={offTime}
             estimatedOdds={pick.estimated_market_odds}
             kellyStake={pick.kelly_stake}
-            isPlaced={isPlaced}
-            needsSetup={needsSetup}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Exacta Card (any order, 2 lines) ──────────────────────────────────
-
-function ExactaCard({ pick, rank, raceId, course, offTime, result, bet, isPlaced, needsSetup }: {
-  pick: ExactaPick; rank: number; raceId: string; course: string; offTime: string
-  result: SettledResult; bet?: any; isPlaced: boolean; needsSetup: boolean
-}) {
-  const isSettled = result !== null
-  const nameKey = `${pick.horses[0].horse_name} & ${pick.horses[1].horse_name} (Exacta)`
-  const borderColor = isSettled
-    ? result === 'won' ? 'border-green-500/30' : 'border-red-500/20'
-    : 'border-cyan-500/20'
-
-  return (
-    <div className={`bg-gray-800/60 border ${borderColor} rounded-xl p-3`}>
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] bg-cyan-500/20 text-cyan-400 font-bold px-2 py-0.5 rounded-full">#{rank}</span>
-          <span className="text-[10px] font-semibold text-cyan-400">
-            Edge: {pick.edge_pct.toFixed(0)}%
-          </span>
-          <span className="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">ANY ORDER</span>
-        </div>
-        {isSettled ? (
-          <ResultBadge result={result} stake={pick.total_stake} estimatedReturn={pick.total_stake * (pick.estimated_market_odds / pick.num_lines)} bet={bet} />
-        ) : (
-          <div className="flex items-center gap-1 text-yellow-400">
-            <Gauge className="w-3 h-3" />
-            <span className="text-xs font-medium">£{pick.total_stake.toFixed(2)}</span>
-            <span className="text-[9px] text-gray-500">(2 × £{pick.kelly_unit_stake.toFixed(2)})</span>
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        {pick.horses.map((h, idx) => (
-          <div key={h.horse_id} className="flex items-center gap-2">
-            <span className={`text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center ${
-              idx === 0 ? 'bg-cyan-500/30 text-cyan-300' : 'bg-gray-600/50 text-gray-300'
-            }`}>
-              {idx === 0 ? '1' : '2'}
-            </span>
-            <span className={`text-sm flex-1 ${idx === 0 ? 'font-semibold text-white' : 'font-medium text-gray-300'}`}>
-              {h.horse_name}
-            </span>
-            <span className="text-xs text-gray-400">{formatOdds(h.odds)}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-700/50">
-        <div className="flex items-center gap-3 text-[10px] text-gray-500">
-          <span>Model: {(pick.harville_prob * 100).toFixed(2)}%</span>
-          <span>Market: {(pick.market_prob * 100).toFixed(2)}%</span>
-          <span>~{Math.round(pick.estimated_market_odds)}/1</span>
-        </div>
-      </div>
-
-      {!isSettled && (
-        <div className="mt-3">
-          <ExoticPlaceBetButton
-            betLabel="Exacta"
-            horseName={nameKey}
-            horseId={pick.horses[0].horse_id}
-            raceId={raceId}
-            course={course}
-            offTime={offTime}
-            estimatedOdds={pick.estimated_market_odds}
-            kellyStake={pick.total_stake}
-            isPlaced={isPlaced}
-            needsSetup={needsSetup}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Trifecta Card (any order, 6 lines) ────────────────────────────────
-
-function TrifectaCard({ pick, rank, raceId, course, offTime, result, bet, isPlaced, needsSetup }: {
-  pick: TrifectaPick; rank: number; raceId: string; course: string; offTime: string
-  result: SettledResult; bet?: any; isPlaced: boolean; needsSetup: boolean
-}) {
-  const isSettled = result !== null
-  const nameKey = `${pick.horses[0].horse_name} & ${pick.horses[1].horse_name} & ${pick.horses[2].horse_name} (Trifecta)`
-  const borderColor = isSettled
-    ? result === 'won' ? 'border-green-500/30' : 'border-red-500/20'
-    : 'border-pink-500/20'
-
-  return (
-    <div className={`bg-gray-800/60 border ${borderColor} rounded-xl p-3`}>
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] bg-pink-500/20 text-pink-400 font-bold px-2 py-0.5 rounded-full">#{rank}</span>
-          <span className="text-[10px] font-semibold text-pink-400">
-            Edge: {pick.edge_pct.toFixed(0)}%
-          </span>
-          <span className="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">ANY ORDER</span>
-        </div>
-        {isSettled ? (
-          <ResultBadge result={result} stake={pick.total_stake} estimatedReturn={pick.total_stake * (pick.estimated_market_odds / pick.num_lines)} bet={bet} />
-        ) : (
-          <div className="flex items-center gap-1 text-yellow-400">
-            <Gauge className="w-3 h-3" />
-            <span className="text-xs font-medium">£{pick.total_stake.toFixed(2)}</span>
-            <span className="text-[9px] text-gray-500">(6 × £{pick.kelly_unit_stake.toFixed(2)})</span>
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        {pick.horses.map((h, idx) => (
-          <div key={h.horse_id} className="flex items-center gap-2">
-            <span className={`text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center ${
-              idx === 0 ? 'bg-pink-500/30 text-pink-300' : idx === 1 ? 'bg-pink-500/20 text-pink-300' : 'bg-gray-600/30 text-gray-400'
-            }`}>
-              {idx + 1}
-            </span>
-            <span className={`text-sm flex-1 ${idx === 0 ? 'font-semibold text-white' : idx === 1 ? 'font-medium text-gray-300' : 'font-medium text-gray-400'}`}>
-              {h.horse_name}
-            </span>
-            <span className="text-xs text-gray-400">{formatOdds(h.odds)}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-700/50">
-        <div className="flex items-center gap-3 text-[10px] text-gray-500">
-          <span>Model: {(pick.harville_prob * 100).toFixed(3)}%</span>
-          <span>Market: {(pick.market_prob * 100).toFixed(3)}%</span>
-          <span>~{Math.round(pick.estimated_market_odds)}/1</span>
-        </div>
-      </div>
-
-      {!isSettled && (
-        <div className="mt-3">
-          <ExoticPlaceBetButton
-            betLabel="Trifecta"
-            horseName={nameKey}
-            horseId={pick.horses[0].horse_id}
-            raceId={raceId}
-            course={course}
-            offTime={offTime}
-            estimatedOdds={pick.estimated_market_odds}
-            kellyStake={pick.total_stake}
             isPlaced={isPlaced}
             needsSetup={needsSetup}
           />
