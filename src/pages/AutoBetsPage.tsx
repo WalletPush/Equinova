@@ -256,6 +256,7 @@ export function AutoBetsPage() {
         }
 
         let modelAgreement = 0
+        // DB column mapping: ensemble_proba = Benter Stage 2 (MAIN), benter_proba = LightGBM (legacy naming)
         const probaFields = ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const
         for (const field of probaFields) {
           const myVal = Number(e[field]) || 0

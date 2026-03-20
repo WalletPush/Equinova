@@ -43,9 +43,21 @@ Two separate codebases work together:
 
 **Dropped:** MLP model and Fusion/naive ensemble averaging.
 
+**CRITICAL — Database Column Name Mapping (DO NOT FORGET):**
+
+| Database column | Actual model | Notes |
+|----------------|--------------|-------|
+| `ensemble_proba` | **Benter Stage 2 output** | THE MAIN MODEL. Drives all picks, Kelly sizing, Top Picks. |
+| `stage1_proba` | **Benter Stage 1 output** | Conditional Logit raw probabilities. Fixed at 9am, used for live Stage 2 recalculation. |
+| `benter_proba` | **LightGBM** | CONFUSING NAME — this is NOT the Benter model. It's the LightGBM base model. Legacy naming from `predict_v2.py` line 55: `'lgbm': 'benter_proba'`. |
+| `rf_proba` | Random Forest | Base model, observation only. |
+| `xgboost_proba` | XGBoost | Base model, observation only. |
+
 **CRITICAL — Model identity:**
 - `ensemble_proba` IS the Benter model output. The "Ensemble" card on the Results page IS the Benter model. NEVER confuse this.
+- `benter_proba` is **LightGBM**, NOT the Benter model. The naming is a legacy artefact from `predict_v2.py` where `PROBA_COLUMNS = {'lgbm': 'benter_proba'}`.
 - The Benter model is a two-stage system: Stage 1 (Conditional Logit for raw probabilities) → Stage 2 (Market Integration combining with implied odds via racewise softmax). Its output is stored as `ensemble_proba`.
+- `stage1_proba` stores the frozen Stage 1 conditional logit output. This does NOT change during the day. Stage 2 is recalculated live when odds move via the `recalc-stage2` edge function.
 - LightGBM, XGBoost, and Random Forest are independent base models for observation/display ONLY. They do NOT influence picks, Kelly sizing, or `ensemble_proba`.
 - After ~1 month of live results, proven signals from base models can be fed as additional features into Benter Stage 1.
 
@@ -134,6 +146,7 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 6. **NEVER run the pipeline scripts (data_collection, 10_model_scheduler, predict_v2, push_to_supabase) with any venv other than `~/aiwinnersenclosure/venv/bin/python3`.** Match what `equinova_daily_runner.py` uses.
 7. **ALL 9 data collection sub-scripts are CRITICAL.** Every single one (racecards, horse form, horse distance, jockey distance, trainer distance, trainer results, jockey results, owner results, market movements) feeds features into the prediction models. If ANY fail or are skipped, predictions will have NULLs and Top Picks won't work.
 8. **VERIFY before reporting.** Never tell the user something is done unless you have confirmed it with evidence (correct status codes, row counts, file sizes, etc.).
+9. **NEVER confuse database column names with model names.** `benter_proba` = LightGBM (legacy naming). `ensemble_proba` = Benter Stage 2 (THE main model). `stage1_proba` = Benter Stage 1 (conditional logit). This mapping is documented above and MUST be memorised. Do NOT "discover" this again — it is KNOWN.
 
 ## Edge Functions (key ones)
 
@@ -146,6 +159,7 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 | `get-user-bets` | Returns user's bets from `bets` table |
 | `place-bet` | Places a bet for the user |
 | `auto-place-bets` | System auto-betting driven by dynamic signals + Kelly staking |
+| `recalc-stage2` | Live Benter Stage 2 recalculation — re-runs racewise softmax with frozen `stage1_proba` + latest `current_odds`. Called by market monitor after odds update. |
 | `complete-csv-import` | Imports predictions CSV into Supabase |
 
 ## Market Movement Architecture
@@ -156,6 +170,38 @@ TheRacingAPI → Z1-Z8 scripts → race_data_YYYY_MM_DD.db (daily SQLite)
 - `race-data` edge function computes market movement inline: `opening_odds` vs `current_odds` → steaming/drifting/stable
 - Top Picks page also computes movement directly from `race_entries.opening_odds` vs `current_odds`
 - The `horse_market_movement` Supabase table is legacy — no longer used for market movement display
+
+## Live Benter Stage 2 Recalculation
+
+When odds move during the day, `ensemble_proba` MUST be recalculated. This is how Benter's original system worked — the model adapts to late money.
+
+**Stage 2 formula (racewise softmax):**
+```
+u_i = model_weight × log(stage1_proba_i) + market_weight × log(market_prob_i)
+P(i wins) = exp(u_i) / Σ_j exp(u_j)
+```
+
+**Segment weights (from trained bundles, stored in `recalc-stage2` edge function):**
+| Segment | model_weight (a) | market_weight (b) |
+|---------|-----------------|-------------------|
+| Flat_Turf | 1.9527 | 0.5468 |
+| Flat_AW | 2.3646 | 0.1581 |
+| Hurdle_Turf | 2.4193 | 0.4129 |
+| Chase_Turf | 3.1392 | 0.2782 |
+| NH_Flat_Turf | 0.5875 | 0.3311 |
+
+**Flow:**
+1. Morning: `predict_v2.py` runs Stage 1 → stores `stage1_proba` (fixed for the day)
+2. Morning: Stage 2 combines with `current_odds` → initial `ensemble_proba`
+3. Throughout day: `racing-market-monitor-cron` updates `current_odds` from Betfair
+4. After odds update: market monitor triggers `recalc-stage2` edge function
+5. `recalc-stage2` re-runs Stage 2 softmax with frozen `stage1_proba` + new `current_odds` → updates `ensemble_proba`
+
+**Key files:**
+- `supabase/functions/recalc-stage2/index.ts` — the recalculation edge function
+- `~/EquiNOVA/scripts/predict_v2.py` — stores `stage1_proba` alongside `ensemble_proba`
+- `~/EquiNOVA/scripts/push_to_supabase.py` — pushes `stage1_proba` to Supabase
+- `supabase/functions/racing-market-monitor-cron/index.ts` — triggers recalc after updating odds
 
 ## Top Picks Selection Criteria
 
