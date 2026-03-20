@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { AppLayout } from '@/components/AppLayout'
-import { NotificationSettings } from '@/components/NotificationSettings'
 import { useAuth } from '@/contexts/AuthContext'
 import { 
   User, 
@@ -191,9 +190,6 @@ export function SettingsPage() {
             </button>
           </form>
         </div>
-
-        {/* Notification Settings */}
-        <NotificationSettings />
 
         {/* AI Features Info */}
         <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-6">

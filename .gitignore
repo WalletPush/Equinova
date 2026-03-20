@@ -27,3 +27,6 @@ npm-debug.log*
 pnpm-debug.log*
 .vercel
 .env*.local
+
+# macOS Finder copy artifacts (e.g. "index 2.ts")
+*\ [0-9]*

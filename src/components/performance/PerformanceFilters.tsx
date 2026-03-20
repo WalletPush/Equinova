@@ -33,11 +33,11 @@ const RACE_TYPE_OPTIONS = [
 
 const MODEL_OPTIONS = [
   { value: 'all', label: 'All Models' },
-  { value: 'benter', label: 'Benter' },
+  { value: 'benter', label: 'LightGBM' },
   { value: 'rf', label: 'Random Forest' },
   { value: 'mlp', label: 'MLP' },
   { value: 'xgboost', label: 'XGBoost' },
-  { value: 'ensemble', label: 'Ensemble' },
+  { value: 'ensemble', label: 'Benter' },
 ]
 
 export const SIGNAL_OPTIONS = [

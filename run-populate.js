@@ -1,8 +1,12 @@
 const https = require('https');
 
-// You'll need to replace this with your actual service role key
-const SERVICE_ROLE_KEY = 'YOUR_SERVICE_ROLE_KEY_HERE';
-const FUNCTION_URL = 'https://nzabewdpotnlttftimej.supabase.co/functions/v1/populate-ml-performance-data';
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+if (!SERVICE_ROLE_KEY || !SUPABASE_URL) {
+  console.error('Missing env vars. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
+  process.exit(1);
+}
+const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/populate-ml-performance-data`;
 
 const options = {
   method: 'POST',

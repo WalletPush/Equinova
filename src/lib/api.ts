@@ -1,12 +1,12 @@
 // API client utilities
 const getSupabaseConfig = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL || 'https://nzabewdpotnlttftimej.supabase.co'
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56YWJld2Rwb3RubHR0ZnRpbWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0Nzk2NzYsImV4cCI6MjA4NjA1NTY3Nn0.tdmtly1nth6-9JQZv31gmJgFS_bpuhy97IOpWY228CE'
-  
+  const url = import.meta.env.VITE_SUPABASE_URL
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
   if (!url || !anonKey) {
     throw new Error('Missing Supabase environment variables. Check your .env file.')
   }
-  
+
   return { url, anonKey }
 }
 

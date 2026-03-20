@@ -168,8 +168,8 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
 
     // Model-by-model analysis using normalized probabilities
     const models: { key: string; label: string; field: ProbaField }[] = [
-      { key: 'ensemble', label: 'Ensemble', field: 'ensemble_proba' },
-      { key: 'benter', label: 'Benter', field: 'benter_proba' },
+      { key: 'ensemble', label: 'Benter', field: 'ensemble_proba' },
+      { key: 'benter', label: 'LightGBM', field: 'benter_proba' },
       { key: 'mlp', label: 'MLP', field: 'mlp_proba' },
       { key: 'rf', label: 'Random Forest', field: 'rf_proba' },
       { key: 'xgboost', label: 'XGBoost', field: 'xgboost_proba' },

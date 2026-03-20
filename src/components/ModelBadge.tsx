@@ -68,12 +68,12 @@ export const MODEL_DEFS: ModelDef[] = [
     field: 'ensemble_proba',
     label: 'ENS',
     color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    name: 'Ensemble (All Models)',
-    description: 'Combines the predictions of all four models above into one consensus pick — strength in numbers.',
+    name: 'Benter (Main Model)',
+    description: 'Two-stage model combining conditional logit with market integration — adapts to live odds throughout the day.',
     strengths: [
       'Most consistent performer across all race types',
-      'Smooths out individual model weaknesses',
-      'When all models agree, confidence is highest',
+      'Blends statistical form with market intelligence',
+      'Recalculates in real-time as odds move pre-race',
     ],
   },
 ]

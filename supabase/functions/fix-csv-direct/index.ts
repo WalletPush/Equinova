@@ -116,63 +116,10 @@ Deno.serve(async (req) => {
             }
         }
 
-        // Now let's also apply a broader fix using SQL for common patterns
-        // This will set default values for remaining NULL fields based on realistic racing statistics
-        const sqlFixes = [
-            // Set reasonable defaults for trainer percentages at distance (5-15%)
-            `UPDATE race_entries 
-             SET trainer_win_percentage_at_distance = CASE 
-                 WHEN trainer_id LIKE 'trn_%' THEN (RANDOM() * 0.10 + 0.05)
-                 ELSE 0.08 
-             END
-             WHERE trainer_win_percentage_at_distance IS NULL;`,
-            
-            // Set reasonable defaults for trainer percentages at course (5-20%)
-            `UPDATE race_entries 
-             SET trainer_win_percentage_at_course = CASE 
-                 WHEN trainer_id LIKE 'trn_%' THEN (RANDOM() * 15.0 + 5.0)
-                 ELSE 8.5 
-             END
-             WHERE trainer_win_percentage_at_course IS NULL;`,
-            
-            // Set reasonable defaults for jockey percentages at distance (8-18%)
-            `UPDATE race_entries 
-             SET jockey_win_percentage_at_distance = CASE 
-                 WHEN jockey_id LIKE 'jky_%' THEN (RANDOM() * 0.10 + 0.08)
-                 ELSE 0.10 
-             END
-             WHERE jockey_win_percentage_at_distance IS NULL;`,
-            
-            // Set reasonable defaults for horse percentages at distance (0-25%)
-            `UPDATE race_entries 
-             SET horse_win_percentage_at_distance = CASE 
-                 WHEN horse_id LIKE 'hrs_%' THEN (RANDOM() * 0.25)
-                 ELSE 0.05 
-             END
-             WHERE horse_win_percentage_at_distance IS NULL;`
-        ];
-
-        let sqlUpdates = 0;
-        for (const sql of sqlFixes) {
-            try {
-                const sqlResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/execute_sql`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${serviceRoleKey}`,
-                        'apikey': serviceRoleKey,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ query: sql })
-                });
-                
-                if (sqlResponse.ok) {
-                    sqlUpdates++;
-                    console.log(`SQL fix ${sqlUpdates} applied successfully`);
-                }
-            } catch (sqlError) {
-                console.warn('SQL fix failed:', sqlError.message);
-            }
-        }
+        // REMOVED: Random imputation of NULL trainer/jockey/horse stats was here.
+        // Writing RANDOM() values into feature columns contaminates model signals.
+        // NULLs should remain NULL — the prediction pipeline handles missing data.
+        const sqlUpdates = 0;
 
         // Verify the fix by counting non-NULL values
         const verifyResponse = await fetch(

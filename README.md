@@ -1,53 +1,104 @@
-# React + TypeScript + Vite
+# EquiNOVA
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A self-learning horse racing prediction and betting platform. Uses multiple ML models trained on historical UK/IRE race data, a Benter-style two-stage probability model with live market integration, and a dynamic signal scanner that discovers profitable betting patterns.
 
-Currently, two official plugins are available:
+## Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+**Frontend:** React 18 · TypeScript · Vite · TailwindCSS · TanStack Query · Recharts
+**Backend:** Supabase (PostgreSQL) · Edge Functions (Deno/TypeScript)
+**Auth:** Supabase Auth
+**ML Pipeline:** Python 3 (scikit-learn, LightGBM, XGBoost, pandas, numpy, scipy) — separate repo at `~/EquiNOVA/scripts/`
+**Hosting:** Vercel (frontend) · Supabase (database + edge functions)
+**CI:** GitHub Actions (cron jobs for results/market monitoring)
 
-## Expanding the ESLint configuration
+## Local Development
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+### Prerequisites
 
-- Configure the top-level `parserOptions` property like this:
+- Node.js 18+
+- pnpm
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+### Setup
+
+```bash
+# Clone the repo
+git clone https://github.com/WalletPush/Equinova.git
+cd Equinova
+
+# Install dependencies
+pnpm install
+
+# Create .env from the example
+cp .env.example .env
+# Fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+
+# Start dev server
+pnpm dev
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+### Environment Variables
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+| Variable | Description |
+|----------|-------------|
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous (public) API key |
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+Both are **required** — the app will throw on startup if either is missing.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Frontend (React + Vite)                            │
+│  Vercel → reads from Supabase                       │
+├─────────────────────────────────────────────────────┤
+│  Supabase Edge Functions (Deno)                     │
+│  race-data · combo-scanner · recalc-stage2          │
+│  place-bet · get-user-bankroll · etc.               │
+├─────────────────────────────────────────────────────┤
+│  Supabase PostgreSQL                                │
+│  races · race_entries · race_results · bets         │
+│  user_bankroll · dynamic_signal_combos              │
+├─────────────────────────────────────────────────────┤
+│  ML Pipeline (Python — separate codebase)           │
+│  TheRacingAPI → SQLite → feature eng → predictions  │
+│  → push_to_supabase.py → race_entries               │
+└─────────────────────────────────────────────────────┘
 ```
 
-Preview test: update on feature/sanity-check
-# Build test
+### ML Models
+
+| Model | DB Column | Role |
+|-------|-----------|------|
+| Benter (Conditional Logit + Market Integration) | `ensemble_proba` | **Main model** — drives picks, Kelly sizing, Top Picks |
+| LightGBM | `benter_proba` | Independent base model (observation only) |
+| XGBoost | `xgboost_proba` | Independent base model (observation only) |
+| Random Forest | `rf_proba` | Independent base model (observation only) |
+
+The Benter model is a two-stage system: Stage 1 produces raw conditional logit probabilities (`stage1_proba`), Stage 2 blends them with market-implied odds via racewise softmax to produce `ensemble_proba`. Stage 2 is recalculated live when odds move.
+
+### Frontend Pages
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| Landing | `/` | Marketing / sign-up |
+| Today's Races | `/races` | Daily races with AI predictions and market movement |
+| Top Picks | `/auto-bets` | AI-discovered profitable patterns matched to today's runners |
+| Results | `/previous` | Historical race results with model accuracy tracking |
+| Performance | `/performance` | Betting performance, equity curve, bankroll management |
+| ML Tracker | `/ml-tracker` | Model accuracy metrics by segment |
+| Settings | `/settings` | User preferences |
+
+## Deployment
+
+The frontend deploys automatically to **Vercel** on push to `main` via GitHub integration.
+
+Edge functions are deployed to **Supabase** via the Supabase MCP tool.
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `pnpm dev` | Start local dev server |
+| `pnpm build` | Production build (TypeScript check + Vite build) |
+| `pnpm lint` | Run ESLint |

@@ -942,7 +942,7 @@ export function PreviousRacesPage() {
                       return (
                         <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs bg-gray-700/40 text-gray-400">
                           <span className="font-medium">No model predicted the winner</span>
-                          <span className="ml-1">— Ensemble pick {mlPick.horse_name} {outcome}</span>
+                          <span className="ml-1">— Benter pick {mlPick.horse_name} {outcome}</span>
                         </div>
                       )
                     }

@@ -2,9 +2,11 @@
 async function triggerMLPipeline() {
   console.log('🚀 Starting manual ML performance pipeline for September 5th...');
   
-  const SUPABASE_URL = 'https://nzabewdpotnlttftimej.supabase.co';
-  // You'll need to replace this with your actual service role key
-  const SERVICE_ROLE_KEY = 'YOUR_SERVICE_ROLE_KEY_HERE';
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    throw new Error('Missing env vars. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
+  }
   
   try {
     // Step 1: Trigger populate-ml-performance-data
@@ -57,21 +59,13 @@ async function triggerMLPipeline() {
   }
 }
 
-// Show instructions
 console.log(`
-⚠️  SETUP REQUIRED:
-1. Replace 'YOUR_SERVICE_ROLE_KEY_HERE' with your actual Supabase service role key
-2. Run: node manual-ml-trigger.js
+Usage:
+  SUPABASE_URL=https://... SUPABASE_SERVICE_ROLE_KEY=... node manual-ml-trigger.js
 
-🔧 To get your service role key:
-1. Go to Supabase Dashboard → Settings → API
-2. Copy the 'service_role' secret key (not the anon public key)
-3. Replace it in this script
-
-📝 This script will:
+This script will:
 - Trigger populate-ml-performance-data for all recent races
 - Trigger update-ml-model-performance to update aggregated stats
 `);
 
-// Uncomment the line below after adding your service role key
-// triggerMLPipeline();
+triggerMLPipeline();

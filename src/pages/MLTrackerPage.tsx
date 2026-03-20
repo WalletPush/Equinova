@@ -102,7 +102,7 @@ const modelConfig: Record<ModelName, {
     borderColor: 'border-orange-500/30'
   },
   ensemble: {
-    full_name: 'Ensemble Model',
+    full_name: 'Benter Model',
     icon: Crown,
     color: 'from-yellow-500 to-yellow-600',
     bgColor: 'bg-yellow-500/10',
