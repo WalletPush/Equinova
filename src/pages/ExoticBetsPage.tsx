@@ -241,7 +241,7 @@ export function ExoticBetsPage() {
         let pos = racePositions[bare]
         if (pos !== undefined) return pos
         for (const [name, p] of Object.entries(racePositions)) {
-          if (name.startsWith(bare) || bare.startsWith(name)) return p
+          if (name.startsWith(bare) || bare.startsWith(name)) return p as number
         }
         return null
       }
