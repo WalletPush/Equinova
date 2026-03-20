@@ -22,6 +22,7 @@ import { PerformancePage } from '@/pages/PerformancePage'
 import { BankrollPage } from '@/pages/BankrollPage'
 import { MLTrackerPage } from '@/pages/MLTrackerPage'
 import { AutoBetsPage } from '@/pages/AutoBetsPage'
+import { ExoticBetsPage } from '@/pages/ExoticBetsPage'
 import './App.css'
 
 const queryClient = new QueryClient({
@@ -84,6 +85,11 @@ function App() {
                   <Route path="/auto-bets" element={
                     <ProtectedRoute>
                       <AutoBetsPage />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/exotic-bets" element={
+                    <ProtectedRoute>
+                      <ExoticBetsPage />
                     </ProtectedRoute>
                   } />
                   <Route path="/settings" element={

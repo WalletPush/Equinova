@@ -13,6 +13,7 @@ import {
   Clock,
   Zap,
   Brain,
+  Layers,
 } from 'lucide-react'
 
 interface AppLayoutProps {
@@ -48,6 +49,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const bottomNavItems = [
     { to: '/races', icon: CalendarDays, label: 'Today', active: 'races' },
     { to: '/auto-bets', icon: Zap, label: 'Top Picks', active: 'auto-bets' },
+    { to: '/exotic-bets', icon: Layers, label: 'Exotics', active: 'exotic-bets' },
     { to: '/previous', icon: Trophy, label: 'Results', active: 'previous' },
     { to: '/performance', icon: TrendingUp, label: 'Performance', active: 'performance' },
   ]
