@@ -79,10 +79,11 @@ export function computeForecasts(
   const modelNorm = normaliseProbs(runners, 'win_prob')
   const marketNorm = normaliseProbs(runners, 'market_prob')
 
+  const top = [...runners].sort((a, b) => b.win_prob - a.win_prob).slice(0, 8)
   const picks: ForecastPick[] = []
 
-  for (const a of runners) {
-    for (const b of runners) {
+  for (const a of top) {
+    for (const b of top) {
       if (a.horse_id === b.horse_id) continue
 
       const pA = modelNorm.get(a.horse_id) || 0
@@ -137,12 +138,13 @@ export function computeTricasts(
   const modelNorm = normaliseProbs(runners, 'win_prob')
   const marketNorm = normaliseProbs(runners, 'market_prob')
 
+  const top = [...runners].sort((a, b) => b.win_prob - a.win_prob).slice(0, 6)
   const picks: TricastPick[] = []
 
-  for (const a of runners) {
-    for (const b of runners) {
+  for (const a of top) {
+    for (const b of top) {
       if (b.horse_id === a.horse_id) continue
-      for (const c of runners) {
+      for (const c of top) {
         if (c.horse_id === a.horse_id || c.horse_id === b.horse_id) continue
 
         const pA = modelNorm.get(a.horse_id) || 0
@@ -216,10 +218,11 @@ export function computeExactas(
   const modelNorm = normaliseProbs(runners, 'win_prob')
   const marketNorm = normaliseProbs(runners, 'market_prob')
   const seen = new Set<string>()
+  const top = [...runners].sort((a, b) => b.win_prob - a.win_prob).slice(0, 8)
   const picks: ExactaPick[] = []
 
-  for (const a of runners) {
-    for (const b of runners) {
+  for (const a of top) {
+    for (const b of top) {
       if (a.horse_id === b.horse_id) continue
       const pairKey = [a.horse_id, b.horse_id].sort().join(':')
       if (seen.has(pairKey)) continue
@@ -293,12 +296,13 @@ export function computeTrifectas(
   const modelNorm = normaliseProbs(runners, 'win_prob')
   const marketNorm = normaliseProbs(runners, 'market_prob')
   const seen = new Set<string>()
+  const top = [...runners].sort((a, b) => b.win_prob - a.win_prob).slice(0, 6)
   const picks: TrifectaPick[] = []
 
-  for (const a of runners) {
-    for (const b of runners) {
+  for (const a of top) {
+    for (const b of top) {
       if (b.horse_id === a.horse_id) continue
-      for (const c of runners) {
+      for (const c of top) {
         if (c.horse_id === a.horse_id || c.horse_id === b.horse_id) continue
 
         const trioKey = [a.horse_id, b.horse_id, c.horse_id].sort().join(':')
