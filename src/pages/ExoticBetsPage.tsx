@@ -33,9 +33,17 @@ import {
 
 type SettledResult = 'won' | 'lost' | null
 
+interface RaceDividends {
+  csf: number | null        // Computer Straight Forecast dividend (per £1)
+  tricast: number | null    // Tricast dividend (per £1)
+  tote_ex: number | null    // Tote exacta dividend (per £1)
+  tote_trifecta: number | null
+}
+
 interface ExoticRaceWithResults extends RaceExotics {
   forecastResults: SettledResult[]
   tricastResults: SettledResult[]
+  dividends: RaceDividends
 }
 
 export function ExoticBetsPage() {
@@ -78,6 +86,7 @@ export function ExoticBetsPage() {
       const raceIds = races.map(r => r.race_id)
       let allEntries: any[] = []
       let allRunners: any[] = []
+      let allRaceResults: any[] = []
       const batchSize = 50
       for (let i = 0; i < raceIds.length; i += batchSize) {
         const batch = raceIds.slice(i, i + batchSize)
@@ -98,6 +107,12 @@ export function ExoticBetsPage() {
           .not('position', 'is', null)
           .gt('position', 0)
         if (runners) allRunners = allRunners.concat(runners)
+
+        const { data: raceResults } = await supabase
+          .from('race_results')
+          .select('race_id, tote_ex, tote_csf, tote_tricast, tote_trifecta')
+          .in('race_id', batch)
+        if (raceResults) allRaceResults = allRaceResults.concat(raceResults)
       }
 
       const resultsByRace: Record<string, Record<string, number>> = {}
@@ -107,7 +122,24 @@ export function ExoticBetsPage() {
         resultsByRace[r.race_id][bare] = Number(r.position)
       }
 
-      return { races, entries: allEntries, resultsByRace }
+      const parseDividend = (v: string | null | undefined): number | null => {
+        if (!v || typeof v !== 'string') return null
+        const cleaned = v.replace(/[£,]/g, '').trim()
+        const n = parseFloat(cleaned)
+        return Number.isFinite(n) && n > 0 ? n : null
+      }
+
+      const dividendsByRace: Record<string, RaceDividends> = {}
+      for (const rr of allRaceResults) {
+        dividendsByRace[rr.race_id] = {
+          csf: parseDividend(rr.tote_csf),
+          tricast: parseDividend(rr.tote_tricast),
+          tote_ex: parseDividend(rr.tote_ex),
+          tote_trifecta: parseDividend(rr.tote_trifecta),
+        }
+      }
+
+      return { races, entries: allEntries, resultsByRace, dividendsByRace }
     },
     staleTime: 60_000,
   })
@@ -231,7 +263,11 @@ export function ExoticBetsPage() {
         return (pos1 === 1 && pos2 === 2 && pos3 === 3) ? 'won' : 'lost'
       })
 
-      results.push({ ...exotics, forecastResults, tricastResults })
+      const dividends = raceData.dividendsByRace?.[raceId] ?? {
+        csf: null, tricast: null, tote_ex: null, tote_trifecta: null,
+      }
+
+      results.push({ ...exotics, forecastResults, tricastResults, dividends })
     }
 
     results.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
@@ -260,28 +296,40 @@ export function ExoticBetsPage() {
       race.forecastResults.forEach((result, i) => {
         if (result === null) return
         const fc = race.forecasts[i]
+        const bet = betsByKey.get(`${race.race_id}:${fc.first.horse_name} / ${fc.second.horse_name}`)
+        const stake = bet ? Number(bet.bet_amount) : fc.kelly_stake
         if (result === 'won') {
           wins++
-          dayPL += fc.kelly_stake * (fc.estimated_market_odds - 1)
+          const csfDiv = race.dividends.csf
+          const totalReturn = bet ? Number(bet.potential_return)
+            : csfDiv ? stake * csfDiv
+            : stake * fc.estimated_market_odds
+          dayPL += totalReturn
         } else {
           losses++
-          dayPL -= fc.kelly_stake
+          dayPL -= stake
         }
       })
       race.tricastResults.forEach((result, i) => {
         if (result === null) return
         const tc = race.tricasts[i]
+        const bet = betsByKey.get(`${race.race_id}:${tc.first.horse_name} / ${tc.second.horse_name} / ${tc.third.horse_name}`)
+        const stake = bet ? Number(bet.bet_amount) : tc.kelly_stake
         if (result === 'won') {
           wins++
-          dayPL += tc.kelly_stake * (tc.estimated_market_odds - 1)
+          const triDiv = race.dividends.tricast
+          const totalReturn = bet ? Number(bet.potential_return)
+            : triDiv ? stake * triDiv
+            : stake * tc.estimated_market_odds
+          dayPL += totalReturn
         } else {
           losses++
-          dayPL -= tc.kelly_stake
+          dayPL -= stake
         }
       })
     }
     return { wins, losses, dayPL }
-  }, [settledRaces])
+  }, [settledRaces, betsByKey])
 
   if (isLoading) {
     return (
@@ -330,10 +378,16 @@ export function ExoticBetsPage() {
               <span className="text-amber-300 font-medium">Forecast</span> = predict 1st and 2nd in exact order.{' '}
               <span className="text-amber-300 font-medium">Tricast</span> = predict 1st, 2nd, and 3rd in exact order.
             </p>
-            <p className="text-xs text-gray-400 leading-relaxed">
+            <p className="text-xs text-gray-400 leading-relaxed mb-2">
               The <span className="text-amber-300 font-medium">Harville formula</span> derives these probabilities from
               our Benter win probabilities. We compare against the market's implied probabilities to find combos where
               our edge is largest. Kelly Criterion sizes each stake (more conservatively than win bets due to higher variance).
+            </p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Settled returns use <span className="text-amber-300 font-medium">actual CSF &amp; tricast dividends</span> from
+              the Racing API — not model estimates. Future integration with the{' '}
+              <span className="text-amber-300 font-medium">Betfair Exchange API</span> will provide live exchange
+              prices for fully automated exotic bet placement.
             </p>
           </div>
         )}
@@ -528,6 +582,7 @@ function RaceCard({ race, isExpanded, onToggle, placedBetKeys, betsByKey, needsS
                     bet={betsByKey.get(`${race.race_id}:${fc.first.horse_name} / ${fc.second.horse_name}`)}
                     isPlaced={placedBetKeys.has(`${race.race_id}:${fc.first.horse_name} / ${fc.second.horse_name}`)}
                     needsSetup={needsSetup}
+                    csfDividend={race.dividends.csf}
                   />
                 ))}
               </div>
@@ -553,6 +608,7 @@ function RaceCard({ race, isExpanded, onToggle, placedBetKeys, betsByKey, needsS
                     bet={betsByKey.get(`${race.race_id}:${tc.first.horse_name} / ${tc.second.horse_name} / ${tc.third.horse_name}`)}
                     isPlaced={placedBetKeys.has(`${race.race_id}:${tc.first.horse_name} / ${tc.second.horse_name} / ${tc.third.horse_name}`)}
                     needsSetup={needsSetup}
+                    tricastDividend={race.dividends.tricast}
                   />
                 ))}
               </div>
@@ -735,23 +791,31 @@ function ExoticPlaceBetButton({
 
 // ─── Won / Lost Badge ───────────────────────────────────────────────────
 
-function ResultBadge({ result, stake, estimatedReturn, bet }: {
+function ResultBadge({ result, stake, totalReturn, bet, dividend }: {
   result: SettledResult
   stake: number
-  estimatedReturn: number
+  totalReturn: number
   bet?: any
+  dividend?: number | null
 }) {
   if (result === null) return null
 
   if (result === 'won') {
-    const returnAmount = bet ? Number(bet.potential_return) : estimatedReturn
+    const actualReturn = bet ? Number(bet.potential_return) : totalReturn
+    const actualStake = bet ? Number(bet.bet_amount) : stake
     return (
-      <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/30">
-          <CheckCircle className="w-3 h-3" /> WON
-        </span>
-        <span className="text-sm font-bold text-green-400">
-          +£{returnAmount.toFixed(2)}
+      <div className="flex flex-col items-end gap-0.5">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/30">
+            <CheckCircle className="w-3 h-3" /> WON
+          </span>
+          <span className="text-sm font-bold text-green-400">
+            +£{actualReturn.toFixed(2)}
+          </span>
+        </div>
+        <span className="text-[10px] text-gray-500">
+          Staked £{actualStake.toFixed(2)}
+          {dividend ? ` · Div £${dividend.toFixed(2)}` : ''}
         </span>
       </div>
     )
@@ -759,12 +823,17 @@ function ResultBadge({ result, stake, estimatedReturn, bet }: {
 
   const lostAmount = bet ? Number(bet.bet_amount) : stake
   return (
-    <div className="flex items-center gap-2">
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">
-        <XCircle className="w-3 h-3" /> LOST
-      </span>
-      <span className="text-sm font-bold text-red-400">
-        -£{lostAmount.toFixed(2)}
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+          <XCircle className="w-3 h-3" /> LOST
+        </span>
+        <span className="text-sm font-bold text-red-400">
+          -£{lostAmount.toFixed(2)}
+        </span>
+      </div>
+      <span className="text-[10px] text-gray-500">
+        Staked £{lostAmount.toFixed(2)}
       </span>
     </div>
   )
@@ -772,9 +841,10 @@ function ResultBadge({ result, stake, estimatedReturn, bet }: {
 
 // ─── Forecast Card ──────────────────────────────────────────────────────
 
-function ForecastCard({ pick, rank, raceId, course, offTime, result, bet, isPlaced, needsSetup }: {
+function ForecastCard({ pick, rank, raceId, course, offTime, result, bet, isPlaced, needsSetup, csfDividend }: {
   pick: ForecastPick; rank: number; raceId: string; course: string; offTime: string
   result: SettledResult; bet?: any; isPlaced: boolean; needsSetup: boolean
+  csfDividend: number | null
 }) {
   const isSettled = result !== null
   const edgeColor = pick.edge_pct >= 3 ? 'text-green-400' : pick.edge_pct >= 1.5 ? 'text-yellow-400' : 'text-gray-400'
@@ -782,6 +852,13 @@ function ForecastCard({ pick, rank, raceId, course, offTime, result, bet, isPlac
   const borderColor = isSettled
     ? result === 'won' ? 'border-green-500/30' : 'border-red-500/20'
     : 'border-amber-500/20'
+
+  const stake = bet ? Number(bet.bet_amount) : pick.kelly_stake
+  const totalReturn = bet
+    ? Number(bet.potential_return)
+    : csfDividend
+      ? stake * csfDividend
+      : stake * pick.estimated_market_odds
 
   return (
     <div className={`bg-gray-800/60 border ${borderColor} rounded-xl p-3`}>
@@ -791,11 +868,11 @@ function ForecastCard({ pick, rank, raceId, course, offTime, result, bet, isPlac
           <span className={`text-[10px] font-semibold ${edgeColor}`}>Edge: {pick.edge_pct.toFixed(1)}%</span>
         </div>
         {isSettled ? (
-          <ResultBadge result={result} stake={pick.kelly_stake} estimatedReturn={pick.kelly_stake * pick.estimated_market_odds} bet={bet} />
+          <ResultBadge result={result} stake={stake} totalReturn={totalReturn} bet={bet} dividend={csfDividend} />
         ) : pick.kelly_stake > 0 ? (
           <div className="flex items-center gap-1 text-yellow-400">
             <Gauge className="w-3 h-3" />
-            <span className="text-xs font-medium">£{pick.kelly_stake.toFixed(2)}</span>
+            <span className="text-xs font-medium">Kelly: £{pick.kelly_stake.toFixed(2)}</span>
           </div>
         ) : null}
       </div>
@@ -817,7 +894,11 @@ function ForecastCard({ pick, rank, raceId, course, offTime, result, bet, isPlac
         <div className="flex items-center gap-3 text-[10px] text-gray-500">
           <span>Model: {(pick.harville_prob * 100).toFixed(2)}%</span>
           <span>Market: {(pick.market_prob * 100).toFixed(2)}%</span>
-          <span>~{Math.round(pick.estimated_market_odds)}/1</span>
+          {isSettled && csfDividend ? (
+            <span className="text-amber-400 font-medium">CSF: £{csfDividend.toFixed(2)}</span>
+          ) : (
+            <span>~{Math.round(pick.estimated_market_odds)}/1</span>
+          )}
         </div>
       </div>
 
@@ -843,9 +924,10 @@ function ForecastCard({ pick, rank, raceId, course, offTime, result, bet, isPlac
 
 // ─── Tricast Card ───────────────────────────────────────────────────────
 
-function TricastCard({ pick, rank, raceId, course, offTime, result, bet, isPlaced, needsSetup }: {
+function TricastCard({ pick, rank, raceId, course, offTime, result, bet, isPlaced, needsSetup, tricastDividend }: {
   pick: TricastPick; rank: number; raceId: string; course: string; offTime: string
   result: SettledResult; bet?: any; isPlaced: boolean; needsSetup: boolean
+  tricastDividend: number | null
 }) {
   const isSettled = result !== null
   const edgeColor = pick.edge_pct >= 2 ? 'text-green-400' : pick.edge_pct >= 1 ? 'text-yellow-400' : 'text-gray-400'
@@ -853,6 +935,13 @@ function TricastCard({ pick, rank, raceId, course, offTime, result, bet, isPlace
   const borderColor = isSettled
     ? result === 'won' ? 'border-green-500/30' : 'border-red-500/20'
     : 'border-purple-500/20'
+
+  const stake = bet ? Number(bet.bet_amount) : pick.kelly_stake
+  const totalReturn = bet
+    ? Number(bet.potential_return)
+    : tricastDividend
+      ? stake * tricastDividend
+      : stake * pick.estimated_market_odds
 
   return (
     <div className={`bg-gray-800/60 border ${borderColor} rounded-xl p-3`}>
@@ -862,11 +951,11 @@ function TricastCard({ pick, rank, raceId, course, offTime, result, bet, isPlace
           <span className={`text-[10px] font-semibold ${edgeColor}`}>Edge: {pick.edge_pct.toFixed(2)}%</span>
         </div>
         {isSettled ? (
-          <ResultBadge result={result} stake={pick.kelly_stake} estimatedReturn={pick.kelly_stake * pick.estimated_market_odds} bet={bet} />
+          <ResultBadge result={result} stake={stake} totalReturn={totalReturn} bet={bet} dividend={tricastDividend} />
         ) : pick.kelly_stake > 0 ? (
           <div className="flex items-center gap-1 text-yellow-400">
             <Gauge className="w-3 h-3" />
-            <span className="text-xs font-medium">£{pick.kelly_stake.toFixed(2)}</span>
+            <span className="text-xs font-medium">Kelly: £{pick.kelly_stake.toFixed(2)}</span>
           </div>
         ) : null}
       </div>
@@ -893,7 +982,11 @@ function TricastCard({ pick, rank, raceId, course, offTime, result, bet, isPlace
         <div className="flex items-center gap-3 text-[10px] text-gray-500">
           <span>Model: {(pick.harville_prob * 100).toFixed(3)}%</span>
           <span>Market: {(pick.market_prob * 100).toFixed(3)}%</span>
-          <span>~{Math.round(pick.estimated_market_odds)}/1</span>
+          {isSettled && tricastDividend ? (
+            <span className="text-purple-400 font-medium">Tricast: £{tricastDividend.toFixed(2)}</span>
+          ) : (
+            <span>~{Math.round(pick.estimated_market_odds)}/1</span>
+          )}
         </div>
       </div>
 
