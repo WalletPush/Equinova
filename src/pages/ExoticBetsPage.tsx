@@ -378,7 +378,7 @@ export function ExoticBetsPage() {
               <span className="text-amber-300 font-medium">Tricast</span> = predict 1st, 2nd, and 3rd in exact order.{' '}
               <span className="text-amber-300 font-medium">Exacta</span> = predict 1st and 2nd in any order (2 lines).{' '}
               <span className="text-amber-300 font-medium">Trifecta</span> = predict 1st, 2nd, and 3rd in any order (6 lines).
-              Exactas and Trifectas only appear when our model has 50%+ relative edge over the market.
+              All bets are Kelly-qualified — only shown when the model finds genuine edge.
             </p>
             <p className="text-xs text-gray-400 leading-relaxed">
               The <span className="text-amber-300 font-medium">Harville formula</span> derives these probabilities from

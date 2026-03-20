@@ -195,21 +195,20 @@ export function computeTricasts(
 
 export interface ExactaPick {
   horses: [Runner, Runner]
-  harville_prob: number       // combined prob of both orderings
+  harville_prob: number
   market_prob: number
   fair_odds: number
   estimated_market_odds: number
   edge: number
-  edge_pct: number            // relative edge: ((model/market) - 1) × 100
-  kelly_unit_stake: number    // per-line Kelly stake
-  total_stake: number         // kelly_unit_stake × 2
+  edge_pct: number
+  kelly_unit_stake: number
+  total_stake: number
   num_lines: 2
 }
 
 export function computeExactas(
   runners: Runner[],
   bankroll: number,
-  minRelativeEdgePct = 50,
   topN = 5,
 ): ExactaPick[] {
   if (runners.length < 2) return []
@@ -236,20 +235,18 @@ export function computeExactas(
 
       if (hProb <= 0 || mProb <= 0) continue
 
-      const relativeEdgePct = ((hProb / mProb) - 1) * 100
-      if (relativeEdgePct < minRelativeEdgePct) continue
-
       const fairOdds = 1 / hProb
       const estMarketOdds = 1 / mProb
       const edge = hProb - mProb
+      const edgePct = edge * 100
 
       let kellyUnit = 0
-      if (edge > 0 && estMarketOdds > 1 && bankroll > 0) {
+      if (edge > 0.005 && estMarketOdds > 1 && bankroll > 0) {
         const kelly = edge / (estMarketOdds - 1)
         const fraction = Math.min(kelly / 6, 0.02)
         const raw = bankroll * fraction
         kellyUnit = roundTo50p(raw)
-        if (kellyUnit < 1) kellyUnit = 1
+        if (kellyUnit < 1) kellyUnit = 0
       }
 
       picks.push({
@@ -259,7 +256,7 @@ export function computeExactas(
         fair_odds: fairOdds,
         estimated_market_odds: estMarketOdds,
         edge,
-        edge_pct: relativeEdgePct,
+        edge_pct: edgePct,
         kelly_unit_stake: kellyUnit,
         total_stake: kellyUnit * 2,
         num_lines: 2,
@@ -275,21 +272,20 @@ export function computeExactas(
 
 export interface TrifectaPick {
   horses: [Runner, Runner, Runner]
-  harville_prob: number       // combined prob of all 6 orderings
+  harville_prob: number
   market_prob: number
   fair_odds: number
   estimated_market_odds: number
   edge: number
-  edge_pct: number            // relative edge: ((model/market) - 1) × 100
-  kelly_unit_stake: number    // per-line Kelly stake
-  total_stake: number         // kelly_unit_stake × 6
+  edge_pct: number
+  kelly_unit_stake: number
+  total_stake: number
   num_lines: 6
 }
 
 export function computeTrifectas(
   runners: Runner[],
   bankroll: number,
-  minRelativeEdgePct = 50,
   topN = 3,
 ): TrifectaPick[] {
   if (runners.length < 3) return []
@@ -327,20 +323,18 @@ export function computeTrifectas(
 
         if (hProb <= 0 || mProb <= 0) continue
 
-        const relativeEdgePct = ((hProb / mProb) - 1) * 100
-        if (relativeEdgePct < minRelativeEdgePct) continue
-
         const fairOdds = 1 / hProb
         const estMarketOdds = 1 / mProb
         const edge = hProb - mProb
+        const edgePct = edge * 100
 
         let kellyUnit = 0
-        if (edge > 0 && estMarketOdds > 1 && bankroll > 0) {
+        if (edge > 0.003 && estMarketOdds > 1 && bankroll > 0) {
           const kelly = edge / (estMarketOdds - 1)
           const fraction = Math.min(kelly / 8, 0.015)
           const raw = bankroll * fraction
           kellyUnit = roundTo50p(raw)
-          if (kellyUnit < 1) kellyUnit = 1
+          if (kellyUnit < 1) kellyUnit = 0
         }
 
         picks.push({
@@ -350,7 +344,7 @@ export function computeTrifectas(
           fair_odds: fairOdds,
           estimated_market_odds: estMarketOdds,
           edge,
-          edge_pct: relativeEdgePct,
+          edge_pct: edgePct,
           kelly_unit_stake: kellyUnit,
           total_stake: kellyUnit * 6,
           num_lines: 6,
@@ -391,8 +385,10 @@ export function computeRaceExotics(
     .filter(f => f.kelly_stake > 0)
   const tricasts = computeTricasts(runners, bankroll, 3)
     .filter(t => t.kelly_stake > 0)
-  const exactas = computeExactas(runners, bankroll, 50, 5)
-  const trifectas = computeTrifectas(runners, bankroll, 50, 3)
+  const exactas = computeExactas(runners, bankroll, 5)
+    .filter(e => e.total_stake > 0)
+  const trifectas = computeTrifectas(runners, bankroll, 3)
+    .filter(t => t.total_stake > 0)
 
   if (forecasts.length === 0 && tricasts.length === 0 && exactas.length === 0 && trifectas.length === 0) return null
 
