@@ -14,7 +14,7 @@ Deno.serve(async (req)=>{
   }
   try {
     // Get request data
-    const { horse_name, horse_id, race_id, course, off_time, trainer_name, jockey_name, current_odds, bet_amount, odds } = await req.json();
+    const { horse_name, horse_id, race_id, course, off_time, trainer_name, jockey_name, current_odds, bet_amount, odds, bet_type: requestedBetType } = await req.json();
     console.log('Place bet request:', {
       horse_name,
       horse_id,
@@ -56,9 +56,9 @@ Deno.serve(async (req)=>{
     const userData = await userResponse.json();
     const userId = userData.id;
     console.log('User authenticated:', userId);
-    // Require client to provide the race_entries horse_id. Do NOT attempt fuzzy name lookups.
     const resolvedHorseId = horse_id || null;
-    if (!resolvedHorseId) {
+    const isExotic = requestedBetType === 'forecast' || requestedBetType === 'tricast';
+    if (!resolvedHorseId && !isExotic) {
       throw new Error('Missing required horse_id from race_entries. Place bet requests must include race_entries.horse_id')
     }
 
@@ -75,7 +75,7 @@ Deno.serve(async (req)=>{
       jockey_name: jockey_name || '',
       current_odds: current_odds || '',
       bet_amount: bet_amount,
-      bet_type: 'win',
+      bet_type: requestedBetType || 'win',
       status: 'pending',
       potential_return: bet_amount * odds
     };
