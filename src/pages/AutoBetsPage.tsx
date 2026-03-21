@@ -38,6 +38,10 @@ import {
   Bell,
   Flame,
   Eye,
+  Shield,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react'
 
 interface SmartMoneyAlert {
@@ -993,19 +997,20 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
           </div>
         )}
 
-        {/* Mastermind Intelligence */}
+        {/* Mastermind Intelligence + Edge Trust */}
         <div className="mt-3 pt-3 border-t border-gray-800">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {mastermindMatch && (
+                <TrustBadge
+                  ets={mastermindMatch.edge_trust_score}
+                  tier={mastermindMatch.trust_tier}
+                />
+              )}
               {activePatternCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
                   <Brain className="w-3 h-3" />
-                  {activePatternCount} Pattern{activePatternCount !== 1 ? 's' : ''}
-                </span>
-              )}
-              {mastermindMatch && mastermindMatch.total_pattern_count > activePatternCount && (
-                <span className="text-[10px] text-gray-500">
-                  +{mastermindMatch.total_pattern_count - activePatternCount} monitoring
+                  {activePatternCount}
                 </span>
               )}
               {!mastermindMatch && (
@@ -1033,6 +1038,11 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
             isVetoed={mastermindMatch?.is_vetoed ?? false}
             vetoReason={mastermindMatch?.veto_reason ?? null}
             kellyStake={kellyInfo?.stake}
+            edgeTrustScore={mastermindMatch?.edge_trust_score ?? 0}
+            trustTier={mastermindMatch?.trust_tier ?? 'blocked'}
+            kellyMultiplier={mastermindMatch?.kelly_multiplier ?? 0}
+            failureModes={mastermindMatch?.failure_modes ?? []}
+            betQuestions={mastermindMatch?.bet_questions ?? null}
             onClose={() => setShowMastermind(false)}
           />
         )}
@@ -1110,6 +1120,23 @@ function ProbBar({ label, value, icon: Icon, color }: { label: string; value: nu
       </div>
       <span className="text-[11px] text-gray-300 w-8 text-right font-mono">{pct > 0 ? `${pct}%` : '—'}</span>
     </div>
+  )
+}
+
+function TrustBadge({ ets, tier }: { ets: number; tier: string }) {
+  const config = {
+    high:    { bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400', icon: ShieldCheck, label: 'High Trust' },
+    medium:  { bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: Shield, label: 'Medium' },
+    low:     { bg: 'bg-orange-500/15', border: 'border-orange-500/30', text: 'text-orange-400', icon: AlertTriangle, label: 'Low' },
+    blocked: { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: ShieldAlert, label: 'Blocked' },
+  }[tier] ?? { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: ShieldAlert, label: '—' }
+
+  const Icon = config.icon
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${config.bg} ${config.text} border ${config.border}`}>
+      <Icon className="w-3 h-3" />
+      {config.label} {ets > 0 ? `(${ets})` : ''}
+    </span>
   )
 }
 

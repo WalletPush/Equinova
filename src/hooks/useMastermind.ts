@@ -17,6 +17,21 @@ export interface PatternMatch {
   roi_pct: number
   confidence_score: number
   pattern_type: string
+  pqs: number
+  stability_windows: number
+  outlier_trimmed_roi: number
+  drawdown_health: number
+  failure_modes: string[]
+}
+
+export interface BetQuestions {
+  fair_probability: number
+  market_implied: number
+  edge_pct: number
+  evidence_strength: number
+  trust_tier: string
+  worth_betting: boolean
+  stake_fraction: number
 }
 
 export interface MastermindMatch {
@@ -40,6 +55,11 @@ export interface MastermindMatch {
   total_pattern_count: number
   is_vetoed: boolean
   veto_reason: string | null
+  edge_trust_score: number
+  trust_tier: string
+  kelly_multiplier: number
+  failure_modes: string[]
+  bet_questions: BetQuestions
 }
 
 interface MastermindResponse {

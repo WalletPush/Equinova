@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     console.log(`mastermind-scanner: date=${today}`);
 
     // ── Load patterns (paginate past PostgREST 1000-row cap) ──
-    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status";
+    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status,pqs,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,failure_modes,oos_validated";
     const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&pattern_type=eq.PROFITABLE&order=confidence_score.desc`;
     const patterns: MastermindPattern[] = [];
     for (let page = 0; page < 5; page++) {
@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
       if (batch.length < 1000) break;
     }
 
-    const antiUrl = `${supabaseUrl}/rest/v1/mastermind_patterns?select=id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status&pattern_type=eq.ANTI_PATTERN&status=eq.ACTIVE&roi_pct=lte.-40&total_bets=gte.30&limit=200`;
+    const antiUrl = `${supabaseUrl}/rest/v1/mastermind_patterns?select=id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status&pattern_type=eq.ANTI_PATTERN&status=eq.ACTIVE&roi_pct=lte.-15&total_bets=gte.50&limit=500`;
     const antiRes = await fetch(antiUrl, { headers: hdrs });
     const antiPatterns: MastermindPattern[] = antiRes.ok
       ? await antiRes.json()
@@ -166,6 +166,11 @@ Deno.serve(async (req) => {
               roi_pct: pat.roi_pct || 0,
               confidence_score: pat.confidence_score || 0,
               pattern_type: "PROFITABLE",
+              pqs: pat.pqs || 0,
+              stability_windows: pat.stability_windows || 0,
+              outlier_trimmed_roi: pat.outlier_trimmed_roi || 0,
+              drawdown_health: pat.drawdown_health || 0,
+              failure_modes: pat.failure_modes || [],
             });
           }
         }
@@ -197,6 +202,11 @@ Deno.serve(async (req) => {
                 roi_pct: pat.roi_pct || 0,
                 confidence_score: pat.confidence_score || 0,
                 pattern_type: "ANTI_PATTERN",
+                pqs: 0,
+                stability_windows: 0,
+                outlier_trimmed_roi: 0,
+                drawdown_health: 0,
+                failure_modes: [],
               });
             }
           }
@@ -204,15 +214,56 @@ Deno.serve(async (req) => {
 
         if (matchedPatterns.length === 0 && matchedAnti.length === 0) continue;
 
-        // Sort by confidence
         matchedPatterns.sort(
-          (a, b) => (b.confidence_score || 0) - (a.confidence_score || 0)
+          (a, b) => (b.pqs || b.confidence_score || 0) - (a.pqs || a.confidence_score || 0)
         );
 
-        const isVetoed = matchedAnti.length >= 3;
         const activePatterns = matchedPatterns.filter(
           (p) => p.status === "ACTIVE"
         );
+
+        // ETS computation: avg PQS of matched ACTIVE patterns - anti penalty
+        const activePqs = activePatterns.map((p) => p.pqs || 0);
+        const avgPqs = activePqs.length > 0
+          ? activePqs.reduce((a, b) => a + b, 0) / activePqs.length
+          : 0;
+        const antiPenalty = Math.min(40, matchedAnti.length * 10);
+        const ets = Math.max(0, Math.min(100, avgPqs - antiPenalty));
+
+        let trustTier: string;
+        let kellyMultiplier: number;
+        if (ets >= 70) { trustTier = "high"; kellyMultiplier = 1.0; }
+        else if (ets >= 40) { trustTier = "medium"; kellyMultiplier = 0.5; }
+        else if (ets >= 20) { trustTier = "low"; kellyMultiplier = 0.25; }
+        else { trustTier = "blocked"; kellyMultiplier = 0.0; }
+
+        const isVetoed = matchedAnti.length >= 3;
+
+        // Gather failure modes from matched patterns
+        const failureModes = new Set<string>();
+        for (const p of activePatterns) {
+          if (Array.isArray(p.failure_modes)) {
+            for (const fm of p.failure_modes) failureModes.add(fm);
+          }
+        }
+
+        // 7 bet questions for frontend
+        const ensProba = n(entry.ensemble_proba);
+        const curOdds = n(entry.current_odds);
+        const openOdds = n(entry.opening_odds);
+        const betOdds = openOdds > 1 ? openOdds : curOdds;
+        const impliedP = betOdds > 1 ? 1 / betOdds : 0;
+        const edge = ensProba - impliedP;
+
+        const betQuestions = {
+          fair_probability: Math.round(ensProba * 1000) / 10,
+          market_implied: Math.round(impliedP * 1000) / 10,
+          edge_pct: Math.round(edge * 1000) / 10,
+          evidence_strength: ets,
+          trust_tier: trustTier,
+          worth_betting: edge >= 0.05 && trustTier !== "blocked",
+          stake_fraction: kellyMultiplier,
+        };
 
         allMatches.push({
           horse_name: entry.horse_name || "",
@@ -221,9 +272,9 @@ Deno.serve(async (req) => {
           course: race.course_name || "",
           off_time: race.off_time || "",
           segment,
-          current_odds: n(entry.current_odds),
-          opening_odds: n(entry.opening_odds),
-          ensemble_proba: n(entry.ensemble_proba),
+          current_odds: curOdds,
+          opening_odds: openOdds,
+          ensemble_proba: ensProba,
           silk_url: entry.silk_url || null,
           number: entry.number ?? null,
           jockey: entry.jockey_name || "",
@@ -235,8 +286,13 @@ Deno.serve(async (req) => {
           total_pattern_count: matchedPatterns.length,
           is_vetoed: isVetoed,
           veto_reason: isVetoed
-            ? `Matches anti-pattern: ${matchedAnti[0].pattern_label} (${matchedAnti[0].d21_roi_pct}% ROI, ${matchedAnti[0].d21_bets} bets last 21d)`
+            ? `${matchedAnti.length} anti-patterns matched`
             : null,
+          edge_trust_score: Math.round(ets * 10) / 10,
+          trust_tier: trustTier,
+          kelly_multiplier: kellyMultiplier,
+          failure_modes: Array.from(failureModes),
+          bet_questions: betQuestions,
         });
       }
     }
@@ -295,6 +351,13 @@ interface MastermindPattern {
   d21_profit: number;
   confidence_score: number;
   status: string;
+  pqs: number;
+  stability_windows: number;
+  outlier_trimmed_roi: number;
+  max_drawdown: number;
+  drawdown_health: number;
+  failure_modes: string[];
+  oos_validated: boolean;
 }
 
 interface PatternMatch {
@@ -312,6 +375,11 @@ interface PatternMatch {
   roi_pct: number;
   confidence_score: number;
   pattern_type: string;
+  pqs: number;
+  stability_windows: number;
+  outlier_trimmed_roi: number;
+  drawdown_health: number;
+  failure_modes: string[];
 }
 
 interface MastermindMatch {
@@ -335,6 +403,19 @@ interface MastermindMatch {
   total_pattern_count: number;
   is_vetoed: boolean;
   veto_reason: string | null;
+  edge_trust_score: number;
+  trust_tier: string;
+  kelly_multiplier: number;
+  failure_modes: string[];
+  bet_questions: {
+    fair_probability: number;
+    market_implied: number;
+    edge_pct: number;
+    evidence_strength: number;
+    trust_tier: string;
+    worth_betting: boolean;
+    stake_fraction: number;
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════

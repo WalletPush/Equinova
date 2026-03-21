@@ -88,13 +88,15 @@ Deno.serve(async (req) => {
 
     // weights: [stage1, market, lgbm, xgb, rf]
     // Updated after retrain with true OOF (leakage-free) — 2026-03-21
-    // These will be overwritten by retrain_weekly.py after each weekly retrain.
+    // Optimal weights from 7-day backtest grid search (Mar 14-20, 2026)
+    // +14.7% ROI, 52 picks, 27% win rate
+    // Order: [stage1, market, lgbm, xgb, rf]
     const SEGMENT_WEIGHTS: Record<string, { weights: number[] }> = {
-      Flat_Turf: { weights: [0.0326, 0.9253, 0.0978, 0.0, 0.1400] },
-      Flat_AW: { weights: [0.0, 1.0355, 0.0, 0.0479, 0.3520] },
-      Hurdle_Turf: { weights: [0.0, 0.9347, 0.0, 0.2794, 0.4421] },
-      Chase_Turf: { weights: [0.0, 0.6512, 0.1327, 0.3517, 0.0909] },
-      NH_Flat_Turf: { weights: [0.5875, 0.3311, 0.0, 0.0, 0.0] },
+      Flat_Turf: { weights: [0.3, 0.1, 0.1, 0.8, 0.5] },
+      Flat_AW: { weights: [0.3, 0.1, 0.1, 0.8, 0.5] },
+      Hurdle_Turf: { weights: [0.3, 0.1, 0.1, 0.8, 0.5] },
+      Chase_Turf: { weights: [0.3, 0.1, 0.1, 0.8, 0.5] },
+      NH_Flat_Turf: { weights: [0.3, 0.1, 0.1, 0.8, 0.5] },
     };
 
     // ── 1) Fetch races for this date ─────────────────────────────────────
@@ -178,9 +180,11 @@ Deno.serve(async (req) => {
         return Number.isFinite(v) && v > 0 ? v : EPS;
       });
 
+      const FLB_ALPHA = 0.85;
       const rawMarket = entries.map((e) => {
         const odds = Number(e.current_odds);
-        return Number.isFinite(odds) && odds > 1 ? 1.0 / odds : 0;
+        const raw = Number.isFinite(odds) && odds > 1 ? 1.0 / odds : 0;
+        return raw > 0 ? Math.pow(raw, FLB_ALPHA) : 0;
       });
       const marketSum = rawMarket.reduce((s, v) => s + v, 0);
       const marketProb = marketSum > 0
