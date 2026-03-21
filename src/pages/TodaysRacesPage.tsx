@@ -1104,6 +1104,11 @@ export function TodaysRacesPage() {
           antiPatterns={mastermindModalEntry.match.anti_patterns ?? []}
           isVetoed={mastermindModalEntry.match.is_vetoed ?? false}
           vetoReason={mastermindModalEntry.match.veto_reason ?? null}
+          edgeTrustScore={mastermindModalEntry.match.edge_trust_score ?? 0}
+          trustTier={mastermindModalEntry.match.trust_tier ?? 'blocked'}
+          kellyMultiplier={mastermindModalEntry.match.kelly_multiplier ?? 0}
+          failureModes={mastermindModalEntry.match.failure_modes ?? []}
+          betQuestions={mastermindModalEntry.match.bet_questions ?? null}
           onClose={() => setMastermindModalEntry(null)}
         />
       )}
