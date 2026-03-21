@@ -37,7 +37,6 @@ import {
   Zap,
   Bell,
   Flame,
-  ShieldAlert,
   Eye,
 } from 'lucide-react'
 
@@ -93,13 +92,12 @@ interface TopPick {
   implied_prob: number
   odds_movement: 'steaming' | 'drifting' | 'stable' | null
   odds_movement_pct: number | null
-  model_agreement: number
 }
 
 const MIN_EDGE = 0.05
-const MAX_ODDS = 12.0
+const MAX_ODDS = 13.0  // 12/1 in decimal
 const MIN_ENSEMBLE_PROBA = 0.15
-// Model agreement removed — base models now feed into Stage 2 combiner
+const LONGSHOT_MIN_ACTIVE_PATTERNS = 2
 
 export function AutoBetsPage() {
   const { user } = useAuth()
@@ -300,17 +298,26 @@ export function AutoBetsPage() {
       for (const e of raceEntries) {
         const liveOdds = Number(e.current_odds) || 0
         const openOddsRaw = Number(e.opening_odds) || 0
-        // Use opening odds for qualification — that's the price available
-        // when picks are first shown in the morning. Picks don't disappear
-        // if odds shorten during the day.
         const odds = openOddsRaw > 1 ? openOddsRaw : liveOdds
         const ensProba = Number(e.ensemble_proba) || 0
         if (odds <= 1 || ensProba <= 0) continue
-        if (odds > MAX_ODDS) continue
         if (ensProba < MIN_ENSEMBLE_PROBA) continue
 
         const impliedProb = 1 / odds
         const edge = ensProba - impliedProb
+        if (edge < MIN_EDGE) continue
+
+        const mmKey = `${raceId}:${e.horse_id}`
+        const mm = matchesByHorse.get(mmKey)
+
+        // Veto pre-filter: vetoed horses are completely hidden
+        if (mm?.is_vetoed) continue
+
+        // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ ACTIVE patterns
+        if (odds > MAX_ODDS) {
+          const activeCount = mm?.active_pattern_count ?? 0
+          if (activeCount < LONGSHOT_MIN_ACTIVE_PATTERNS) continue
+        }
 
         const bestSpeed = Math.max(
           Number(e.best_speed_figure_on_course_going_distance) || 0,
@@ -360,13 +367,10 @@ export function AutoBetsPage() {
           implied_prob: impliedProb,
           odds_movement: oddsMovement,
           odds_movement_pct: oddsMovementPct,
-          model_agreement: 0,
         }
 
-        if (edge >= MIN_EDGE) {
-          if (!bestPick || edge > bestPick.edge) {
-            bestPick = pick
-          }
+        if (!bestPick || edge > bestPick.edge) {
+          bestPick = pick
         }
       }
 
@@ -400,7 +404,7 @@ export function AutoBetsPage() {
     upcoming.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     settled.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     return { picks: upcoming, settledPicks: settled }
-  }, [entriesData, bankroll, selectedDate, ukToday])
+  }, [entriesData, bankroll, selectedDate, ukToday, matchesByHorse])
 
   const betsByHorse = useMemo(() => {
     const map = new Map<string, any>()
@@ -499,10 +503,11 @@ export function AutoBetsPage() {
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
             The <span className="text-purple-300 font-medium">Benter model</span> calculates each horse's true win probability
-            and compares it to the market odds. Only horses where{' '}
-            <span className="text-green-400 font-medium">at least 2 models agree</span>, the edge exceeds 5%,
-            odds are under 12/1, and Benter probability is at least 15% are shown.
-            One pick per race. Kelly Criterion sizes the optimal stake.
+            and compares it to the market odds. Horses with{' '}
+            <span className="text-green-400 font-medium">5%+ edge</span> and at least 15% Benter probability qualify up to 12/1.
+            Longshots above 12/1 can qualify if backed by{' '}
+            <span className="text-purple-300 font-medium">2+ active Mastermind patterns</span>.
+            Horses vetoed by anti-patterns are excluded. One pick per race. Kelly Criterion sizes the stake.
           </p>
         </div>
 
@@ -837,26 +842,6 @@ function EdgeGauge({ edge, impliedProb, benterProba }: { edge: number; impliedPr
   )
 }
 
-// ─── Model Agreement Indicator ──────────────────────────────────────────
-
-function ModelAgreement({ count }: { count: number }) {
-  const dots = [
-    { label: 'Benter', active: count >= 1 },
-    { label: 'LGBM', active: count >= 2 },
-    { label: 'RF', active: count >= 3 },
-    { label: 'XGB', active: count >= 4 },
-  ]
-  return (
-    <div className="flex items-center gap-1">
-      {dots.map((d, i) => (
-        <div key={i} className={`w-2 h-2 rounded-full ${d.active ? 'bg-green-400' : 'bg-gray-700'}`}
-          title={`${d.label}: ${d.active ? 'Top pick' : 'Not top pick'}`} />
-      ))}
-      <span className="text-[10px] text-gray-500 ml-1">{count}/4 models agree</span>
-    </div>
-  )
-}
-
 // ─── Pick Card ──────────────────────────────────────────────────────────
 
 function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onToggleSlip, slipFull, mastermindMatch }: {
@@ -879,9 +864,8 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
   const kellyInfo = useMemo(() => computeKelly(pick, userBankroll), [pick, userBankroll])
 
   const activePatternCount = mastermindMatch?.active_pattern_count ?? 0
-  const isVetoed = mastermindMatch?.is_vetoed ?? false
 
-  const borderColor = isVetoed ? 'border-red-500/40' : inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : activePatternCount > 0 ? 'border-purple-500/50' : 'border-purple-500/30'
+  const borderColor = inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : activePatternCount > 0 ? 'border-purple-500/50' : 'border-purple-500/30'
 
   return (
     <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
@@ -905,7 +889,6 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
         <div className="flex items-center gap-3 text-[10px] text-gray-400">
           <span>Benter: {(pick.ensemble_proba * 100).toFixed(1)}%</span>
           <span>Market: {(pick.implied_prob * 100).toFixed(1)}%</span>
-          <ModelAgreement count={pick.model_agreement} />
         </div>
       </div>
 
@@ -1014,11 +997,6 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
         <div className="mt-3 pt-3 border-t border-gray-800">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {isVetoed && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
-                  <ShieldAlert className="w-3 h-3" /> VETOED
-                </span>
-              )}
               {activePatternCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
                   <Brain className="w-3 h-3" />
