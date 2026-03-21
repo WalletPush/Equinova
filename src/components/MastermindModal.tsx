@@ -73,7 +73,6 @@ export function MastermindModal({
                 <span className="text-green-400 font-semibold text-sm uppercase tracking-wider">
                   {activePatterns.length} Active Pattern{activePatterns.length !== 1 ? 's' : ''} Match
                 </span>
-                <span className="text-gray-500 text-xs">(last 21 days)</span>
               </div>
               <div className="space-y-2">
                 {activePatterns.map((pat, idx) => (
@@ -153,29 +152,32 @@ export function MastermindModal({
 function PatternCard({ pattern, variant }: { pattern: PatternMatch; variant: 'active' | 'monitoring' | 'anti' }) {
   const borderColor = variant === 'active' ? 'border-green-700/30' : variant === 'monitoring' ? 'border-yellow-700/30' : 'border-red-700/30'
   const bgColor = variant === 'active' ? 'bg-green-900/15' : variant === 'monitoring' ? 'bg-yellow-900/10' : 'bg-red-900/15'
-  const roiColor = pattern.d21_roi_pct > 0 ? 'text-green-400' : 'text-red-400'
-  const wrColor = pattern.d21_bets > 0
-    ? (pattern.d21_wins / pattern.d21_bets) * 100 >= 30
-      ? 'text-green-400'
-      : 'text-yellow-400'
-    : 'text-gray-500'
-  const d21WR = pattern.d21_bets > 0 ? ((pattern.d21_wins / pattern.d21_bets) * 100).toFixed(0) : '—'
+
+  const has21d = pattern.d21_bets > 0
+  const roi = has21d ? pattern.d21_roi_pct : pattern.roi_pct
+  const bets = has21d ? pattern.d21_bets : pattern.total_bets
+  const wins = has21d ? pattern.d21_wins : pattern.wins
+  const wr = bets > 0 ? (wins / bets) * 100 : 0
+  const period = has21d ? 'last 21d' : 'historical'
+
+  const roiColor = roi > 0 ? 'text-green-400' : 'text-red-400'
+  const wrColor = wr >= 30 ? 'text-green-400' : wr > 0 ? 'text-yellow-400' : 'text-gray-500'
 
   return (
     <div className={`${bgColor} border ${borderColor} rounded-lg p-3`}>
       <p className="text-white text-sm font-medium mb-2">{pattern.pattern_label}</p>
       <div className="flex items-center gap-4 text-xs">
         <span className={roiColor}>
-          {pattern.d21_roi_pct > 0 ? '+' : ''}{pattern.d21_roi_pct.toFixed(1)}% ROI
+          {roi > 0 ? '+' : ''}{roi.toFixed(1)}% ROI
         </span>
         <span className="text-gray-400">
-          {pattern.d21_bets} bets
+          {bets} bets
         </span>
         <span className={wrColor}>
-          {pattern.d21_wins}W ({d21WR}%)
+          {wins}W ({wr > 0 ? wr.toFixed(0) : '—'}%)
         </span>
         <span className="text-gray-500">
-          last 21d
+          {period}
         </span>
       </div>
     </div>
