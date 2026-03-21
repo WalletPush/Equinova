@@ -1011,45 +1011,49 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
         )}
 
         {/* Mastermind Intelligence */}
-        {mastermindMatch && (mastermindMatch.matching_patterns.length > 0 || mastermindMatch.anti_patterns.length > 0) && (
-          <div className="mt-3 pt-3 border-t border-gray-800">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {isVetoed && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
-                    <ShieldAlert className="w-3 h-3" /> VETOED
-                  </span>
-                )}
-                {activePatternCount > 0 && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                    <Brain className="w-3 h-3" />
-                    {activePatternCount} Pattern{activePatternCount !== 1 ? 's' : ''}
-                  </span>
-                )}
-                {mastermindMatch.total_pattern_count > activePatternCount && (
-                  <span className="text-[10px] text-gray-500">
-                    +{mastermindMatch.total_pattern_count - activePatternCount} monitoring
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => setShowMastermind(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors"
-              >
-                <Eye className="w-3 h-3" />
-                View AI Intelligence
-              </button>
+        <div className="mt-3 pt-3 border-t border-gray-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {isVetoed && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                  <ShieldAlert className="w-3 h-3" /> VETOED
+                </span>
+              )}
+              {activePatternCount > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                  <Brain className="w-3 h-3" />
+                  {activePatternCount} Pattern{activePatternCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {mastermindMatch && mastermindMatch.total_pattern_count > activePatternCount && (
+                <span className="text-[10px] text-gray-500">
+                  +{mastermindMatch.total_pattern_count - activePatternCount} monitoring
+                </span>
+              )}
+              {!mastermindMatch && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-800 text-gray-500 border border-gray-700">
+                  <Brain className="w-3 h-3" />
+                  Scanning...
+                </span>
+              )}
             </div>
+            <button
+              onClick={() => setShowMastermind(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors"
+            >
+              <Eye className="w-3 h-3" />
+              AI Intelligence
+            </button>
           </div>
-        )}
+        </div>
 
-        {showMastermind && mastermindMatch && (
+        {showMastermind && (
           <MastermindModal
             horseName={pick.horse_name}
-            patterns={mastermindMatch.matching_patterns}
-            antiPatterns={mastermindMatch.anti_patterns}
-            isVetoed={mastermindMatch.is_vetoed}
-            vetoReason={mastermindMatch.veto_reason}
+            patterns={mastermindMatch?.matching_patterns ?? []}
+            antiPatterns={mastermindMatch?.anti_patterns ?? []}
+            isVetoed={mastermindMatch?.is_vetoed ?? false}
+            vetoReason={mastermindMatch?.veto_reason ?? null}
             kellyStake={kellyInfo?.stake}
             onClose={() => setShowMastermind(false)}
           />
