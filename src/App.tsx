@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { HorseDetailProvider } from '@/contexts/HorseDetailContext'
+import { NotificationProvider } from '@/contexts/NotificationContext'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AdminRoute } from '@/components/AdminRoute'
 import { LandingPage } from '@/pages/LandingPage'
@@ -38,6 +39,7 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <NotificationProvider>
             <HorseDetailProvider>
               <Router>
                 <Routes>
@@ -109,6 +111,7 @@ function App() {
                 </Routes>
               </Router>
             </HorseDetailProvider>
+          </NotificationProvider>
         </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>
