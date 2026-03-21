@@ -314,9 +314,6 @@ export function AutoBetsPage() {
         const mmKey = `${raceId}:${e.horse_id}`
         const mm = matchesByHorse.get(mmKey)
 
-        // Veto pre-filter: vetoed horses are completely hidden
-        if (mm?.is_vetoed) continue
-
         // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ ACTIVE patterns
         if (odds > MAX_ODDS) {
           const activeCount = mm?.active_pattern_count ?? 0
