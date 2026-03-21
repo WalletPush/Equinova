@@ -3,21 +3,21 @@
 // Live Benter Stage 2 recalculation + Smart Money detection.
 //
 // Stage 1 (conditional logit) runs once at 9am and is fixed for the day.
-// Stage 2 combines Stage 1 output with market probabilities:
+// Stage 2 combines 5 probability sources via racewise softmax:
 //
-//   u_i = model_weight × log(stage1_proba_i) + market_weight × log(market_prob_i)
-//   P(i wins) = exp(u_i) / Σ_j exp(u_j)          [racewise softmax]
+//   u_i = w[0]*log(s1_i) + w[1]*log(market_i) + w[2]*log(lgbm_i) + w[3]*log(xgb_i) + w[4]*log(rf_i)
+//   P(i wins) = exp(u_i) / Σ_j exp(u_j)
+//
+// When odds change, only log(market) changes; tree model probabilities
+// are fixed from the morning run. Recompute u with all 5 terms and re-softmax.
 //
 // After recalculating ensemble_proba, scans for "Smart Money" triggers:
 // horses where Benter edge AND market backing converge. Inserts alerts
 // into smart_money_alerts table.
 //
-// Segment weights (from trained Benter bundles):
-//   Flat_Turf:    a=1.9527, b=0.5468
-//   Flat_AW:      a=2.3646, b=0.1581
-//   Hurdle_Turf:  a=2.4193, b=0.4129
-//   Chase_Turf:   a=3.1392, b=0.2782
-//   NH_Flat_Turf: a=0.5875, b=0.3311
+// Segment weights [stage1, market, lgbm, xgb, rf] are updated after each
+// weekly retrain. Current values below are PLACEHOLDERS until first retrain
+// with the extended 5-source combiner.
 //
 // Called by the market-monitor cron after it updates current_odds,
 // or on-demand via POST { date?: "YYYY-MM-DD" }.
@@ -86,12 +86,15 @@ Deno.serve(async (req) => {
       "Content-Type": "application/json",
     };
 
-    const SEGMENT_WEIGHTS: Record<string, { a: number; b: number }> = {
-      Flat_Turf: { a: 1.9526746421597867, b: 0.5468448239024457 },
-      Flat_AW: { a: 2.364569392693001, b: 0.15805944852676032 },
-      Hurdle_Turf: { a: 2.419299298189669, b: 0.4128749567533024 },
-      Chase_Turf: { a: 3.1391505790313396, b: 0.2781728716289576 },
-      NH_Flat_Turf: { a: 0.5874636542265078, b: 0.331126154869991 },
+    // weights: [stage1, market, lgbm, xgb, rf]
+    // Updated after retrain with true OOF (leakage-free) — 2026-03-21
+    // These will be overwritten by retrain_weekly.py after each weekly retrain.
+    const SEGMENT_WEIGHTS: Record<string, { weights: number[] }> = {
+      Flat_Turf: { weights: [0.0326, 0.9253, 0.0978, 0.0, 0.1400] },
+      Flat_AW: { weights: [0.0, 1.0355, 0.0, 0.0479, 0.3520] },
+      Hurdle_Turf: { weights: [0.0, 0.9347, 0.0, 0.2794, 0.4421] },
+      Chase_Turf: { weights: [0.0, 0.6512, 0.1327, 0.3517, 0.0909] },
+      NH_Flat_Turf: { weights: [0.5875, 0.3311, 0.0, 0.0, 0.0] },
     };
 
     // ── 1) Fetch races for this date ─────────────────────────────────────
@@ -152,7 +155,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const { a, b } = SEGMENT_WEIGHTS[segment];
+      const { weights } = SEGMENT_WEIGHTS[segment];
+      const [wS1, wMkt, wLgbm, wXgb, wRf] = weights;
 
       const hasS1 = entries.every(
         (e) => e.stage1_proba !== null && e.stage1_proba !== undefined
@@ -183,10 +187,28 @@ Deno.serve(async (req) => {
         ? rawMarket.map((v) => v / marketSum)
         : rawMarket;
 
+      // Tree model probabilities (fixed from morning prediction run)
+      const lgbmProb = entries.map((e) => {
+        const v = Number(e.benter_proba);
+        return Number.isFinite(v) && v > 0 ? v : EPS;
+      });
+      const xgbProb = entries.map((e) => {
+        const v = Number(e.xgboost_proba);
+        return Number.isFinite(v) && v > 0 ? v : EPS;
+      });
+      const rfProb = entries.map((e) => {
+        const v = Number(e.rf_proba);
+        return Number.isFinite(v) && v > 0 ? v : EPS;
+      });
+
       const u = entries.map((_, idx) => {
-        const logS1 = Math.log(Math.max(s1[idx], EPS));
-        const logM = Math.log(Math.max(marketProb[idx], EPS));
-        return a * logS1 + b * logM;
+        return (
+          wS1 * Math.log(Math.max(s1[idx], EPS)) +
+          wMkt * Math.log(Math.max(marketProb[idx], EPS)) +
+          wLgbm * Math.log(Math.max(lgbmProb[idx], EPS)) +
+          wXgb * Math.log(Math.max(xgbProb[idx], EPS)) +
+          wRf * Math.log(Math.max(rfProb[idx], EPS))
+        );
       });
 
       const maxU = Math.max(...u);
@@ -228,7 +250,7 @@ Deno.serve(async (req) => {
 
     // ── 5) Smart Money Detection ────────────────────────────────────────
     // After recalculation, scan for horses where:
-    // - Already a Top Pick candidate (edge>=5%, odds<=13, ensemble>=15%, 2+ models)
+    // - Top Pick candidate (edge>=5%, odds<=13, ensemble>=15%)
     // - Backed >=15% from opening (current_odds < opening_odds * 0.85)
     // - Live edge still >=10% (double the base threshold)
     // - Kelly-qualified (>=£1 after rounding to nearest 50p)
@@ -277,18 +299,8 @@ Deno.serve(async (req) => {
       // Minimum ensemble probability 15%
       if (liveEnsemble < 0.15) continue;
 
-      // Model agreement: count how many of the 3 independent models agree
+      // Edge checks (model agreement removed — base models now feed into Stage 2)
       const impliedProb = 1 / curOdds;
-      let modelAgreement = 0;
-      const lgbm = Number(e.benter_proba);
-      const rf = Number(e.rf_proba);
-      const xgb = Number(e.xgboost_proba);
-      if (Number.isFinite(lgbm) && lgbm > impliedProb) modelAgreement++;
-      if (Number.isFinite(rf) && rf > impliedProb) modelAgreement++;
-      if (Number.isFinite(xgb) && xgb > impliedProb) modelAgreement++;
-      if (modelAgreement < 2) continue;
-
-      // Edge checks
       const liveEdge = liveEnsemble - impliedProb;
       if (liveEdge < 0.10) continue; // must be 10%+ edge for smart money
 

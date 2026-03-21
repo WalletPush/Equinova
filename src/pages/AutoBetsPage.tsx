@@ -6,10 +6,12 @@ import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { BetSlip } from '@/components/BetSlip'
+import { MastermindModal } from '@/components/MastermindModal'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
+import { useMastermind, useAutoBetSettings } from '@/hooks/useMastermind'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNotifications } from '@/contexts/NotificationContext'
 import { getUKTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
@@ -35,6 +37,8 @@ import {
   Zap,
   Bell,
   Flame,
+  ShieldAlert,
+  Eye,
 } from 'lucide-react'
 
 interface SmartMoneyAlert {
@@ -95,7 +99,7 @@ interface TopPick {
 const MIN_EDGE = 0.05
 const MAX_ODDS = 12.0
 const MIN_ENSEMBLE_PROBA = 0.15
-const MIN_MODEL_AGREEMENT = 2
+// Model agreement removed — base models now feed into Stage 2 combiner
 
 export function AutoBetsPage() {
   const { user } = useAuth()
@@ -106,6 +110,9 @@ export function AutoBetsPage() {
   const { isSupported: pushSupported, permission: pushPermission, isSubscribed: pushSubscribed, requestPermission, subscribe } = useNotifications()
   const [slipHorseIds, setSlipHorseIds] = useState<Set<string>>(new Set())
   const [pushDismissed, setPushDismissed] = useState(() => sessionStorage.getItem('push-dismissed') === '1')
+
+  const { matchesByHorse, isLoading: mastermindLoading } = useMastermind()
+  const { autoBetEnabled, toggleAutoBet, isToggling } = useAutoBetSettings()
 
   const toggleSlip = useCallback((horseId: string) => {
     setSlipHorseIds(prev => {
@@ -321,16 +328,6 @@ export function AutoBetsPage() {
           else oddsMovement = 'stable'
         }
 
-        let modelAgreement = 0
-        // DB column mapping: ensemble_proba = Benter Stage 2 (MAIN), benter_proba = LightGBM (legacy naming)
-        const probaFields = ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const
-        for (const field of probaFields) {
-          const myVal = Number(e[field]) || 0
-          if (myVal <= 0) continue
-          const isTop = raceEntries.every((other: any) => (Number(other[field]) || 0) <= myVal)
-          if (isTop) modelAgreement++
-        }
-
         const pick: TopPick = {
           race_id: raceId,
           horse_id: e.horse_id,
@@ -363,10 +360,10 @@ export function AutoBetsPage() {
           implied_prob: impliedProb,
           odds_movement: oddsMovement,
           odds_movement_pct: oddsMovementPct,
-          model_agreement: modelAgreement,
+          model_agreement: 0,
         }
 
-        if (edge >= MIN_EDGE && modelAgreement >= MIN_MODEL_AGREEMENT) {
+        if (edge >= MIN_EDGE) {
           if (!bestPick || edge > bestPick.edge) {
             bestPick = pick
           }
@@ -508,6 +505,50 @@ export function AutoBetsPage() {
             One pick per race. Kelly Criterion sizes the optimal stake.
           </p>
         </div>
+
+        {/* Mastermind Auto-Bet Toggle */}
+        {user && (
+          <div className={`border rounded-xl p-4 transition-all ${
+            autoBetEnabled
+              ? 'bg-gradient-to-r from-purple-900/30 to-blue-900/30 border-purple-500/40'
+              : 'bg-gray-800/60 border-gray-700'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${autoBetEnabled ? 'bg-purple-500/20' : 'bg-gray-700'}`}>
+                  <Brain className={`w-5 h-5 ${autoBetEnabled ? 'text-purple-400' : 'text-gray-500'}`} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">Mastermind Auto-Bet</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                      autoBetEnabled ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'
+                    }`}>
+                      {autoBetEnabled ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {autoBetEnabled
+                      ? 'Auto-betting active — Mastermind places bets on pattern-matched Top Picks'
+                      : 'Manual mode — view AI intelligence on each pick'
+                    }
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => toggleAutoBet(!autoBetEnabled)}
+                disabled={isToggling}
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  autoBetEnabled ? 'bg-purple-500' : 'bg-gray-600'
+                } ${isToggling ? 'opacity-50' : ''}`}
+              >
+                <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
+                  autoBetEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Push notification prompt */}
         {pushSupported && !pushSubscribed && !pushDismissed && (
@@ -673,6 +714,7 @@ export function AutoBetsPage() {
                   inSlip={slipHorseIds.has(pick.horse_id)}
                   onToggleSlip={isToday ? () => toggleSlip(pick.horse_id) : undefined}
                   slipFull={slipHorseIds.size >= 4}
+                  mastermindMatch={matchesByHorse.get(`${pick.race_id}:${pick.horse_id}`)}
                 />
               ))}
             </div>
@@ -710,6 +752,7 @@ export function AutoBetsPage() {
                   userBankroll={bankroll}
                   needsSetup={needsSetup}
                   settled
+                  mastermindMatch={matchesByHorse.get(`${pick.race_id}:${pick.horse_id}`)}
                 />
               ))}
             </div>
@@ -816,7 +859,7 @@ function ModelAgreement({ count }: { count: number }) {
 
 // ─── Pick Card ──────────────────────────────────────────────────────────
 
-function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onToggleSlip, slipFull }: {
+function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onToggleSlip, slipFull, mastermindMatch }: {
   pick: TopPick
   bet: any | null
   userBankroll: number
@@ -825,15 +868,20 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
   inSlip?: boolean
   onToggleSlip?: () => void
   slipFull?: boolean
+  mastermindMatch?: import('@/hooks/useMastermind').MastermindMatch
 }) {
   const fp = pick.finishing_position
   const isSettled = fp != null && fp > 0
   const isWinner = fp === 1
   const hasBet = !!bet
+  const [showMastermind, setShowMastermind] = useState(false)
 
   const kellyInfo = useMemo(() => computeKelly(pick, userBankroll), [pick, userBankroll])
 
-  const borderColor = inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : 'border-purple-500/30'
+  const activePatternCount = mastermindMatch?.active_pattern_count ?? 0
+  const isVetoed = mastermindMatch?.is_vetoed ?? false
+
+  const borderColor = isVetoed ? 'border-red-500/40' : inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : activePatternCount > 0 ? 'border-purple-500/50' : 'border-purple-500/30'
 
   return (
     <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
@@ -960,6 +1008,51 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
               <p className="text-xs text-gray-300 leading-relaxed italic">{pick.comment}</p>
             </div>
           </div>
+        )}
+
+        {/* Mastermind Intelligence */}
+        {mastermindMatch && (mastermindMatch.matching_patterns.length > 0 || mastermindMatch.anti_patterns.length > 0) && (
+          <div className="mt-3 pt-3 border-t border-gray-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {isVetoed && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                    <ShieldAlert className="w-3 h-3" /> VETOED
+                  </span>
+                )}
+                {activePatternCount > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                    <Brain className="w-3 h-3" />
+                    {activePatternCount} Pattern{activePatternCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {mastermindMatch.total_pattern_count > activePatternCount && (
+                  <span className="text-[10px] text-gray-500">
+                    +{mastermindMatch.total_pattern_count - activePatternCount} monitoring
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setShowMastermind(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors"
+              >
+                <Eye className="w-3 h-3" />
+                View AI Intelligence
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showMastermind && mastermindMatch && (
+          <MastermindModal
+            horseName={pick.horse_name}
+            patterns={mastermindMatch.matching_patterns}
+            antiPatterns={mastermindMatch.anti_patterns}
+            isVetoed={mastermindMatch.is_vetoed}
+            vetoReason={mastermindMatch.veto_reason}
+            kellyStake={kellyInfo?.stake}
+            onClose={() => setShowMastermind(false)}
+          />
         )}
 
         {/* Action row */}

@@ -4,6 +4,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { ProfitableSignalBadges } from '@/components/ProfitableSignalBadges'
+import { MastermindModal } from '@/components/MastermindModal'
 import { useHorseDetail } from '@/contexts/HorseDetailContext'
 import { supabase, callSupabaseFunction, Race } from '@/lib/supabase'
 import { useBankroll } from '@/hooks/useBankroll'
@@ -11,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { detectProfitableSignals } from '@/lib/confluenceScore'
 import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { useDynamicSignals } from '@/hooks/useDynamicSignals'
+import { useMastermind } from '@/hooks/useMastermind'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { formatOdds } from '@/lib/odds'
 import { fetchFromSupabaseFunction } from '@/lib/api'
@@ -79,6 +81,8 @@ export function TodaysRacesPage() {
   const { openHorseDetail } = useHorseDetail()
   const lifetimeSignalStats = useLifetimeSignalStats()
   const { matchesByHorse } = useDynamicSignals()
+  const { matchesByHorse: mastermindByHorse } = useMastermind()
+  const [mastermindModalEntry, setMastermindModalEntry] = useState<{ name: string; match: any } | null>(null)
 
   const { data: racesData, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['races', selectedDate, 'today-races'],
@@ -253,7 +257,7 @@ export function TodaysRacesPage() {
     const MIN_EDGE = 0.05
     const MAX_ODDS = 12.0
     const MIN_ENSEMBLE_PROBA = 0.15
-    const MIN_MODEL_AGREEMENT = 2
+    // Model agreement removed — base models now feed into Stage 2 combiner
 
     const results: ValueBetResult[] = []
 
@@ -273,14 +277,7 @@ export function TodaysRacesPage() {
         const edge = ens - impliedProb
         if (edge < MIN_EDGE) continue
 
-        let modelAgreement = 0
-        for (const field of ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const) {
-          const myVal = Number(entry[field]) || 0
-          if (myVal <= 0) continue
-          const isTop = race.topEntries.every((other: any) => (Number(other[field]) || 0) <= myVal)
-          if (isTop) modelAgreement++
-        }
-        if (modelAgreement < MIN_MODEL_AGREEMENT) continue
+        const modelAgreement = 0
 
         const kelly = edge / (odds - 1)
         const fraction = Math.min(kelly / 4, 0.03)
@@ -950,7 +947,9 @@ export function TodaysRacesPage() {
                               : []
                             const dynMatch = matchesByHorse.get(`${race.race_id}:${entry.horse_id}`)
                             const dynCombos = dynMatch?.matching_combos ?? []
-                            const hasProfSignal = profSignals.length > 0 || dynCombos.length > 0
+                            const mmMatch = mastermindByHorse.get(`${race.race_id}:${entry.horse_id}`)
+                            const mmPatternCount = mmMatch?.active_pattern_count ?? 0
+                            const hasProfSignal = profSignals.length > 0 || dynCombos.length > 0 || mmPatternCount > 0
 
                             return (
                             <div key={entry.id} className={`py-2.5 px-3 rounded-lg ${
@@ -1056,8 +1055,22 @@ export function TodaysRacesPage() {
                               </div>
                               </div>
                               {hasProfSignal && (
-                                <div className="mt-1.5 ml-9">
+                                <div className="mt-1.5 ml-9 flex items-center gap-2 flex-wrap">
                                   <ProfitableSignalBadges signals={profSignals} dynamicCombos={dynCombos} compact />
+                                  {mmPatternCount > 0 && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setMastermindModalEntry({ name: entry.horse_name || '', match: mmMatch }) }}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30 transition-colors"
+                                    >
+                                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 110 20 10 10 0 010-20z" /><path d="M12 16v-4M12 8h.01" /></svg>
+                                      {mmPatternCount} AI Pattern{mmPatternCount !== 1 ? 's' : ''}
+                                    </button>
+                                  )}
+                                  {mmMatch?.is_vetoed && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                                      VETOED
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1083,6 +1096,17 @@ export function TodaysRacesPage() {
           })}
         </div>
       </div>
+
+      {mastermindModalEntry && mastermindModalEntry.match && (
+        <MastermindModal
+          horseName={mastermindModalEntry.name}
+          patterns={mastermindModalEntry.match.matching_patterns ?? []}
+          antiPatterns={mastermindModalEntry.match.anti_patterns ?? []}
+          isVetoed={mastermindModalEntry.match.is_vetoed ?? false}
+          vetoReason={mastermindModalEntry.match.veto_reason ?? null}
+          onClose={() => setMastermindModalEntry(null)}
+        />
+      )}
     </AppLayout>
   )
 }

@@ -253,7 +253,7 @@ export function PreviousRacesPage() {
   const MIN_EDGE = 0.05
   const MAX_ODDS = 12.0
   const MIN_ENSEMBLE_PROBA = 0.15
-  const MIN_MODEL_AGREEMENT = 2
+  // Model agreement removed — base models now feed into Stage 2 combiner
 
   interface BenterPick {
     horse: string
@@ -302,19 +302,8 @@ export function PreviousRacesPage() {
         const edge = ens - 1 / odds
         if (edge < MIN_EDGE) continue
 
-        let modelsAgree = 0
-        const probaFields = ['ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba'] as const
-        for (const field of probaFields) {
-          const myVal = Number((e as any)[field]) || 0
-          if (myVal <= 0) continue
-          const isTop = entries.every((other: any) => (Number(other[field]) || 0) <= myVal)
-          if (isTop) modelsAgree++
-        }
-
-        if (modelsAgree < MIN_MODEL_AGREEMENT) continue
-
         if (!bestPick || edge > bestPick.edge) {
-          bestPick = { entry: e, edge, modelsAgree }
+          bestPick = { entry: e, edge, modelsAgree: 0 }
         }
       }
 
