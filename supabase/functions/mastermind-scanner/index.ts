@@ -41,14 +41,23 @@ Deno.serve(async (req) => {
 
     console.log(`mastermind-scanner: date=${today}`);
 
-    // ── Load patterns ──
-    const patternsUrl = `${supabaseUrl}/rest/v1/mastermind_patterns?select=*&status=in.(ACTIVE,MONITORING)&order=confidence_score.desc&limit=500`;
-    const patternsRes = await fetch(patternsUrl, { headers: hdrs });
-    const patterns: MastermindPattern[] = patternsRes.ok
-      ? await patternsRes.json()
-      : [];
+    // ── Load patterns (paginate past PostgREST 1000-row cap) ──
+    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status";
+    const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&pattern_type=eq.PROFITABLE&order=confidence_score.desc`;
+    const patterns: MastermindPattern[] = [];
+    for (let page = 0; page < 5; page++) {
+      const from = page * 1000;
+      const to = from + 999;
+      const res = await fetch(patternBase, {
+        headers: { ...hdrs, Range: `${from}-${to}` },
+      });
+      if (!res.ok) break;
+      const batch: MastermindPattern[] = await res.json();
+      patterns.push(...batch);
+      if (batch.length < 1000) break;
+    }
 
-    const antiUrl = `${supabaseUrl}/rest/v1/mastermind_patterns?select=*&pattern_type=eq.ANTI_PATTERN&status=eq.ACTIVE&limit=200`;
+    const antiUrl = `${supabaseUrl}/rest/v1/mastermind_patterns?select=id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status&pattern_type=eq.ANTI_PATTERN&status=eq.ACTIVE&roi_pct=lte.-40&total_bets=gte.30&limit=200`;
     const antiRes = await fetch(antiUrl, { headers: hdrs });
     const antiPatterns: MastermindPattern[] = antiRes.ok
       ? await antiRes.json()
@@ -89,23 +98,14 @@ Deno.serve(async (req) => {
       "stage1_proba",
       "rpr", "ts", "ofr",
       "horse_win_percentage_at_distance", "horse_ae_at_distance",
-      "horse_course_win_rate",
       "trainer_win_percentage_at_course", "trainer_21_days_win_percentage",
       "trainer_win_percentage_at_distance",
       "trainer_avg_finishing_position_at_course",
-      "trainer_rtf",
       "jockey_21_days_win_percentage", "jockey_win_percentage_at_distance",
-      "jockey_booking_change",
       "best_speed_figure_at_distance", "last_speed_figure", "mean_speed_figure",
       "best_speed_figure_on_course_going_distance", "best_speed_figure_at_track",
       "avg_finishing_position", "avg_ovr_btn",
-      "comment",
-      "career_runs", "career_win_rate", "consistency_score",
-      "finishing_position_trend", "beaten_lengths_trend",
-      "class_change", "weight_change", "first_time_headgear",
-      "draw_bias_at_course", "sire_win_rate_at_distance",
-      "trainer_jockey_combo_win_pct",
-      "last_run",
+      "comment", "last_run",
     ].join(",");
 
     const entries = await fetchBatch(
@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
           (a, b) => (b.confidence_score || 0) - (a.confidence_score || 0)
         );
 
-        const isVetoed = matchedAnti.length > 0;
+        const isVetoed = matchedAnti.length >= 3;
         const activePatterns = matchedPatterns.filter(
           (p) => p.status === "ACTIVE"
         );
