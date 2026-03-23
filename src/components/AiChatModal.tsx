@@ -12,10 +12,10 @@ interface AiChatModalProps {
 }
 
 const SUGGESTION_CHIPS = [
-  'Full form analysis',
-  'Jockey & trainer stats',
-  'Course & distance record',
-  'Compare with main rivals',
+  'Recent form',
+  'Jockey stats',
+  'Trainer record',
+  'Course form',
 ]
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -196,7 +196,7 @@ export function AiChatModal({ context, silkUrl, horseNumber, onClose }: AiChatMo
               <div className="px-4 py-3 rounded-2xl rounded-bl-md bg-gray-800 border border-gray-700">
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
-                  <span>Analysing with Racing API...</span>
+                  <span>Fetching data & analysing (10-30s)...</span>
                 </div>
               </div>
             </div>

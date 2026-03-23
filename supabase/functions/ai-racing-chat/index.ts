@@ -15,7 +15,10 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-    const racingApiToken = Deno.env.get('RACING_API_OAUTH_TOKEN');
+    let racingApiToken = Deno.env.get('RACING_API_OAUTH_TOKEN');
+    const refreshToken = Deno.env.get('RACING_API_REFRESH_TOKEN');
+    const clientId = Deno.env.get('RACING_API_CLIENT_ID');
+    const clientSecret = Deno.env.get('RACING_API_CLIENT_SECRET');
 
     if (!serviceRoleKey || !supabaseUrl) {
       throw new Error('Supabase configuration missing');
@@ -53,9 +56,9 @@ Deno.serve(async (req) => {
 
     // Build system prompt with EquiNOVA context
     const contextLines: string[] = [
-      'You are EquiNOVA\'s racing analyst — concise, data-driven, and confident.',
-      'Use the Racing API tools to look up form, jockey/trainer statistics, course/distance records, going preferences, and any other relevant data.',
-      'Give short, punchy analysis backed by the data you retrieve. Keep responses under 300 words.',
+      "You are EquiNOVA's racing analyst — concise, data-driven, and confident.",
+      'Use the Racing API tools to look up data. IMPORTANT: use at most 2-3 tool calls per response to stay fast. Focus on the single most relevant data source.',
+      'Give short, punchy analysis backed by the data you retrieve. Keep responses under 200 words.',
       'Format key stats in bold. Use bullet points for clarity.',
       'Never give explicit betting advice — present facts and let the user decide.',
     ];
@@ -87,8 +90,6 @@ Deno.serve(async (req) => {
 
     const systemPrompt = contextLines.join('\n');
 
-    // Build messages array: system + history + current message
-    // Truncate history to last 10 messages to control token cost
     const trimmedHistory = history.slice(-10);
     const messages = [
       ...trimmedHistory.map((h: { role: string; content: string }) => ({
@@ -100,46 +101,89 @@ Deno.serve(async (req) => {
 
     console.log(`AI Chat - Calling Anthropic (${messages.length} messages, context: ${context.horse_name || 'none'})`);
 
-    // Call Anthropic Messages API with MCP connector
-    const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'mcp-client-2025-11-20',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6-20250929',
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages,
-        mcp_servers: [
-          {
-            type: 'url',
-            url: 'https://mcp.theracingapi.com/',
-            name: 'the-racing-api',
-            authorization_token: racingApiToken,
-          },
-        ],
-        tools: [
-          {
-            type: 'mcp_toolset',
-            mcp_server_name: 'the-racing-api',
-          },
-        ],
-      }),
-    });
+    // Try calling Anthropic with current token; if auth fails, refresh and retry once
+    async function callAnthropic(accessToken: string) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
+      try {
+      return await fetch('https://api.anthropic.com/v1/messages', {
+        signal: controller.signal,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': anthropicKey!,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'mcp-client-2025-11-20',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages,
+          mcp_servers: [
+            {
+              type: 'url',
+              url: 'https://mcp.theracingapi.com/',
+              name: 'the-racing-api',
+              authorization_token: accessToken,
+            },
+          ],
+          tools: [
+            {
+              type: 'mcp_toolset',
+              mcp_server_name: 'the-racing-api',
+            },
+          ],
+        }),
+      });
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
 
+    let anthropicResponse = await callAnthropic(racingApiToken!);
+
+    // If MCP auth failed, try refreshing the token
     if (!anthropicResponse.ok) {
-      const errBody = await anthropicResponse.text();
-      console.error('Anthropic API error:', anthropicResponse.status, errBody);
-      throw new Error(`AI service error (${anthropicResponse.status}): ${errBody}`);
+      const errText = await anthropicResponse.text();
+      const isMcpAuthError = errText.includes('Authentication error while communicating with MCP server');
+
+      if (isMcpAuthError && refreshToken && clientId && clientSecret) {
+        console.log('AI Chat - Access token expired, refreshing...');
+        const refreshResponse = await fetch('https://mcp.theracingapi.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+            client_id: clientId,
+            client_secret: clientSecret,
+          }).toString(),
+        });
+
+        if (refreshResponse.ok) {
+          const tokenData = await refreshResponse.json();
+          racingApiToken = tokenData.access_token;
+          console.log('AI Chat - Token refreshed successfully');
+
+          // Retry with new token
+          anthropicResponse = await callAnthropic(racingApiToken!);
+          if (!anthropicResponse.ok) {
+            const retryErr = await anthropicResponse.text();
+            throw new Error(`AI service error after refresh (${anthropicResponse.status}): ${retryErr}`);
+          }
+        } else {
+          const refreshErr = await refreshResponse.text();
+          console.error('Token refresh failed:', refreshErr);
+          throw new Error(`Token refresh failed. Original error: ${errText}`);
+        }
+      } else {
+        throw new Error(`AI service error (${anthropicResponse.status}): ${errText}`);
+      }
     }
 
     const result = await anthropicResponse.json();
 
-    // Extract text blocks from the response (skip tool use/result blocks)
     const textBlocks = (result.content || [])
       .filter((block: { type: string }) => block.type === 'text')
       .map((block: { text: string }) => block.text);
@@ -170,7 +214,7 @@ Deno.serve(async (req) => {
         message: error.message,
       },
     }), {
-      status: 400,
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
