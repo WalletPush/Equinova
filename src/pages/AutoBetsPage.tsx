@@ -168,6 +168,7 @@ export function AutoBetsPage() {
       const raceIds = races.map(r => r.race_id)
       let allEntries: any[] = []
       let allRunners: any[] = []
+      let allResults: any[] = []
       const batchSize = 50
       for (let i = 0; i < raceIds.length; i += batchSize) {
         const batch = raceIds.slice(i, i + batchSize)
@@ -189,21 +190,48 @@ export function AutoBetsPage() {
 
         const { data: runners } = await supabase
           .from('race_runners')
-          .select('race_id, horse, position')
+          .select('race_id, horse, horse_id, position')
           .in('race_id', batch)
           .not('position', 'is', null)
           .gt('position', 0)
         if (runners) allRunners = allRunners.concat(runners)
+
+        const { data: results } = await supabase
+          .from('race_results')
+          .select('race_id, non_runners')
+          .in('race_id', batch)
+        if (results) allResults = allResults.concat(results)
       }
 
+      // Build result lookup by horse_id (primary) and name (fallback)
       const resultsByRace: Record<string, Record<string, number>> = {}
+      const resultsByHorseId: Record<string, number> = {}
+      const racesWithResults = new Set<string>()
       for (const r of allRunners) {
         if (!resultsByRace[r.race_id]) resultsByRace[r.race_id] = {}
         const bare = (r.horse || '').replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
         resultsByRace[r.race_id][bare] = Number(r.position)
+        if (r.horse_id) {
+          resultsByHorseId[`${r.race_id}:${r.horse_id}`] = Number(r.position)
+        }
+        racesWithResults.add(r.race_id)
       }
 
-      return { entries: allEntries, raceMap, resultsByRace }
+      // Build non-runner set from race_results.non_runners text
+      const nonRunnersByRace: Record<string, Set<string>> = {}
+      for (const res of allResults) {
+        const nrText = res.non_runners || ''
+        if (!nrText.trim()) continue
+        racesWithResults.add(res.race_id)
+        const names = new Set<string>()
+        for (const chunk of nrText.split(',')) {
+          const name = chunk.replace(/\s*\(.*$/, '').trim().toLowerCase()
+          if (name) names.add(name)
+        }
+        nonRunnersByRace[res.race_id] = names
+      }
+
+      return { entries: allEntries, raceMap, resultsByRace, resultsByHorseId, racesWithResults, nonRunnersByRace }
     },
     staleTime: 30_000,
   })
@@ -276,7 +304,7 @@ export function AutoBetsPage() {
 
   const { picks, settledPicks } = useMemo(() => {
     if (!entriesData?.entries?.length) return { picks: [] as TopPick[], settledPicks: [] as TopPick[] }
-    const { entries, raceMap, resultsByRace } = entriesData
+    const { entries, raceMap, resultsByRace, resultsByHorseId, racesWithResults, nonRunnersByRace } = entriesData
 
     const isPastDate = selectedDate < ukToday
     const ukTime = getUKTime()
@@ -384,19 +412,36 @@ export function AutoBetsPage() {
         if (!kelly) continue
 
         const raceMinutes = raceTimeToMinutes(bestPick.off_time || '')
-        const hasResults = !!resultsByRace[bestPick.race_id]
+        const hasResults = racesWithResults?.has(bestPick.race_id)
         const raceFinished = isPastDate || (raceMinutes > 0 && (curMinutes - raceMinutes) > 10)
 
-        if (hasResults && raceFinished) {
-          const racePositions = resultsByRace[bestPick.race_id]
+        // Check if this horse was a non-runner (void bet — skip entirely)
+        const nrSet = nonRunnersByRace?.[bestPick.race_id]
+        if (nrSet) {
           const bareName = bestPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
-          let pos = racePositions[bareName]
+          if (nrSet.has(bareName)) continue
+        }
+
+        if (hasResults && raceFinished) {
+          // Match by horse_id first (reliable), then name fallback
+          const idKey = `${bestPick.race_id}:${bestPick.horse_id}`
+          let pos: number | undefined = resultsByHorseId?.[idKey]
+
           if (pos === undefined) {
-            for (const [name, p] of Object.entries(racePositions)) {
-              if (name.startsWith(bareName) || bareName.startsWith(name)) { pos = p; break }
+            const racePositions = resultsByRace[bestPick.race_id]
+            if (racePositions) {
+              const bareName = bestPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+              pos = racePositions[bareName]
+              if (pos === undefined) {
+                for (const [name, p] of Object.entries(racePositions)) {
+                  if (name.startsWith(bareName) || bareName.startsWith(name)) { pos = p; break }
+                }
+              }
             }
           }
-          bestPick.finishing_position = pos ?? null
+
+          // If race has results but horse not found = unplaced/fell/PU = loss
+          bestPick.finishing_position = pos ?? 0
           settled.push(bestPick)
         } else if (raceFinished && !hasResults) {
           settled.push(bestPick)
@@ -423,6 +468,7 @@ export function AutoBetsPage() {
     if (!settledPicks.length) return null
     let wins = 0, losses = 0, dayPL = 0
     for (const p of settledPicks) {
+      if (p.finishing_position === null) continue
       const mmKey = `${p.race_id}:${p.horse_id}`
       const mm = matchesByHorse.get(mmKey)
       const kelly = computeKelly(p, bankroll, mm?.trust_score ?? 0)
@@ -870,7 +916,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
   mastermindMatch?: import('@/hooks/useMastermind').MastermindMatch
 }) {
   const fp = pick.finishing_position
-  const isSettled = fp != null && fp > 0
+  const isSettled = fp != null && fp >= 0
   const isWinner = fp === 1
   const hasBet = !!bet
   const [showMastermind, setShowMastermind] = useState(false)
@@ -1156,7 +1202,8 @@ function TrustBadge({ score, tier }: { score: number; tier: string }) {
 }
 
 function fmtPos(p: number | null) {
-  if (!p) return ''
+  if (p === null || p === undefined) return ''
+  if (p === 0) return 'LOST'
   if (p === 1) return '1st'
   if (p === 2) return '2nd'
   if (p === 3) return '3rd'
