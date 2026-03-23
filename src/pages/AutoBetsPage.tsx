@@ -1006,7 +1006,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
               {patternCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
                   <Brain className="w-3 h-3" />
-                  {patternCount} {patternCount === 1 ? 'pattern' : 'patterns'}
+                  {mastermindMatch?.lifetime_count ?? 0}L + {mastermindMatch?.d21_count ?? 0}D
                 </span>
               )}
               {!mastermindMatch && (
@@ -1029,11 +1029,20 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
         {showMastermind && (
           <MastermindModal
             horseName={pick.horse_name}
-            patterns={mastermindMatch?.matching_patterns ?? []}
+            lifetimePatterns={mastermindMatch?.lifetime_patterns ?? []}
+            d21Patterns={mastermindMatch?.d21_patterns ?? []}
             patternCount={mastermindMatch?.pattern_count ?? 0}
+            lifetimeCount={mastermindMatch?.lifetime_count ?? 0}
+            d21Count={mastermindMatch?.d21_count ?? 0}
             trustScore={mastermindMatch?.trust_score ?? 0}
             trustTier={mastermindMatch?.trust_tier ?? 'none'}
+            kellyMultiplier={mastermindMatch?.kelly_multiplier ?? 0}
             kellyStake={kellyInfo?.stake}
+            fairProbability={mastermindMatch?.fair_probability ?? (pick.ensemble_proba * 100)}
+            marketImplied={mastermindMatch?.market_implied ?? (pick.implied_prob * 100)}
+            edgePct={mastermindMatch?.edge_pct ?? (pick.edge / pick.implied_prob * 100)}
+            stakeFraction={mastermindMatch?.stake_fraction ?? 0}
+            worthBetting={mastermindMatch?.worth_betting ?? false}
             onClose={() => setShowMastermind(false)}
           />
         )}

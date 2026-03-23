@@ -50,10 +50,10 @@ Deno.serve(async (req) => {
 
     console.log(`mastermind-scanner: date=${today}`);
 
-    // -- Load PROFITABLE patterns only (no anti-patterns) --
-    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,status";
-    const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&pattern_type=eq.PROFITABLE&order=roi_pct.desc`;
-    const patterns: MastermindPattern[] = [];
+    // -- Load ALL active patterns (lifetime + 21-day) --
+    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,d21_bets,d21_wins,d21_roi_pct,d21_profit,status";
+    const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&order=roi_pct.desc`;
+    const allPatterns: MastermindPattern[] = [];
     for (let page = 0; page < 5; page++) {
       const from = page * 1000;
       const to = from + 999;
@@ -62,11 +62,13 @@ Deno.serve(async (req) => {
       });
       if (!res.ok) break;
       const batch: MastermindPattern[] = await res.json();
-      patterns.push(...batch);
+      allPatterns.push(...batch);
       if (batch.length < 1000) break;
     }
 
-    console.log(`Loaded ${patterns.length} lifetime profitable patterns`);
+    const lifetimePatterns = allPatterns.filter(p => p.pattern_type === "PROFITABLE");
+    const d21Patterns = allPatterns.filter(p => p.pattern_type === "21DAY_PROFITABLE");
+    console.log(`Loaded ${lifetimePatterns.length} lifetime + ${d21Patterns.length} 21-day patterns`);
 
     // -- Load today's races + entries --
     const racesRes = await fetch(
@@ -79,7 +81,9 @@ Deno.serve(async (req) => {
       return json({
         data: {
           matches: [],
-          patterns_loaded: patterns.length,
+          patterns_loaded: allPatterns.length,
+          lifetime_patterns_loaded: lifetimePatterns.length,
+          d21_patterns_loaded: d21Patterns.length,
           meta: {
             today_races: 0,
             generated_at: new Date().toISOString(),
@@ -140,18 +144,14 @@ Deno.serve(async (req) => {
 
         const signalSet = new Set(signals);
 
-        // Match profitable patterns for this segment
-        const applicablePatterns = patterns.filter(
-          (p) => p.segment === segment
-        );
-        const matchedPatterns: PatternMatch[] = [];
-        for (const pat of applicablePatterns) {
-          const keys: string[] = Array.isArray(pat.signal_keys)
-            ? pat.signal_keys
-            : [];
+        // Match LIFETIME patterns for this segment
+        const applicableLifetime = lifetimePatterns.filter(p => p.segment === segment);
+        const matchedLifetime: PatternMatch[] = [];
+        for (const pat of applicableLifetime) {
+          const keys: string[] = Array.isArray(pat.signal_keys) ? pat.signal_keys : [];
           if (keys.length === 0) continue;
           if (keys.every((k) => signalSet.has(k))) {
-            matchedPatterns.push({
+            matchedLifetime.push({
               pattern_id: pat.id,
               pattern_label: pat.pattern_label,
               signal_keys: pat.signal_keys,
@@ -164,44 +164,95 @@ Deno.serve(async (req) => {
               stability_windows: pat.stability_windows || 0,
               outlier_trimmed_roi: pat.outlier_trimmed_roi || 0,
               drawdown_health: pat.drawdown_health || 0,
+              d21_bets: pat.d21_bets || 0,
+              d21_wins: pat.d21_wins || 0,
+              d21_roi_pct: pat.d21_roi_pct || 0,
             });
           }
         }
 
-        // Sort by quality score
-        matchedPatterns.sort(
-          (a, b) => computeQuality(b) - computeQuality(a)
-        );
-
-        // Trust score: based on count and quality of matched patterns
-        const patternCount = matchedPatterns.length;
-        let trustScore = 0;
-        let trustTier = "none";
-
-        if (patternCount > 0) {
-          const qualityScores = matchedPatterns.map((p) => computeQuality(p));
-          const avgQuality = qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length;
-          const countBonus = Math.min(20, patternCount * 5);
-          trustScore = Math.max(0, Math.min(100, Math.round(avgQuality + countBonus)));
-
-          if (trustScore >= 70) trustTier = "high";
-          else if (trustScore >= 40) trustTier = "medium";
-          else trustTier = "low";
+        // Match 21-DAY patterns for this segment
+        const applicable21d = d21Patterns.filter(p => p.segment === segment);
+        const matched21d: PatternMatch[] = [];
+        for (const pat of applicable21d) {
+          const keys: string[] = Array.isArray(pat.signal_keys) ? pat.signal_keys : [];
+          if (keys.length === 0) continue;
+          if (keys.every((k) => signalSet.has(k))) {
+            // Avoid duplicating patterns already matched as lifetime
+            const alreadyMatched = matchedLifetime.some(
+              lp => JSON.stringify(lp.signal_keys) === JSON.stringify(pat.signal_keys)
+            );
+            if (alreadyMatched) continue;
+            matched21d.push({
+              pattern_id: pat.id,
+              pattern_label: pat.pattern_label,
+              signal_keys: pat.signal_keys,
+              status: pat.status,
+              total_bets: 0,
+              wins: 0,
+              win_rate: 0,
+              roi_pct: 0,
+              pattern_type: "21DAY_PROFITABLE",
+              stability_windows: 0,
+              outlier_trimmed_roi: 0,
+              drawdown_health: 0,
+              d21_bets: pat.d21_bets || 0,
+              d21_wins: pat.d21_wins || 0,
+              d21_roi_pct: pat.d21_roi_pct || 0,
+            });
+          }
         }
 
-        // Always include runners that match at least one pattern
-        // Also include runners with no matches if they have model predictions
-        if (matchedPatterns.length === 0) {
+        matchedLifetime.sort((a, b) => computeQuality(b) - computeQuality(a));
+        matched21d.sort((a, b) => (b.d21_roi_pct || 0) - (a.d21_roi_pct || 0));
+
+        const totalPatterns = matchedLifetime.length + matched21d.length;
+
+        // Trust score from lifetime patterns (primary) + 21-day bonus
+        let trustScore = 0;
+        let trustTier = "none";
+        if (matchedLifetime.length > 0) {
+          const qualityScores = matchedLifetime.map(p => computeQuality(p));
+          const avgQuality = qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length;
+          const countBonus = Math.min(20, matchedLifetime.length * 5);
+          const d21Bonus = Math.min(10, matched21d.length * 3);
+          trustScore = Math.max(0, Math.min(100, Math.round(avgQuality + countBonus + d21Bonus)));
+        } else if (matched21d.length > 0) {
+          trustScore = Math.max(0, Math.min(50, Math.round(matched21d.length * 10)));
+        }
+
+        if (trustScore >= 70) trustTier = "high";
+        else if (trustScore >= 40) trustTier = "medium";
+        else if (trustScore > 0) trustTier = "low";
+
+        if (totalPatterns === 0) {
           const ensProba = n(entry.ensemble_proba);
           if (ensProba <= 0) continue;
         }
 
+        // Bet decision computation
         const ensProba = n(entry.ensemble_proba);
         const curOdds = n(entry.current_odds);
         const openOdds = n(entry.opening_odds);
         const betOdds = openOdds > 1 ? openOdds : curOdds;
         const impliedP = betOdds > 1 ? 1 / betOdds : 0;
-        const edge = ensProba - impliedP;
+        const edgeRaw = impliedP > 0 ? ensProba - impliedP : 0;
+        const edgePct = impliedP > 0 ? (edgeRaw / impliedP) * 100 : 0;
+
+        // Kelly criterion: f* = (bp - q) / b where b = decimal_odds - 1
+        const b = betOdds - 1;
+        const q = 1 - ensProba;
+        let kellyFraction = b > 0 ? ((b * ensProba - q) / b) : 0;
+        kellyFraction = Math.max(0, kellyFraction);
+
+        // Kelly multiplier based on trust + patterns
+        let kellyMultiplier = 0;
+        if (trustTier === "high") kellyMultiplier = 1.0;
+        else if (trustTier === "medium") kellyMultiplier = 0.5;
+        else if (trustTier === "low") kellyMultiplier = 0.25;
+        const stakeFraction = kellyFraction * kellyMultiplier * 0.5;
+
+        const worthBetting = edgePct >= 5 && totalPatterns > 0 && ensProba >= 0.10;
 
         allMatches.push({
           horse_name: entry.horse_name || "",
@@ -217,22 +268,32 @@ Deno.serve(async (req) => {
           number: entry.number ?? null,
           jockey: entry.jockey_name || "",
           trainer: entry.trainer_name || "",
-          matching_patterns: matchedPatterns.slice(0, 15),
+          lifetime_patterns: matchedLifetime.slice(0, 15),
+          d21_patterns: matched21d.slice(0, 15),
           active_signals: signals,
-          pattern_count: patternCount,
+          pattern_count: totalPatterns,
+          lifetime_count: matchedLifetime.length,
+          d21_count: matched21d.length,
           trust_score: trustScore,
           trust_tier: trustTier,
+          edge_pct: Math.round(edgePct * 10) / 10,
+          market_implied: Math.round(impliedP * 1000) / 10,
+          fair_probability: Math.round(ensProba * 1000) / 10,
+          kelly_multiplier: kellyMultiplier,
+          stake_fraction: Math.round(stakeFraction * 10000) / 100,
+          worth_betting: worthBetting,
         });
       }
     }
 
-    // Sort by pattern count descending
     allMatches.sort((a, b) => b.pattern_count - a.pattern_count);
 
     return json({
       data: {
         matches: allMatches,
-        patterns_loaded: patterns.length,
+        patterns_loaded: allPatterns.length,
+        lifetime_patterns_loaded: lifetimePatterns.length,
+        d21_patterns_loaded: d21Patterns.length,
         meta: {
           today_races: todayRaces.length,
           today_entries: entries.length,
@@ -275,6 +336,10 @@ interface MastermindPattern {
   outlier_trimmed_roi: number;
   max_drawdown: number;
   drawdown_health: number;
+  d21_bets: number;
+  d21_wins: number;
+  d21_roi_pct: number;
+  d21_profit: number;
 }
 
 interface PatternMatch {
@@ -290,6 +355,9 @@ interface PatternMatch {
   stability_windows: number;
   outlier_trimmed_roi: number;
   drawdown_health: number;
+  d21_bets: number;
+  d21_wins: number;
+  d21_roi_pct: number;
 }
 
 interface MastermindMatch {
@@ -306,11 +374,20 @@ interface MastermindMatch {
   number: number | null;
   jockey: string;
   trainer: string;
-  matching_patterns: PatternMatch[];
+  lifetime_patterns: PatternMatch[];
+  d21_patterns: PatternMatch[];
   active_signals: string[];
   pattern_count: number;
+  lifetime_count: number;
+  d21_count: number;
   trust_score: number;
   trust_tier: string;
+  edge_pct: number;
+  market_implied: number;
+  fair_probability: number;
+  kelly_multiplier: number;
+  stake_fraction: number;
+  worth_betting: boolean;
 }
 
 // =======================================================================
