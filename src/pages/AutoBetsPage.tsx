@@ -638,18 +638,47 @@ export function AutoBetsPage() {
         </div>
 
         {/* How it works banner */}
-        <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl p-4 space-y-2">
+        <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-purple-400 flex-shrink-0" />
-            <span className="text-sm font-semibold text-purple-300">How Top Picks Work</span>
+            <span className="text-sm font-semibold text-purple-300">How to Use Top Picks</span>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
-            The <span className="text-purple-300 font-medium">Benter model</span> calculates each horse's true win probability
-            and compares it to the market odds. Horses with{' '}
-            <span className="text-green-400 font-medium">5%+ edge</span> and at least 15% Benter probability qualify up to 12/1.
-            Longshots above 12/1 can qualify if backed by{' '}
-            <span className="text-purple-300 font-medium">2+ lifetime profitable patterns</span>.
-            One pick per race. Kelly Criterion sizes the stake. AI Intelligence shows matched patterns per segment.
+            Our AI scans every race and finds horses the{' '}
+            <span className="text-white font-medium">bookmakers have priced too high</span>.
+            When our models think a horse has a better chance of winning than the odds suggest,
+            that's an "edge" — and that horse becomes a pick. We show{' '}
+            <span className="text-white font-medium">one best pick per race</span> and
+            suggest how much to stake based on the size of the edge.
+          </p>
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-gray-500 font-semibold uppercase tracking-wider">Signal Strength Guide</p>
+            <div className="flex items-start gap-2">
+              <span className="text-yellow-400 text-xs font-bold w-20 flex-shrink-0 pt-0.5">Weak</span>
+              <p className="text-xs text-gray-400">
+                The horse shows a small edge over the market. Worth noting and keeping an eye on,
+                but not a strong enough signal to bet confidently on its own. Watch how the odds move closer to race time.
+              </p>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-orange-400 text-xs font-bold w-20 flex-shrink-0 pt-0.5">Moderate</span>
+              <p className="text-xs text-gray-400">
+                A solid edge backed by at least 2 of our 4 models agreeing this horse is the one to beat.
+                These are reasonable plays, especially when odds are shortening (money coming in from other punters too).
+              </p>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-green-400 text-xs font-bold w-20 flex-shrink-0 pt-0.5">Strong</span>
+              <p className="text-xs text-gray-400">
+                A large edge with multiple models and historical patterns all pointing to the same horse.
+                These are our highest conviction picks. The suggested Kelly stake reflects the confidence level.
+              </p>
+            </div>
+          </div>
+          <p className="text-[10px] text-gray-500 leading-relaxed border-t border-gray-700/50 pt-2">
+            <span className="text-purple-300 font-medium">Tip:</span>{' '}
+            The edge gauge on each card shows exactly how much our AI thinks the horse is underpriced.
+            The bigger the edge, the stronger the opportunity. Green model dots show how many of our models agree.
           </p>
         </div>
 
