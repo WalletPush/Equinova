@@ -54,7 +54,7 @@ export function MastermindModal({
   const TierIcon = tierCfg.icon
 
   const stakeLabel = stakeFraction > 0
-    ? `${stakeFraction.toFixed(1)}% ${kellyMultiplier >= 1 ? 'half' : kellyMultiplier >= 0.5 ? 'quarter' : 'eighth'}-Kelly`
+    ? `${stakeFraction.toFixed(2)}% quarter-Kelly`
     : 'N/A'
 
   const modal = (
