@@ -474,8 +474,12 @@ function computeSignals(
   const lgbmProb = n(entry.benter_proba);
   const xgbProb = n(entry.xgboost_proba);
   const rfProb = n(entry.rf_proba);
-  const odds = n(entry.current_odds);
-  const impliedProb = odds > 1 ? 1 / odds : 0;
+  const curOdds = n(entry.current_odds);
+  const openOdds = n(entry.opening_odds);
+  // Use opening odds for pattern-critical signals so patterns stay stable
+  // throughout the day. Fall back to current odds if opening isn't available.
+  const stableOdds = openOdds > 1 ? openOdds : curOdds;
+  const impliedProb = stableOdds > 1 ? 1 / stableOdds : 0;
 
   const isTop = (val: number, col: string) => {
     if (val <= 0) return false;
@@ -508,23 +512,28 @@ function computeSignals(
 
   const totalEns = raceEntries.reduce((s, e) => s + n(e.ensemble_proba), 0);
   const normProb = totalEns > 0 ? ensProb / totalEns : 0;
-  const valueScore = odds > 1 ? normProb * odds : 0;
+  const valueScore = stableOdds > 1 ? normProb * stableOdds : 0;
   if (valueScore >= 1.10) signals.push("value_1_10");
   if (valueScore >= 1.20) signals.push("value_1_20");
 
-  if (odds >= 1 && odds < 3) signals.push("odds_evs_to_2");
-  if (odds >= 3 && odds < 5) signals.push("odds_2_to_4");
-  if (odds >= 5 && odds < 9) signals.push("odds_4_to_8");
-  if (odds >= 9 && odds < 15) signals.push("odds_8_to_14");
-  if (odds >= 15) signals.push("odds_14_plus");
+  if (stableOdds >= 1 && stableOdds < 3) signals.push("odds_evs_to_2");
+  if (stableOdds >= 3 && stableOdds < 5) signals.push("odds_2_to_4");
+  if (stableOdds >= 5 && stableOdds < 9) signals.push("odds_4_to_8");
+  if (stableOdds >= 9 && stableOdds < 15) signals.push("odds_8_to_14");
+  if (stableOdds >= 15) signals.push("odds_14_plus");
 
-  if (raceEntries.every((e) => n(e.current_odds) >= odds) && odds > 0)
+  // Favourite based on opening odds for stability
+  const getStableOdds = (e: any) => {
+    const o = n(e.opening_odds);
+    return o > 1 ? o : n(e.current_odds);
+  };
+  if (raceEntries.every((e) => getStableOdds(e) >= stableOdds) && stableOdds > 0)
     signals.push("favourite");
 
-  const openOdds = n(entry.opening_odds);
+  // Market movement signals still use live odds (these reflect real drift)
   let pctChange = 0;
-  if (openOdds > 0 && odds > 0)
-    pctChange = ((odds - openOdds) / openOdds) * 100;
+  if (openOdds > 0 && curOdds > 0)
+    pctChange = ((curOdds - openOdds) / openOdds) * 100;
   if (pctChange <= -25) signals.push("heavy_steaming");
   else if (pctChange <= -15) signals.push("steaming");
   else if (pctChange <= -5) signals.push("light_steaming");
@@ -532,10 +541,11 @@ function computeSignals(
   if (pctChange >= 15 && pctChange < 25) signals.push("drifting");
   if (pctChange >= 25) signals.push("heavy_drifting");
 
-  const oddsRank = raceEntries.filter((e) => n(e.current_odds) < odds).length + 1;
+  // model_market_aligned uses opening odds rank so it doesn't degrade with drift
+  const oddsRank = raceEntries.filter((e) => getStableOdds(e) < stableOdds).length + 1;
   if (signals.includes("benter_top_pick") && oddsRank <= 2)
     signals.push("model_market_aligned");
-  if (edgePct >= 15 && odds > 9) signals.push("model_market_diverge");
+  if (edgePct >= 15 && stableOdds > 9) signals.push("model_market_diverge");
 
   const rpr = n(entry.rpr);
   const ts = n(entry.ts);

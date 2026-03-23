@@ -325,6 +325,14 @@ export function AutoBetsPage() {
     }
   }, [userBetsData, bankroll])
 
+  const userBetLookup = useMemo(() => {
+    const set = new Set<string>()
+    for (const b of userBetsData ?? []) {
+      if (b.race_id && b.horse_id) set.add(`${b.race_id}:${b.horse_id}`)
+    }
+    return set
+  }, [userBetsData])
+
   const { picks, settledPicks } = useMemo(() => {
     if (!entriesData?.entries?.length) return { picks: [] as TopPick[], settledPicks: [] as TopPick[] }
     const { entries, raceMap, resultsByRace, resultsByHorseId, outcomeByHorseId, racesWithResults, nonRunnersByRace } = entriesData
@@ -342,12 +350,14 @@ export function AutoBetsPage() {
 
     const upcoming: TopPick[] = []
     const settled: TopPick[] = []
+    const addedRaceIds = new Set<string>()
 
     for (const [raceId, raceEntries] of byRace) {
       const race = raceMap[raceId]
       if (!race) continue
 
       let bestPick: TopPick | null = null
+      let betBackedPick: TopPick | null = null
 
       for (const e of raceEntries) {
         const liveOdds = Number(e.current_odds) || 0
@@ -363,13 +373,14 @@ export function AutoBetsPage() {
 
         const mmKey = `${raceId}:${e.horse_id}`
         const mm = matchesByHorse.get(mmKey)
-
-        // Signal gate: horse MUST have at least 1 matched pattern to qualify
         const pCount = mm?.pattern_count ?? 0
-        if (pCount === 0) continue
+        const hasBet = userBetLookup.has(mmKey)
 
-        // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ lifetime profitable patterns
-        if (odds > MAX_ODDS) {
+        // Signal gate: must have patterns OR an existing bet to qualify
+        if (pCount === 0 && !hasBet) continue
+
+        // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ patterns (unless already bet)
+        if (odds > MAX_ODDS && !hasBet) {
           if (pCount < LONGSHOT_MIN_ACTIVE_PATTERNS) continue
         }
 
@@ -424,37 +435,47 @@ export function AutoBetsPage() {
           odds_movement_pct: oddsMovementPct,
         }
 
+        // Horses with existing bets always get priority for their race
+        if (hasBet) {
+          betBackedPick = pick
+        }
+
         if (!bestPick || edge > bestPick.edge) {
           bestPick = pick
         }
       }
 
-      if (bestPick) {
-        const mmKey = `${bestPick.race_id}:${bestPick.horse_id}`
-        const mmMatch = matchesByHorse.get(mmKey)
-        const kelly = computeKelly(bestPick, bankroll, mmMatch?.trust_score ?? 0)
-        if (!kelly) continue
+      // Prefer the horse the user already bet on; fall back to highest edge
+      const finalPick = betBackedPick ?? bestPick
 
-        const raceMinutes = raceTimeToMinutes(bestPick.off_time || '')
-        const hasResults = racesWithResults?.has(bestPick.race_id)
+      if (finalPick) {
+        const mmKey = `${finalPick.race_id}:${finalPick.horse_id}`
+        const hasBet = userBetLookup.has(mmKey)
+        const mmMatch = matchesByHorse.get(mmKey)
+        const kelly = computeKelly(finalPick, bankroll, mmMatch?.trust_score ?? 0)
+        // Skip Kelly gate only for horses without existing bets
+        if (!kelly && !hasBet) continue
+
+        const raceMinutes = raceTimeToMinutes(finalPick.off_time || '')
+        const hasResults = racesWithResults?.has(finalPick.race_id)
         const raceFinished = isPastDate || (raceMinutes > 0 && (curMinutes - raceMinutes) > 10)
 
-        // Check if this horse was a non-runner (void bet — skip entirely)
-        const nrSet = nonRunnersByRace?.[bestPick.race_id]
+        const nrSet = nonRunnersByRace?.[finalPick.race_id]
         if (nrSet) {
-          const bareName = bestPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+          const bareName = finalPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
           if (nrSet.has(bareName)) continue
         }
 
+        addedRaceIds.add(finalPick.race_id)
+
         if (hasResults && raceFinished) {
-          // Match by horse_id first (reliable), then name fallback
-          const idKey = `${bestPick.race_id}:${bestPick.horse_id}`
+          const idKey = `${finalPick.race_id}:${finalPick.horse_id}`
           let pos: number | undefined = resultsByHorseId?.[idKey]
 
           if (pos === undefined) {
-            const racePositions = resultsByRace[bestPick.race_id]
+            const racePositions = resultsByRace[finalPick.race_id]
             if (racePositions) {
-              const bareName = bestPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+              const bareName = finalPick.horse_name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
               pos = racePositions[bareName]
               if (pos === undefined) {
                 for (const [name, p] of Object.entries(racePositions)) {
@@ -464,16 +485,16 @@ export function AutoBetsPage() {
             }
           }
 
-          bestPick.finishing_position = pos ?? 0
+          finalPick.finishing_position = pos ?? 0
           if (pos === undefined || pos === 0) {
-            const outcomeKey = `${bestPick.race_id}:${bestPick.horse_id}`
-            bestPick.outcome = outcomeByHorseId?.[outcomeKey] || 'LOST'
+            const outcomeKey = `${finalPick.race_id}:${finalPick.horse_id}`
+            finalPick.outcome = outcomeByHorseId?.[outcomeKey] || 'LOST'
           }
-          settled.push(bestPick)
+          settled.push(finalPick)
         } else if (raceFinished && !hasResults) {
-          settled.push(bestPick)
+          settled.push(finalPick)
         } else if (!raceFinished) {
-          upcoming.push(bestPick)
+          upcoming.push(finalPick)
         }
       }
     }
@@ -481,7 +502,7 @@ export function AutoBetsPage() {
     upcoming.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     settled.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     return { picks: upcoming, settledPicks: settled }
-  }, [entriesData, bankroll, selectedDate, ukToday, matchesByHorse])
+  }, [entriesData, bankroll, selectedDate, ukToday, matchesByHorse, userBetLookup])
 
   const handleAutoBetToggle = useCallback(async (turnOn: boolean) => {
     toggleAutoBet(turnOn)
