@@ -169,7 +169,7 @@ export function AiChatModal({ context, silkUrl, horseNumber, onClose }: AiChatMo
               <div className="p-3 bg-purple-500/10 rounded-full mb-3">
                 <Sparkles className="w-8 h-8 text-purple-400" />
               </div>
-              <p className="text-gray-300 font-medium mb-1">Racing API Intelligence</p>
+              <p className="text-gray-300 font-medium mb-1">EquiNOVA Intelligence</p>
               <p className="text-gray-500 text-sm mb-5">
                 Ask anything about {context.horse_name}'s form, connections, or race conditions
               </p>
@@ -225,7 +225,7 @@ export function AiChatModal({ context, silkUrl, horseNumber, onClose }: AiChatMo
             </button>
           </div>
           <p className="text-[10px] text-gray-600 mt-1.5 text-center">
-            Powered by Claude Sonnet 4.6 + Racing API MCP
+            Powered by Claude Sonnet 4.6 + EquiNOVA
           </p>
         </div>
       </div>

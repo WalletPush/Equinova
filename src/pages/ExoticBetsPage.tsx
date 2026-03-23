@@ -385,7 +385,7 @@ export function ExoticBetsPage() {
             </p>
             <p className="text-xs text-gray-400 leading-relaxed">
               Settled returns use <span className="text-amber-300 font-medium">actual CSF &amp; tricast dividends</span> from
-              the Racing API — not model estimates. Future integration with the{' '}
+              live data feeds — not model estimates. Future integration with the{' '}
               <span className="text-amber-300 font-medium">Betfair Exchange API</span> will provide live exchange
               prices for fully automated exotic bet placement.
             </p>
