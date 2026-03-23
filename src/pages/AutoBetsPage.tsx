@@ -113,7 +113,7 @@ export function AutoBetsPage() {
   const [slipHorseIds, setSlipHorseIds] = useState<Set<string>>(new Set())
   const [pushDismissed, setPushDismissed] = useState(() => sessionStorage.getItem('push-dismissed') === '1')
 
-  const { matchesByHorse, isLoading: mastermindLoading } = useMastermind()
+  const { matchesByHorse, isLoading: mastermindLoading } = useMastermind(selectedDate)
   const { autoBetEnabled, toggleAutoBet, isToggling } = useAutoBetSettings()
 
   const toggleSlip = useCallback((horseId: string) => {

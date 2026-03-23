@@ -77,9 +77,9 @@ interface MastermindResponse {
   }
 }
 
-export function useMastermind() {
+export function useMastermind(date?: string) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['mastermind-scanner'],
+    queryKey: ['mastermind-scanner', date ?? 'today'],
     queryFn: async (): Promise<MastermindResponse | null> => {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mastermind-scanner`
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -90,7 +90,7 @@ export function useMastermind() {
           Authorization: `Bearer ${anonKey}`,
           apikey: anonKey,
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify(date ? { date } : {}),
       })
       if (!res.ok) return null
       return res.json()

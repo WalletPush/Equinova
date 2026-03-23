@@ -1,5 +1,5 @@
 /**
- * EquiNOVA Mastermind Scanner — Edge Function
+ * EquiNOVA Mastermind Scanner -- Edge Function
  *
  * Computes 80+ atomic signals for today's entries, matches them against
  * ACTIVE/MONITORING patterns from mastermind_patterns, and returns
@@ -35,13 +35,22 @@ Deno.serve(async (req) => {
       apikey: supabaseKey,
     };
 
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Europe/London",
-    });
+    let targetDate: string;
+    try {
+      const body = await req.json().catch(() => ({}));
+      targetDate = body?.date || new Date().toLocaleDateString("en-CA", {
+        timeZone: "Europe/London",
+      });
+    } catch {
+      targetDate = new Date().toLocaleDateString("en-CA", {
+        timeZone: "Europe/London",
+      });
+    }
+    const today = targetDate;
 
     console.log(`mastermind-scanner: date=${today}`);
 
-    // ── Load patterns (paginate past PostgREST 1000-row cap) ──
+    // -- Load patterns (paginate past PostgREST 1000-row cap) --
     const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status,pqs,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,failure_modes,oos_validated";
     const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&pattern_type=eq.PROFITABLE&order=confidence_score.desc`;
     const patterns: MastermindPattern[] = [];
@@ -67,7 +76,7 @@ Deno.serve(async (req) => {
       `Loaded ${patterns.length} patterns, ${antiPatterns.length} anti-patterns`
     );
 
-    // ── Load today's races + entries ──
+    // -- Load today's races + entries --
     const racesRes = await fetch(
       `${supabaseUrl}/rest/v1/races?select=race_id,date,off_time,course_name,type,surface&date=eq.${today}&limit=200`,
       { headers: hdrs }
@@ -115,7 +124,7 @@ Deno.serve(async (req) => {
 
     const entriesByRace = groupBy(entries, "race_id");
 
-    // ── Compute signals + match patterns for each runner ──
+    // -- Compute signals + match patterns for each runner --
     const allMatches: MastermindMatch[] = [];
 
     for (const [raceId, raceEntries] of Object.entries(entriesByRace)) {
@@ -215,17 +224,16 @@ Deno.serve(async (req) => {
         if (matchedPatterns.length === 0 && matchedAnti.length === 0) continue;
 
         matchedPatterns.sort(
-          (a, b) => (b.pqs || b.confidence_score || 0) - (a.pqs || a.confidence_score || 0)
+          (a, b) => computePqs(b) - computePqs(a)
         );
 
         const activePatterns = matchedPatterns.filter(
           (p) => p.status === "ACTIVE"
         );
 
-        // ETS computation: avg PQS of matched ACTIVE patterns - anti penalty
-        const activePqs = activePatterns.map((p) => p.pqs || 0);
-        const avgPqs = activePqs.length > 0
-          ? activePqs.reduce((a, b) => a + b, 0) / activePqs.length
+        const activePqsScores = activePatterns.map((p) => computePqs(p));
+        const avgPqs = activePqsScores.length > 0
+          ? activePqsScores.reduce((a, b) => a + b, 0) / activePqsScores.length
           : 0;
         const antiPenalty = Math.min(40, matchedAnti.length * 10);
         const ets = Math.max(0, Math.min(100, avgPqs - antiPenalty));
@@ -320,9 +328,9 @@ Deno.serve(async (req) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 // Types
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 interface Race {
   race_id: string;
@@ -418,11 +426,25 @@ interface MastermindMatch {
   };
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 // Helpers
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 const n = (v: unknown): number => parseFloat(v as string) || 0;
+
+function computePqs(p: PatternMatch): number {
+  const bets = p.total_bets || 0;
+  const sampleScore = Math.min(25, (Math.log2(Math.max(bets, 1)) / Math.log2(1000)) * 25);
+  const wr = p.win_rate || 0;
+  const winScore = Math.min(25, (wr / 40) * 25);
+  const roi = p.roi_pct || 0;
+  const roiScore = Math.min(25, Math.max(0, (roi / 30) * 25));
+  const sw = p.stability_windows || 0;
+  const stabilityScore = Math.min(15, (sw / 5) * 15);
+  const dh = p.drawdown_health || 0;
+  const drawdownScore = dh * 10;
+  return Math.round(sampleScore + winScore + roiScore + stabilityScore + drawdownScore);
+}
 
 function groupBy(arr: any[], key: string): Record<string, any[]> {
   const map: Record<string, any[]> = {};
@@ -469,9 +491,9 @@ function classifySegment(race: Race): string {
   return "flat_turf";
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 // Signal Computation (TypeScript port of mastermind_signals.py)
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 function computeSignals(
   entry: any,
@@ -482,7 +504,7 @@ function computeSignals(
 ): string[] {
   const signals: string[] = [];
 
-  // ── Model & Edge ──
+  // -- Model & Edge --
   const ensProb = n(entry.ensemble_proba);
   const lgbmProb = n(entry.benter_proba);
   const xgbProb = n(entry.xgboost_proba);
@@ -525,7 +547,7 @@ function computeSignals(
   if (valueScore >= 1.10) signals.push("value_1_10");
   if (valueScore >= 1.20) signals.push("value_1_20");
 
-  // ── Odds & Market ──
+  // -- Odds & Market --
   if (odds >= 1 && odds < 3) signals.push("odds_evs_to_2");
   if (odds >= 3 && odds < 5) signals.push("odds_2_to_4");
   if (odds >= 5 && odds < 9) signals.push("odds_4_to_8");
@@ -551,7 +573,7 @@ function computeSignals(
     signals.push("model_market_aligned");
   if (edgePct >= 15 && odds > 9) signals.push("model_market_diverge");
 
-  // ── Ratings ──
+  // -- Ratings --
   const rpr = n(entry.rpr);
   const ts = n(entry.ts);
   const ofr = n(entry.ofr);
@@ -592,7 +614,7 @@ function computeSignals(
     if (pctAbove >= 10) signals.push("rating_standout_10");
   }
 
-  // ── Speed & Form ──
+  // -- Speed & Form --
   const lastSpd = n(entry.last_speed_figure);
   const meanSpd = n(entry.mean_speed_figure);
   if (lastSpd > meanSpd && lastSpd > 0 && meanSpd > 0) signals.push("speed_improving");
@@ -625,7 +647,7 @@ function computeSignals(
   if (n(entry.career_win_rate) >= 20) signals.push("career_winner");
   if (n(entry.beaten_lengths_trend) < 0) signals.push("beaten_lengths_improving");
 
-  // ── Trainer ──
+  // -- Trainer --
   const t21 = n(entry.trainer_21_days_win_percentage);
   if (t21 >= 20) signals.push("trainer_21d_hot");
   else if (t21 >= 15) signals.push("trainer_21d_warm");
@@ -650,7 +672,7 @@ function computeSignals(
   if (signals.includes("trainer_21d_hot") && signals.includes("trainer_course_specialist"))
     signals.push("trainer_in_form_at_course");
 
-  // ── Jockey ──
+  // -- Jockey --
   const j21 = n(entry.jockey_21_days_win_percentage);
   if (j21 >= 20) signals.push("jockey_21d_hot");
   else if (j21 >= 15) signals.push("jockey_21d_warm");
@@ -667,7 +689,7 @@ function computeSignals(
     signals.push("elite_connections");
   if (tjc === 0 && n(entry.jockey_booking_change) === 1) signals.push("tj_first_combo");
 
-  // ── Horse Context ──
+  // -- Horse Context --
   const comment = ((entry.comment as string) || "").toLowerCase();
   if (/\bc\s*&\s*d\b/.test(comment) || /course\s+and\s+distance/.test(comment))
     signals.push("cd_winner");
@@ -691,7 +713,7 @@ function computeSignals(
     if (drawBias <= threshold) signals.push("draw_advantage");
   }
 
-  // ── Race Context ──
+  // -- Race Context --
   if (fieldSize > 0 && fieldSize <= 7) signals.push("small_field");
   if (fieldSize >= 8 && fieldSize <= 13) signals.push("medium_field");
   if (fieldSize >= 14) signals.push("large_field");
