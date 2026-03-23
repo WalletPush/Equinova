@@ -132,69 +132,6 @@ export function AutoBetsPage() {
   const [isPlacingAutoBets, setIsPlacingAutoBets] = useState(false)
   const queryClient = useQueryClient()
 
-  const handleAutoBetToggle = useCallback(async (turnOn: boolean) => {
-    toggleAutoBet(turnOn)
-    if (!turnOn) return
-
-    if (!isToday) return
-
-    setIsPlacingAutoBets(true)
-    setAutoBetToast(null)
-
-    try {
-      // Use the DISPLAYED Top Picks (one per race, properly filtered) — NOT raw mastermind matches
-      const strongMatches: any[] = []
-      for (const pick of picks) {
-        const mmKey = `${pick.race_id}:${pick.horse_id}`
-        const mm = matchesByHorse.get(mmKey)
-        if (!mm) continue
-        if ((mm.trust_score ?? 0) < 70) continue
-        if ((mm.pattern_count ?? 0) === 0) continue
-
-        strongMatches.push({
-          horse_name: pick.horse_name,
-          horse_id: pick.horse_id,
-          race_id: pick.race_id,
-          course: pick.course,
-          off_time: pick.off_time,
-          trainer: pick.trainer,
-          jockey: pick.jockey,
-          ensemble_proba: pick.ensemble_proba,
-          opening_odds: pick.opening_odds,
-          current_odds: pick.current_odds,
-          trust_score: mm.trust_score,
-          trust_tier: mm.trust_tier,
-          pattern_count: mm.pattern_count,
-        })
-      }
-
-      if (strongMatches.length === 0) {
-        setAutoBetToast({ count: 0, total: 0, error: 'No Strong picks today' })
-        setTimeout(() => setAutoBetToast(null), 5000)
-        return
-      }
-
-      const res = await callSupabaseFunction('mastermind-auto-bet', { matches: strongMatches })
-      const result = res?.data
-
-      if (result) {
-        setAutoBetToast({ count: result.bets_placed ?? 0, total: result.total_staked ?? 0 })
-        queryClient.invalidateQueries({ queryKey: ['user-bankroll'] })
-        queryClient.invalidateQueries({ queryKey: ['user-bets-summary'] })
-        queryClient.invalidateQueries({ queryKey: ['benter-top-picks', selectedDate] })
-      } else {
-        setAutoBetToast({ count: 0, total: 0, error: 'No response from auto-bet' })
-      }
-
-      setTimeout(() => setAutoBetToast(null), 8000)
-    } catch (err) {
-      setAutoBetToast({ count: 0, total: 0, error: String(err) })
-      setTimeout(() => setAutoBetToast(null), 8000)
-    } finally {
-      setIsPlacingAutoBets(false)
-    }
-  }, [toggleAutoBet, isToday, picks, matchesByHorse, selectedDate, queryClient])
-
   const toggleSlip = useCallback((horseId: string) => {
     setSlipHorseIds(prev => {
       const next = new Set(prev)
@@ -545,6 +482,68 @@ export function AutoBetsPage() {
     settled.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     return { picks: upcoming, settledPicks: settled }
   }, [entriesData, bankroll, selectedDate, ukToday, matchesByHorse])
+
+  const handleAutoBetToggle = useCallback(async (turnOn: boolean) => {
+    toggleAutoBet(turnOn)
+    if (!turnOn) return
+
+    if (!isToday) return
+
+    setIsPlacingAutoBets(true)
+    setAutoBetToast(null)
+
+    try {
+      const strongMatches: any[] = []
+      for (const pick of picks) {
+        const mmKey = `${pick.race_id}:${pick.horse_id}`
+        const mm = matchesByHorse.get(mmKey)
+        if (!mm) continue
+        if ((mm.trust_score ?? 0) < 70) continue
+        if ((mm.pattern_count ?? 0) === 0) continue
+
+        strongMatches.push({
+          horse_name: pick.horse_name,
+          horse_id: pick.horse_id,
+          race_id: pick.race_id,
+          course: pick.course,
+          off_time: pick.off_time,
+          trainer: pick.trainer,
+          jockey: pick.jockey,
+          ensemble_proba: pick.ensemble_proba,
+          opening_odds: pick.opening_odds,
+          current_odds: pick.current_odds,
+          trust_score: mm.trust_score,
+          trust_tier: mm.trust_tier,
+          pattern_count: mm.pattern_count,
+        })
+      }
+
+      if (strongMatches.length === 0) {
+        setAutoBetToast({ count: 0, total: 0, error: 'No Strong picks today' })
+        setTimeout(() => setAutoBetToast(null), 5000)
+        return
+      }
+
+      const res = await callSupabaseFunction('mastermind-auto-bet', { matches: strongMatches })
+      const result = res?.data
+
+      if (result) {
+        setAutoBetToast({ count: result.bets_placed ?? 0, total: result.total_staked ?? 0 })
+        queryClient.invalidateQueries({ queryKey: ['user-bankroll'] })
+        queryClient.invalidateQueries({ queryKey: ['user-bets-summary'] })
+        queryClient.invalidateQueries({ queryKey: ['benter-top-picks', selectedDate] })
+      } else {
+        setAutoBetToast({ count: 0, total: 0, error: 'No response from auto-bet' })
+      }
+
+      setTimeout(() => setAutoBetToast(null), 8000)
+    } catch (err) {
+      setAutoBetToast({ count: 0, total: 0, error: String(err) })
+      setTimeout(() => setAutoBetToast(null), 8000)
+    } finally {
+      setIsPlacingAutoBets(false)
+    }
+  }, [toggleAutoBet, isToday, picks, matchesByHorse, selectedDate, queryClient])
 
   const betsByHorse = useMemo(() => {
     const map = new Map<string, any>()
