@@ -838,14 +838,7 @@ export function TodaysRacesPage() {
                       </div>
                     </div>
                     
-                    {/* Stacked action buttons */}
-                    <div className="flex flex-col gap-1.5 flex-shrink-0">
-                      <Link
-                        to={`/race/${race.race_id}`}
-                        className="bg-yellow-500 hover:bg-yellow-400 text-gray-900 px-4 py-1.5 rounded-md text-sm font-bold transition-colors text-center"
-                      >
-                        Analyse
-                      </Link>
+                    <div className="flex-shrink-0">
                       <button
                         onClick={() => setExpandedRace(isExpanded ? null : race.race_id)}
                         className={`border px-4 py-1.5 rounded-md text-sm font-medium transition-colors text-center ${
