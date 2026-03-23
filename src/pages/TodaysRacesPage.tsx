@@ -350,7 +350,9 @@ export function TodaysRacesPage() {
   }, [userBetsData, bankroll])
 
   const todayBets = useMemo(() => {
-    return (userBetsData ?? []).filter((b: any) => b.created_at?.startsWith(selectedDate))
+    return (userBetsData ?? []).filter((b: any) =>
+      (b.race_date ?? b.created_at ?? '').startsWith(selectedDate)
+    )
   }, [userBetsData, selectedDate])
 
   const todayPL = useMemo(() => {
