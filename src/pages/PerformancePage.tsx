@@ -111,6 +111,7 @@ export function PerformancePage() {
     for (const b of bets) {
       if (b.status === 'won') totalPL += Number(b.potential_return) - Number(b.bet_amount)
       else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
+      else if (b.status === 'pending') totalPL -= Number(b.bet_amount)
     }
     const startingBankroll = bankroll - totalPL
     const roi = startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0
@@ -131,6 +132,7 @@ export function PerformancePage() {
       for (const b of dayBets) {
         if (b.status === 'won') dayPL += Number(b.potential_return) - Number(b.bet_amount)
         else if (b.status === 'lost') dayPL -= Number(b.bet_amount)
+        else if (b.status === 'pending') dayPL -= Number(b.bet_amount)
       }
 
       runningPL += dayPL

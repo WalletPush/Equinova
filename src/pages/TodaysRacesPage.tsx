@@ -338,14 +338,16 @@ export function TodaysRacesPage() {
       totalStaked += amt
       if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
       else if (b.status === 'lost') { totalPL -= amt; settled++ }
+      else if (b.status === 'pending') { totalPL -= amt }
     }
+    const startingBankroll = bankroll - totalPL
     return {
       totalPL, totalStaked, wins, settled,
       totalBets: bets.length,
-      roi: totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0,
+      roi: startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0,
       winRate: settled > 0 ? (wins / settled) * 100 : 0,
     }
-  }, [userBetsData])
+  }, [userBetsData, bankroll])
 
   const todayBets = useMemo(() => {
     return (userBetsData ?? []).filter((b: any) => b.created_at?.startsWith(selectedDate))

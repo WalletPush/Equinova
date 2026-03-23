@@ -142,34 +142,29 @@ export function AutoBetsPage() {
     setAutoBetToast(null)
 
     try {
-      const ukTime = getUKTime()
-      const [curH, curM] = ukTime.split(':').map(Number)
-      const nowMinutes = curH * 60 + curM
-
-      // Gather Strong picks (trust >= 70) for upcoming races only
+      // Use the DISPLAYED Top Picks (one per race, properly filtered) — NOT raw mastermind matches
       const strongMatches: any[] = []
-      for (const [, match] of matchesByHorse) {
-        if ((match.trust_score ?? 0) < 70) continue
-        if ((match.pattern_count ?? 0) === 0) continue
-
-        // Skip races that have already started
-        const raceMinutes = raceTimeToMinutes(match.off_time || '')
-        if (raceMinutes > 0 && nowMinutes >= raceMinutes) continue
+      for (const pick of picks) {
+        const mmKey = `${pick.race_id}:${pick.horse_id}`
+        const mm = matchesByHorse.get(mmKey)
+        if (!mm) continue
+        if ((mm.trust_score ?? 0) < 70) continue
+        if ((mm.pattern_count ?? 0) === 0) continue
 
         strongMatches.push({
-          horse_name: match.horse_name,
-          horse_id: match.horse_id,
-          race_id: match.race_id,
-          course: match.course,
-          off_time: match.off_time,
-          trainer: match.trainer,
-          jockey: match.jockey,
-          ensemble_proba: match.ensemble_proba,
-          opening_odds: match.opening_odds,
-          current_odds: match.current_odds,
-          trust_score: match.trust_score,
-          trust_tier: match.trust_tier,
-          pattern_count: match.pattern_count,
+          horse_name: pick.horse_name,
+          horse_id: pick.horse_id,
+          race_id: pick.race_id,
+          course: pick.course,
+          off_time: pick.off_time,
+          trainer: pick.trainer,
+          jockey: pick.jockey,
+          ensemble_proba: pick.ensemble_proba,
+          opening_odds: pick.opening_odds,
+          current_odds: pick.current_odds,
+          trust_score: mm.trust_score,
+          trust_tier: mm.trust_tier,
+          pattern_count: mm.pattern_count,
         })
       }
 
@@ -198,7 +193,7 @@ export function AutoBetsPage() {
     } finally {
       setIsPlacingAutoBets(false)
     }
-  }, [toggleAutoBet, isToday, matchesByHorse, selectedDate, queryClient])
+  }, [toggleAutoBet, isToday, picks, matchesByHorse, selectedDate, queryClient])
 
   const toggleSlip = useCallback((horseId: string) => {
     setSlipHorseIds(prev => {
@@ -383,6 +378,7 @@ export function AutoBetsPage() {
       totalStaked += amt
       if (b.status === 'won') { totalPL += Number(b.potential_return) - amt; wins++; settled++ }
       else if (b.status === 'lost') { totalPL -= amt; settled++ }
+      else if (b.status === 'pending') { totalPL -= amt }
     }
     const startingBankroll = bankroll - totalPL
     return {
