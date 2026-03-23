@@ -7,6 +7,7 @@ import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { BetSlip } from '@/components/BetSlip'
 import { MastermindModal } from '@/components/MastermindModal'
+import { AiChatModal } from '@/components/AiChatModal'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import { MarketMovementBadge } from '@/components/MarketMovement'
@@ -1105,6 +1106,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
   const isWinner = fp === 1
   const hasBet = !!bet
   const [showMastermind, setShowMastermind] = useState(false)
+  const [showAiChat, setShowAiChat] = useState(false)
 
   const trustScore = mastermindMatch?.trust_score ?? 0
   const kellyInfo = useMemo(() => computeKelly(pick, userBankroll, trustScore), [pick, userBankroll, trustScore])
@@ -1124,15 +1126,26 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
               Benter Edge: +{(pick.edge * 100).toFixed(1)}%
             </span>
           </div>
-          {isSettled && (
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
-              isWinner ? 'bg-green-500/20 text-green-400'
-              : pick.outcome && ['FELL', 'PU', 'UR', 'BD'].includes(pick.outcome) ? 'bg-red-500/20 text-red-400'
-              : 'bg-gray-700 text-gray-400'
-            }`}>
-              {isWinner ? <><CheckCircle className="w-3 h-3" /> WON</> : fmtPos(fp, pick.outcome)}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {!isSettled && (
+              <button
+                onClick={() => setShowAiChat(true)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/15 text-blue-400 border border-blue-500/25 hover:bg-blue-500/25 hover:border-blue-500/40 transition-colors"
+              >
+                <MessageSquare className="w-3 h-3" />
+                Chat AI
+              </button>
+            )}
+            {isSettled && (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+                isWinner ? 'bg-green-500/20 text-green-400'
+                : pick.outcome && ['FELL', 'PU', 'UR', 'BD'].includes(pick.outcome) ? 'bg-red-500/20 text-red-400'
+                : 'bg-gray-700 text-gray-400'
+              }`}>
+                {isWinner ? <><CheckCircle className="w-3 h-3" /> WON</> : fmtPos(fp, pick.outcome)}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-gray-400">
           <span>Benter: {(pick.ensemble_proba * 100).toFixed(1)}%</span>
@@ -1302,6 +1315,27 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
             stakeFraction={mastermindMatch?.stake_fraction ?? 0}
             worthBetting={mastermindMatch?.worth_betting ?? false}
             onClose={() => setShowMastermind(false)}
+          />
+        )}
+
+        {showAiChat && (
+          <AiChatModal
+            context={{
+              horse_name: pick.horse_name,
+              course: pick.course,
+              off_time: pick.off_time,
+              race_type: pick.race_type,
+              ensemble_proba: pick.ensemble_proba,
+              implied_prob: pick.implied_prob,
+              edge: pick.edge,
+              current_odds: pick.current_odds,
+              opening_odds: pick.opening_odds,
+              jockey: pick.jockey,
+              trainer: pick.trainer,
+            }}
+            silkUrl={pick.silk_url}
+            horseNumber={pick.number}
+            onClose={() => setShowAiChat(false)}
           />
         )}
 
