@@ -15,10 +15,6 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-    let racingApiToken = Deno.env.get('RACING_API_OAUTH_TOKEN');
-    const refreshToken = Deno.env.get('RACING_API_REFRESH_TOKEN');
-    const clientId = Deno.env.get('RACING_API_CLIENT_ID');
-    const clientSecret = Deno.env.get('RACING_API_CLIENT_SECRET');
 
     if (!serviceRoleKey || !supabaseUrl) {
       throw new Error('Supabase configuration missing');
@@ -26,11 +22,7 @@ Deno.serve(async (req) => {
     if (!anthropicKey) {
       throw new Error('ANTHROPIC_API_KEY not configured');
     }
-    if (!racingApiToken) {
-      throw new Error('RACING_API_OAUTH_TOKEN not configured');
-    }
 
-    // Authenticate user
     const authHeader = req.headers.get('authorization');
     if (!authHeader) {
       throw new Error('No authorization header provided');
@@ -45,8 +37,6 @@ Deno.serve(async (req) => {
     if (!userResponse.ok) {
       throw new Error('Invalid authentication');
     }
-    const userData = await userResponse.json();
-    console.log('AI Chat - User authenticated:', userData.id);
 
     const { message, history = [], context = {} } = await req.json();
 
@@ -54,41 +44,92 @@ Deno.serve(async (req) => {
       throw new Error('Message is required');
     }
 
-    // Build system prompt with EquiNOVA context
-    const contextLines: string[] = [
+    // ── Fetch race data from Supabase ──────────────────────────────
+    let dataBriefing = '';
+
+    if (context.race_id) {
+      const headers = {
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'apikey': serviceRoleKey,
+        'Content-Type': 'application/json',
+      };
+
+      // Fetch race metadata
+      const raceRes = await fetch(
+        `${supabaseUrl}/rest/v1/races?race_id=eq.${context.race_id}&select=course_name,date,off_time,distance,race_class,type,age_band,going,surface,field_size,prize`,
+        { headers }
+      );
+      const races = await raceRes.json();
+      const race = races?.[0];
+
+      // Fetch ALL entries in this race
+      const entriesRes = await fetch(
+        `${supabaseUrl}/rest/v1/race_entries?race_id=eq.${context.race_id}&select=horse_name,horse_id,jockey_name,trainer_name,age,sex,lbs,ofr,rpr,ts,current_odds,opening_odds,number,draw,form,last_run,comment,spotlight,mean_speed_figure,last_speed_figure,best_speed_figure_at_distance,best_speed_figure_at_track,avg_finishing_position,avg_ovr_btn,avg_finishing_position_going,jockey_win_percentage_at_distance,trainer_win_percentage_at_distance,trainer_win_percentage_at_course,horse_win_percentage_at_distance,trainer_21_days_win_percentage,jockey_21_days_win_percentage,trainer_avg_finishing_position_at_course,horse_ae_at_distance,ensemble_proba,stage1_proba,benter_proba,rf_proba,xgboost_proba,edge,kelly_fraction,predicted_winner,bet_tier&order=ensemble_proba.desc.nullslast`,
+        { headers }
+      );
+      const entries = await entriesRes.json();
+
+      if (race && entries?.length) {
+        const lines: string[] = [];
+        lines.push('=== RACE DATA ===');
+        lines.push(`Course: ${race.course_name} | Date: ${race.date} | Off: ${race.off_time}`);
+        lines.push(`Distance: ${race.distance} | Class: ${race.race_class} | Type: ${race.type} | Going: ${race.going}`);
+        lines.push(`Field size: ${race.field_size} | Age: ${race.age_band} | Prize: ${race.prize}`);
+        lines.push('');
+
+        for (const e of entries) {
+          const isTarget = e.horse_name?.toLowerCase() === context.horse_name?.toLowerCase();
+          const marker = isTarget ? ' ★ TOP PICK' : '';
+          lines.push(`--- ${e.horse_name}${marker} ---`);
+          lines.push(`  #${e.number || '?'} | Draw: ${e.draw ?? '-'} | Age: ${e.age}${e.sex || ''} | Weight: ${e.lbs || '-'}lbs`);
+          lines.push(`  Jockey: ${e.jockey_name || '-'} | Trainer: ${e.trainer_name || '-'}`);
+          lines.push(`  Form: ${e.form || '-'} | Last run: ${e.last_run ?? '-'} days ago`);
+          lines.push(`  Odds: ${e.current_odds ?? '-'} (opening: ${e.opening_odds ?? '-'}) | RPR: ${e.rpr ?? '-'} | OFR: ${e.ofr ?? '-'} | TS: ${e.ts ?? '-'}`);
+
+          const sp = (v: number | null | undefined) => v != null ? v.toFixed(1) : '-';
+          const pct = (v: number | null | undefined) => v != null ? (v * 100).toFixed(1) + '%' : '-';
+          const pctRaw = (v: number | null | undefined) => v != null ? v.toFixed(1) + '%' : '-';
+
+          lines.push(`  Speed: mean=${sp(e.mean_speed_figure)} last=${sp(e.last_speed_figure)} best@dist=${sp(e.best_speed_figure_at_distance)} best@track=${sp(e.best_speed_figure_at_track)}`);
+          lines.push(`  Avg finish pos: ${sp(e.avg_finishing_position)} | Avg beaten: ${sp(e.avg_ovr_btn)} | Going finish: ${sp(e.avg_finishing_position_going)}`);
+          lines.push(`  Horse dist win%: ${pct(e.horse_win_percentage_at_distance)} | Horse A/E@dist: ${sp(e.horse_ae_at_distance)}`);
+          lines.push(`  Jockey dist win%: ${pct(e.jockey_win_percentage_at_distance)} | Jockey 21d: ${pctRaw(e.jockey_21_days_win_percentage)}`);
+          lines.push(`  Trainer dist win%: ${pct(e.trainer_win_percentage_at_distance)} | Trainer course win%: ${pct(e.trainer_win_percentage_at_course)} | Trainer 21d: ${pctRaw(e.trainer_21_days_win_percentage)}`);
+          lines.push(`  EquiNOVA: prob=${pct(e.ensemble_proba)} edge=${e.edge != null ? (e.edge > 0 ? '+' : '') + (e.edge * 100).toFixed(1) + '%' : '-'} | Kelly=${sp(e.kelly_fraction)} | Tier: ${e.bet_tier || '-'}`);
+          lines.push(`  Models: LGBM=${pct(e.benter_proba)} RF=${pct(e.rf_proba)} XGB=${pct(e.xgboost_proba)}`);
+
+          if (isTarget) {
+            if (e.spotlight) lines.push(`  Spotlight: ${e.spotlight}`);
+            if (e.comment) lines.push(`  Comment: ${e.comment}`);
+          }
+          lines.push('');
+        }
+
+        dataBriefing = lines.join('\n');
+      }
+    }
+
+    // ── Build system prompt ────────────────────────────────────────
+    const systemParts: string[] = [
       "You are EquiNOVA's racing analyst — concise, data-driven, and confident.",
-      'Use the Racing API tools to look up data. IMPORTANT: use at most 2-3 tool calls per response to stay fast. Focus on the single most relevant data source.',
-      'Give short, punchy analysis backed by the data you retrieve. Keep responses under 200 words.',
+      'You have full race data below including every runner, their form, speed figures, jockey/trainer stats, and EquiNOVA model probabilities.',
+      'Give short, punchy analysis backed by the data provided. Keep responses under 250 words.',
       'Format key stats in bold. Use bullet points for clarity.',
       'Never give explicit betting advice — present facts and let the user decide.',
+      'When comparing rivals, reference the data for each runner shown below.',
     ];
 
     if (context.horse_name) {
-      contextLines.push('');
-      contextLines.push(`The user is viewing a Top Pick: **${context.horse_name}**`);
-      if (context.course) contextLines.push(`Course: ${context.course}`);
-      if (context.off_time) contextLines.push(`Off time: ${context.off_time}`);
-      if (context.race_type) contextLines.push(`Race type: ${context.race_type}`);
-      if (context.ensemble_proba != null) {
-        const benterPct = (context.ensemble_proba * 100).toFixed(1);
-        contextLines.push(`EquiNOVA Benter model probability: ${benterPct}%`);
-      }
-      if (context.implied_prob != null) {
-        const marketPct = (context.implied_prob * 100).toFixed(1);
-        contextLines.push(`Market implied probability: ${marketPct}%`);
-      }
-      if (context.edge != null) {
-        const edgePct = (context.edge * 100).toFixed(1);
-        contextLines.push(`Edge: +${edgePct}%`);
-      }
-      if (context.current_odds != null) {
-        contextLines.push(`Current odds: ${context.current_odds}`);
-      }
-      if (context.jockey) contextLines.push(`Jockey: ${context.jockey}`);
-      if (context.trainer) contextLines.push(`Trainer: ${context.trainer}`);
+      systemParts.push('');
+      systemParts.push(`The user is viewing Top Pick: ${context.horse_name}`);
     }
 
-    const systemPrompt = contextLines.join('\n');
+    if (dataBriefing) {
+      systemParts.push('');
+      systemParts.push(dataBriefing);
+    }
+
+    const systemPrompt = systemParts.join('\n');
 
     const trimmedHistory = history.slice(-10);
     const messages = [
@@ -99,87 +140,26 @@ Deno.serve(async (req) => {
       { role: 'user', content: message },
     ];
 
-    console.log(`AI Chat - Calling Anthropic (${messages.length} messages, context: ${context.horse_name || 'none'})`);
+    console.log(`AI Chat - Calling Anthropic (${messages.length} msgs, prompt ~${systemPrompt.length} chars, horse: ${context.horse_name || 'none'})`);
 
-    // Try calling Anthropic with current token; if auth fails, refresh and retry once
-    async function callAnthropic(accessToken: string) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
-      try {
-      return await fetch('https://api.anthropic.com/v1/messages', {
-        signal: controller.signal,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': anthropicKey!,
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta': 'mcp-client-2025-11-20',
-        },
-        body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages,
-          mcp_servers: [
-            {
-              type: 'url',
-              url: 'https://mcp.theracingapi.com/',
-              name: 'the-racing-api',
-              authorization_token: accessToken,
-            },
-          ],
-          tools: [
-            {
-              type: 'mcp_toolset',
-              mcp_server_name: 'the-racing-api',
-            },
-          ],
-        }),
-      });
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
+    const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+      }),
+    });
 
-    let anthropicResponse = await callAnthropic(racingApiToken!);
-
-    // If MCP auth failed, try refreshing the token
     if (!anthropicResponse.ok) {
       const errText = await anthropicResponse.text();
-      const isMcpAuthError = errText.includes('Authentication error while communicating with MCP server');
-
-      if (isMcpAuthError && refreshToken && clientId && clientSecret) {
-        console.log('AI Chat - Access token expired, refreshing...');
-        const refreshResponse = await fetch('https://mcp.theracingapi.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            client_id: clientId,
-            client_secret: clientSecret,
-          }).toString(),
-        });
-
-        if (refreshResponse.ok) {
-          const tokenData = await refreshResponse.json();
-          racingApiToken = tokenData.access_token;
-          console.log('AI Chat - Token refreshed successfully');
-
-          // Retry with new token
-          anthropicResponse = await callAnthropic(racingApiToken!);
-          if (!anthropicResponse.ok) {
-            const retryErr = await anthropicResponse.text();
-            throw new Error(`AI service error after refresh (${anthropicResponse.status}): ${retryErr}`);
-          }
-        } else {
-          const refreshErr = await refreshResponse.text();
-          console.error('Token refresh failed:', refreshErr);
-          throw new Error(`Token refresh failed. Original error: ${errText}`);
-        }
-      } else {
-        throw new Error(`AI service error (${anthropicResponse.status}): ${errText}`);
-      }
+      throw new Error(`AI service error (${anthropicResponse.status}): ${errText}`);
     }
 
     const result = await anthropicResponse.json();
@@ -191,7 +171,7 @@ Deno.serve(async (req) => {
     const responseText = textBlocks.join('\n\n') || 'No response generated.';
 
     const usage = result.usage || {};
-    console.log(`AI Chat - Response received (input: ${usage.input_tokens}, output: ${usage.output_tokens})`);
+    console.log(`AI Chat - Response (input: ${usage.input_tokens}, output: ${usage.output_tokens})`);
 
     return new Response(JSON.stringify({
       success: true,

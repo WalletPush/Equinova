@@ -1321,6 +1321,7 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
         {showAiChat && (
           <AiChatModal
             context={{
+              race_id: pick.race_id,
               horse_name: pick.horse_name,
               course: pick.course,
               off_time: pick.off_time,

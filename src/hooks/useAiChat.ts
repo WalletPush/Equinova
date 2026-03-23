@@ -7,6 +7,7 @@ export interface ChatMessage {
 }
 
 export interface AiChatContext {
+  race_id: string
   horse_name: string
   course: string
   off_time: string
