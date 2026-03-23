@@ -375,7 +375,9 @@ export function AutoBetsPage() {
       }
 
       if (bestPick) {
-        const kelly = computeKelly(bestPick, bankroll)
+        const mmKey = `${bestPick.race_id}:${bestPick.horse_id}`
+        const mmMatch = matchesByHorse.get(mmKey)
+        const kelly = computeKelly(bestPick, bankroll, mmMatch?.trust_score ?? 0)
         if (!kelly) continue
 
         const raceMinutes = raceTimeToMinutes(bestPick.off_time || '')
@@ -418,7 +420,9 @@ export function AutoBetsPage() {
     if (!settledPicks.length) return null
     let wins = 0, losses = 0, dayPL = 0
     for (const p of settledPicks) {
-      const kelly = computeKelly(p, bankroll)
+      const mmKey = `${p.race_id}:${p.horse_id}`
+      const mm = matchesByHorse.get(mmKey)
+      const kelly = computeKelly(p, bankroll, mm?.trust_score ?? 0)
       const stake = kelly?.stake ?? 0
       if (p.finishing_position === 1) {
         wins++
@@ -429,7 +433,7 @@ export function AutoBetsPage() {
       }
     }
     return { wins, losses, dayPL }
-  }, [settledPicks, bankroll])
+  }, [settledPicks, bankroll, matchesByHorse])
 
   const slipSelections = useMemo<Selection[]>(() => {
     if (slipHorseIds.size === 0) return []
@@ -796,22 +800,29 @@ export function AutoBetsPage() {
 
 // ─── Kelly Criterion — uses Benter ensemble_proba ────────────────────────
 
-function computeKelly(pick: TopPick, userBankroll: number) {
+function getTrustMultiplier(trustScore: number): number {
+  if (trustScore >= 80) return 1.5
+  if (trustScore >= 60) return 1.0
+  if (trustScore >= 30) return 0.5
+  if (trustScore > 0) return 0.25
+  return 0.25
+}
+
+function computeKelly(pick: TopPick, userBankroll: number, trustScore = 0) {
   const { ensemble_proba } = pick
-  // Use opening odds for Kelly sizing — that's the price locked in
-  // when the morning predictions are pushed. Current odds may have
-  // shortened, but you bet at the morning price.
   const odds = (pick.opening_odds > 1 ? pick.opening_odds : pick.current_odds)
   if (odds <= 1 || userBankroll <= 0 || ensemble_proba <= 0) return null
   const implied = 1 / odds
   const edge = ensemble_proba - implied
   if (edge <= 0.01) return null
   const kelly = edge / (odds - 1)
-  const fraction = Math.min(kelly / 4, 0.03)
+  const baseQuarterKelly = kelly / 4
+  const multiplier = getTrustMultiplier(trustScore)
+  const fraction = Math.min(baseQuarterKelly * multiplier, 0.05)
   const rawStake = userBankroll * fraction
   const stake = Math.round(rawStake * 2) / 2
   if (stake < 1) return null
-  return { stake, fraction, edge }
+  return { stake, fraction, edge, multiplier }
 }
 
 // ─── Edge Gauge ─────────────────────────────────────────────────────────
@@ -861,7 +872,8 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
   const hasBet = !!bet
   const [showMastermind, setShowMastermind] = useState(false)
 
-  const kellyInfo = useMemo(() => computeKelly(pick, userBankroll), [pick, userBankroll])
+  const trustScore = mastermindMatch?.trust_score ?? 0
+  const kellyInfo = useMemo(() => computeKelly(pick, userBankroll, trustScore), [pick, userBankroll, trustScore])
 
   const patternCount = mastermindMatch?.pattern_count ?? 0
 

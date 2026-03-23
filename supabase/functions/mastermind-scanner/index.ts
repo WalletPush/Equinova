@@ -239,18 +239,20 @@ Deno.serve(async (req) => {
         const edgeRaw = impliedP > 0 ? ensProba - impliedP : 0;
         const edgePct = impliedP > 0 ? (edgeRaw / impliedP) * 100 : 0;
 
-        // Kelly criterion: f* = edge / (odds - 1)
-        // Quarter-Kelly capped at 3% — matches computeKelly() on the frontend
+        // Kelly criterion: f* = edge / (odds - 1), base = quarter-Kelly
+        // Trust multiplier scales it: 0.25x (weak) to 1.5x (elite 80+)
         const b = betOdds - 1;
         const kellyFull = b > 0 ? Math.max(0, edgeRaw / b) : 0;
-        const quarterKelly = Math.min(kellyFull / 4, 0.03);
+        const baseQuarterKelly = kellyFull / 4;
 
-        // Kelly multiplier scales down based on trust confidence
-        let kellyMultiplier = 0;
-        if (trustTier === "high") kellyMultiplier = 1.0;
-        else if (trustTier === "medium") kellyMultiplier = 0.75;
-        else if (trustTier === "low") kellyMultiplier = 0.5;
-        const stakeFraction = quarterKelly * kellyMultiplier;
+        // Trust-driven multiplier (mirrors frontend getTrustMultiplier)
+        let kellyMultiplier = 0.25;
+        if (trustScore >= 80) kellyMultiplier = 1.5;
+        else if (trustScore >= 60) kellyMultiplier = 1.0;
+        else if (trustScore >= 30) kellyMultiplier = 0.5;
+        else if (trustScore > 0) kellyMultiplier = 0.25;
+
+        const stakeFraction = Math.min(baseQuarterKelly * kellyMultiplier, 0.05);
 
         const worthBetting = edgePct >= 5 && totalPatterns > 0 && ensProba >= 0.10;
 

@@ -53,8 +53,9 @@ export function MastermindModal({
   const tierCfg = TIER_CONFIG[trustTier] ?? TIER_CONFIG.none
   const TierIcon = tierCfg.icon
 
+  const multLabel = kellyMultiplier >= 1.5 ? '1.5x' : kellyMultiplier >= 1.0 ? '1.0x' : kellyMultiplier >= 0.5 ? '0.5x' : '0.25x'
   const stakeLabel = stakeFraction > 0
-    ? `${stakeFraction.toFixed(2)}% quarter-Kelly`
+    ? `${stakeFraction.toFixed(2)}% (${multLabel} quarter-Kelly)`
     : 'N/A'
 
   const modal = (
