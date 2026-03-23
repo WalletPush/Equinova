@@ -128,6 +128,77 @@ export function AutoBetsPage() {
 
   const { matchesByHorse, isLoading: mastermindLoading } = useMastermind(selectedDate)
   const { autoBetEnabled, toggleAutoBet, isToggling } = useAutoBetSettings()
+  const [autoBetToast, setAutoBetToast] = useState<{ count: number; total: number; error?: string } | null>(null)
+  const [isPlacingAutoBets, setIsPlacingAutoBets] = useState(false)
+  const queryClient = useQueryClient()
+
+  const handleAutoBetToggle = useCallback(async (turnOn: boolean) => {
+    toggleAutoBet(turnOn)
+    if (!turnOn) return
+
+    if (!isToday) return
+
+    setIsPlacingAutoBets(true)
+    setAutoBetToast(null)
+
+    try {
+      const ukTime = getUKTime()
+      const [curH, curM] = ukTime.split(':').map(Number)
+      const nowMinutes = curH * 60 + curM
+
+      // Gather Strong picks (trust >= 70) for upcoming races only
+      const strongMatches: any[] = []
+      for (const [, match] of matchesByHorse) {
+        if ((match.trust_score ?? 0) < 70) continue
+        if ((match.pattern_count ?? 0) === 0) continue
+
+        // Skip races that have already started
+        const raceMinutes = raceTimeToMinutes(match.off_time || '')
+        if (raceMinutes > 0 && nowMinutes >= raceMinutes) continue
+
+        strongMatches.push({
+          horse_name: match.horse_name,
+          horse_id: match.horse_id,
+          race_id: match.race_id,
+          course: match.course,
+          off_time: match.off_time,
+          trainer: match.trainer,
+          jockey: match.jockey,
+          ensemble_proba: match.ensemble_proba,
+          opening_odds: match.opening_odds,
+          current_odds: match.current_odds,
+          trust_score: match.trust_score,
+          trust_tier: match.trust_tier,
+          pattern_count: match.pattern_count,
+        })
+      }
+
+      if (strongMatches.length === 0) {
+        setAutoBetToast({ count: 0, total: 0, error: 'No Strong picks today' })
+        setTimeout(() => setAutoBetToast(null), 5000)
+        return
+      }
+
+      const res = await callSupabaseFunction('mastermind-auto-bet', { matches: strongMatches })
+      const result = res?.data
+
+      if (result) {
+        setAutoBetToast({ count: result.bets_placed ?? 0, total: result.total_staked ?? 0 })
+        queryClient.invalidateQueries({ queryKey: ['user-bankroll'] })
+        queryClient.invalidateQueries({ queryKey: ['user-bets-summary'] })
+        queryClient.invalidateQueries({ queryKey: ['benter-top-picks', selectedDate] })
+      } else {
+        setAutoBetToast({ count: 0, total: 0, error: 'No response from auto-bet' })
+      }
+
+      setTimeout(() => setAutoBetToast(null), 8000)
+    } catch (err) {
+      setAutoBetToast({ count: 0, total: 0, error: String(err) })
+      setTimeout(() => setAutoBetToast(null), 8000)
+    } finally {
+      setIsPlacingAutoBets(false)
+    }
+  }, [toggleAutoBet, isToday, matchesByHorse, selectedDate, queryClient])
 
   const toggleSlip = useCallback((horseId: string) => {
     setSlipHorseIds(prev => {
@@ -609,25 +680,69 @@ export function AutoBetsPage() {
                     </span>
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {autoBetEnabled
-                      ? 'Auto-betting active — Mastermind places bets on pattern-matched Top Picks'
+                    {isPlacingAutoBets
+                      ? 'Placing bets on Strong picks...'
+                      : autoBetEnabled
+                      ? 'Auto-betting active — bets placed on Strong picks (trust 70+)'
                       : 'Manual mode — view AI intelligence on each pick'
                     }
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => toggleAutoBet(!autoBetEnabled)}
-                disabled={isToggling}
+                onClick={() => handleAutoBetToggle(!autoBetEnabled)}
+                disabled={isToggling || isPlacingAutoBets}
                 className={`relative w-12 h-6 rounded-full transition-colors ${
                   autoBetEnabled ? 'bg-purple-500' : 'bg-gray-600'
-                } ${isToggling ? 'opacity-50' : ''}`}
+                } ${(isToggling || isPlacingAutoBets) ? 'opacity-50' : ''}`}
               >
                 <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
                   autoBetEnabled ? 'translate-x-6' : 'translate-x-0.5'
                 }`} />
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Auto-bet result toast */}
+        {autoBetToast && (
+          <div className={`border rounded-xl p-4 flex items-center justify-between ${
+            autoBetToast.error
+              ? 'bg-red-500/10 border-red-500/30'
+              : autoBetToast.count > 0
+              ? 'bg-green-500/10 border-green-500/30'
+              : 'bg-yellow-500/10 border-yellow-500/30'
+          }`}>
+            <div className="flex items-center gap-3">
+              {autoBetToast.error ? (
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              ) : autoBetToast.count > 0 ? (
+                <CheckCircle className="w-5 h-5 text-green-400" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-yellow-400" />
+              )}
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  {autoBetToast.error
+                    ? 'Auto-bet failed'
+                    : autoBetToast.count > 0
+                    ? `Auto-bet: ${autoBetToast.count} bet${autoBetToast.count !== 1 ? 's' : ''} placed`
+                    : 'No qualifying bets today'
+                  }
+                </p>
+                <p className="text-xs text-gray-400">
+                  {autoBetToast.error
+                    ? autoBetToast.error
+                    : autoBetToast.count > 0
+                    ? `Total staked: £${autoBetToast.total.toFixed(2)} — Kelly-sized by trust score`
+                    : 'No Strong picks (trust 70+) available for today'
+                  }
+                </p>
+              </div>
+            </div>
+            <button onClick={() => setAutoBetToast(null)} className="text-gray-400 hover:text-white">
+              <XCircle className="w-4 h-4" />
+            </button>
           </div>
         )}
 

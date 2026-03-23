@@ -1,12 +1,17 @@
 /**
- * EquiNOVA Mastermind Auto-Bet — Edge Function
+ * EquiNOVA Mastermind Auto-Bet -- Edge Function
  *
- * Called after mastermind-scanner identifies pattern matches on Top Picks.
- * For users with auto_bet_enabled = true, places bets on qualifying
- * Top Picks that match >= 1 ACTIVE pattern and are NOT vetoed.
+ * When auto-bet is toggled ON, the frontend sends today's Strong picks
+ * (trust >= 70). This function places Kelly-sized bets on each,
+ * respecting bankroll limits and preventing duplicate bets.
  *
- * Uses Kelly staking from ensemble_proba + opening_odds.
- * Respects bankroll limits.
+ * Trust-driven Kelly multiplier (matches frontend getTrustMultiplier):
+ *   trust 80+  = 1.5x quarter-Kelly (elite)
+ *   trust 60-79 = 1.0x (high)
+ *   trust 30-59 = 0.5x (medium)
+ *   trust <30   = 0.25x (low)
+ *
+ * Safety: duplicate check, bankroll cap, 5% max per bet, trust >= 70 gate.
  */
 
 Deno.serve(async (req) => {
@@ -30,14 +35,17 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const svcHdrs: Record<string, string> = {
+      Authorization: `Bearer ${supabaseKey}`,
+      apikey: supabaseKey,
+      "Content-Type": "application/json",
+    };
 
+    // -- Auth --
     const authHeader = req.headers.get("authorization");
-    if (!authHeader) {
-      return json({ error: "No authorization header" }, 401);
-    }
+    if (!authHeader) return json({ error: "No authorization header" }, 401);
     const token = authHeader.replace("Bearer ", "");
 
-    // Verify user
     const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
       headers: { Authorization: `Bearer ${token}`, apikey: supabaseKey },
     });
@@ -45,88 +53,105 @@ Deno.serve(async (req) => {
     const user = await userRes.json();
     const userId = user.id;
 
-    // Check if auto-bet is enabled
-    const settingsUrl = `${supabaseUrl}/rest/v1/user_auto_bet_settings?user_id=eq.${userId}&select=auto_bet_enabled`;
-    const settingsRes = await fetch(settingsUrl, {
-      headers: { Authorization: `Bearer ${supabaseKey}`, apikey: supabaseKey },
-    });
+    // -- Check auto-bet enabled --
+    const settingsRes = await fetch(
+      `${supabaseUrl}/rest/v1/user_auto_bet_settings?user_id=eq.${userId}&select=auto_bet_enabled`,
+      { headers: svcHdrs }
+    );
     const settings = settingsRes.ok ? await settingsRes.json() : [];
-    const autoBetEnabled = settings.length > 0 && settings[0].auto_bet_enabled;
-
-    if (!autoBetEnabled) {
-      return json({
-        data: { bets_placed: 0, message: "Auto-bet is disabled" },
-      });
+    if (!settings.length || !settings[0].auto_bet_enabled) {
+      return json({ data: { bets_placed: 0, message: "Auto-bet is disabled" } });
     }
 
-    // Get request body with matches
+    // -- Parse matches from request body --
     const body = await req.json().catch(() => ({}));
-    const matches = body.matches || [];
-
+    const matches: AutoBetMatch[] = body.matches || [];
     if (matches.length === 0) {
       return json({ data: { bets_placed: 0, message: "No matches provided" } });
     }
 
-    // Get user bankroll
-    const bankrollUrl = `${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}&select=balance`;
-    const bankrollRes = await fetch(bankrollUrl, {
-      headers: { Authorization: `Bearer ${supabaseKey}`, apikey: supabaseKey },
-    });
+    // -- Get user bankroll (column is current_amount, NOT balance) --
+    const bankrollRes = await fetch(
+      `${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}&select=current_amount`,
+      { headers: svcHdrs }
+    );
     const bankrollData = bankrollRes.ok ? await bankrollRes.json() : [];
-    const bankroll =
-      bankrollData.length > 0 ? parseFloat(bankrollData[0].balance) || 0 : 0;
+    const bankroll = bankrollData.length > 0
+      ? parseFloat(bankrollData[0].current_amount) || 0
+      : 0;
 
     if (bankroll <= 0) {
-      return json({
-        data: { bets_placed: 0, message: "Insufficient bankroll" },
-      });
+      return json({ data: { bets_placed: 0, message: "Insufficient bankroll" } });
     }
 
-    const betsPlaced: any[] = [];
+    // -- Check for existing bets today to prevent duplicates --
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    const existingBetsRes = await fetch(
+      `${supabaseUrl}/rest/v1/bets?user_id=eq.${userId}&race_date=eq.${today}&select=race_id,horse_id`,
+      { headers: svcHdrs }
+    );
+    const existingBets: { race_id: string; horse_id: string }[] =
+      existingBetsRes.ok ? await existingBetsRes.json() : [];
+    const alreadyBet = new Set(existingBets.map(b => `${b.race_id}:${b.horse_id}`));
+
+    console.log(`Auto-bet: ${matches.length} candidates, bankroll=GBP${bankroll.toFixed(2)}, existing=${alreadyBet.size}`);
+
+    // -- Place bets --
+    const betsPlaced: PlacedBet[] = [];
     let remainingBankroll = bankroll;
 
     for (const match of matches) {
-      // Only bet on matches with ACTIVE patterns and no veto
-      const activePatterns = (match.matching_patterns || []).filter(
-        (p: any) => p.status === "ACTIVE" && p.pattern_type === "PROFITABLE"
-      );
-      if (activePatterns.length === 0 || match.is_vetoed) continue;
+      // Trust gate: only Strong picks (trust >= 70)
+      const trustScore = match.trust_score || 0;
+      if (trustScore < 70) continue;
 
-      const ensProba = parseFloat(match.ensemble_proba) || 0;
-      const odds = parseFloat(match.opening_odds || match.current_odds) || 0;
+      // Skip if already bet on this horse in this race
+      const betKey = `${match.race_id}:${match.horse_id}`;
+      if (alreadyBet.has(betKey)) {
+        console.log(`Skip duplicate: ${match.horse_name} (${betKey})`);
+        continue;
+      }
 
-      if (ensProba < 0.15 || odds <= 1 || odds > 13.0) continue;
+      const ensProba = parseFloat(String(match.ensemble_proba)) || 0;
+      const odds = parseFloat(String(match.opening_odds || match.current_odds)) || 0;
 
-      // Kelly criterion
+      if (ensProba < 0.15 || odds <= 1) continue;
+
+      // Edge calculation
       const impliedProb = 1 / odds;
       const edge = ensProba - impliedProb;
-      if (edge < 0.05) continue;
+      if (edge < 0.01) continue;
 
-      const kellyFraction = edge / (odds - 1);
-      const quarterKelly = kellyFraction * 0.25;
-      let stake = Math.round(remainingBankroll * quarterKelly * 2) / 2; // Round to nearest 50p
+      // Kelly criterion with trust multiplier
+      const kellyFull = edge / (odds - 1);
+      const baseQuarterKelly = kellyFull / 4;
+
+      let kellyMultiplier = 0.25;
+      if (trustScore >= 80) kellyMultiplier = 1.5;
+      else if (trustScore >= 60) kellyMultiplier = 1.0;
+      else if (trustScore >= 30) kellyMultiplier = 0.5;
+
+      const fraction = Math.min(baseQuarterKelly * kellyMultiplier, 0.05);
+      let stake = Math.round(remainingBankroll * fraction * 2) / 2; // nearest 50p
 
       if (stake < 1) continue;
-      stake = Math.min(stake, remainingBankroll * 0.05); // Max 5% of bankroll per bet
       if (stake > remainingBankroll) continue;
 
-      // Place bet via place-bet edge function pattern
+      // Place bet via place-bet edge function (uses user's JWT for auth)
       const betData = {
         horse_name: match.horse_name,
         horse_id: match.horse_id,
         race_id: match.race_id,
         course: match.course,
         off_time: match.off_time,
-        trainer_name: match.trainer,
-        jockey_name: match.jockey,
+        trainer_name: match.trainer || "",
+        jockey_name: match.jockey || "",
         current_odds: odds,
         bet_amount: stake,
         odds: odds,
-        bet_type: "win",
       };
 
-      const placeBetUrl = `${supabaseUrl}/functions/v1/place-bet`;
-      const betRes = await fetch(placeBetUrl, {
+      const betRes = await fetch(`${supabaseUrl}/functions/v1/place-bet`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -138,56 +163,35 @@ Deno.serve(async (req) => {
 
       if (betRes.ok) {
         remainingBankroll -= stake;
+        alreadyBet.add(betKey);
+
         betsPlaced.push({
           horse_name: match.horse_name,
           race_id: match.race_id,
+          horse_id: match.horse_id,
           stake,
           odds,
-          patterns_matched: activePatterns.length,
+          trust_score: trustScore,
+          kelly_multiplier: kellyMultiplier,
         });
 
-        // Record in match history
-        for (const pat of activePatterns) {
-          const histUrl = `${supabaseUrl}/rest/v1/mastermind_match_history`;
-          await fetch(histUrl, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${supabaseKey}`,
-              apikey: supabaseKey,
-              "Content-Type": "application/json",
-              Prefer: "return=minimal",
-            },
-            body: JSON.stringify({
-              pattern_id: pat.pattern_id,
-              race_date: new Date().toLocaleDateString("en-CA", {
-                timeZone: "Europe/London",
-              }),
-              race_id: match.race_id,
-              horse_id: match.horse_id,
-              horse_name: match.horse_name,
-              odds_at_match: odds,
-              result: "PENDING",
-              profit: 0,
-              was_auto_bet: true,
-            }),
-          });
-        }
-
         console.log(
-          `Auto-bet placed: ${match.horse_name} @ ${odds} - £${stake} (${activePatterns.length} patterns)`
+          `Auto-bet placed: ${match.horse_name} @ ${odds} - GBP${stake} (trust=${trustScore}, mult=${kellyMultiplier}x)`
         );
       } else {
-        console.error(
-          `Failed to place bet for ${match.horse_name}: ${betRes.status}`
-        );
+        const errText = await betRes.text().catch(() => "unknown");
+        console.error(`Failed to place bet for ${match.horse_name}: ${betRes.status} ${errText}`);
       }
     }
+
+    const totalStaked = betsPlaced.reduce((s, b) => s + b.stake, 0);
 
     return json({
       data: {
         bets_placed: betsPlaced.length,
-        bets: betsPlaced,
+        total_staked: totalStaked,
         remaining_bankroll: remainingBankroll,
+        bets: betsPlaced,
       },
     });
   } catch (err) {
@@ -195,3 +199,31 @@ Deno.serve(async (req) => {
     return json({ error: String(err) }, 500);
   }
 });
+
+// -- Types --
+
+interface AutoBetMatch {
+  horse_name: string;
+  horse_id: string;
+  race_id: string;
+  course: string;
+  off_time: string;
+  trainer?: string;
+  jockey?: string;
+  ensemble_proba: number;
+  opening_odds: number;
+  current_odds: number;
+  trust_score: number;
+  trust_tier: string;
+  pattern_count: number;
+}
+
+interface PlacedBet {
+  horse_name: string;
+  race_id: string;
+  horse_id: string;
+  stake: number;
+  odds: number;
+  trust_score: number;
+  kelly_multiplier: number;
+}
