@@ -137,9 +137,8 @@ export function AiChatModal({ context, silkUrl, horseNumber, onClose }: AiChatMo
               <div className="flex items-center gap-1.5 mt-0.5">
                 <HorseNameWithSilk
                   horseName={context.horse_name}
-                  silkUrl={silkUrl}
-                  number={horseNumber}
-                  size="sm"
+                  silkUrl={silkUrl ?? undefined}
+                  number={horseNumber ?? undefined}
                 />
               </div>
             </div>
