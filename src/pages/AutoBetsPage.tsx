@@ -1033,6 +1033,16 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
                   Kelly: £{kellyInfo.stake.toFixed(2)}
                 </span>
               )}
+              {isSettled && kellyInfo && isWinner && (
+                <span className="text-xs font-bold text-green-400">
+                  WON: +£{(kellyInfo.stake * pick.current_odds).toFixed(2)}
+                </span>
+              )}
+              {isSettled && kellyInfo && !isWinner && fp !== null && (
+                <span className="text-xs font-bold text-red-400">
+                  LOST: -£{kellyInfo.stake.toFixed(2)}
+                </span>
+              )}
             </div>
 
             {/* Ratings badges */}
