@@ -313,9 +313,12 @@ export function AutoBetsPage() {
         const mmKey = `${raceId}:${e.horse_id}`
         const mm = matchesByHorse.get(mmKey)
 
+        // Signal gate: horse MUST have at least 1 matched pattern to qualify
+        const pCount = mm?.pattern_count ?? 0
+        if (pCount === 0) continue
+
         // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ lifetime profitable patterns
         if (odds > MAX_ODDS) {
-          const pCount = mm?.pattern_count ?? 0
           if (pCount < LONGSHOT_MIN_ACTIVE_PATTERNS) continue
         }
 
