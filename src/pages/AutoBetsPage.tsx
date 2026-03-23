@@ -553,25 +553,27 @@ export function AutoBetsPage() {
     return map
   }, [userBetsData])
 
+  const mySettledPicks = useMemo(() => {
+    return settledPicks.filter(p => betsByHorse.has(`${p.race_id}:${p.horse_id}`))
+  }, [settledPicks, betsByHorse])
+
   const settledSummary = useMemo(() => {
-    if (!settledPicks.length) return null
+    if (!mySettledPicks.length) return null
     let wins = 0, losses = 0, dayPL = 0
-    for (const p of settledPicks) {
-      if (p.finishing_position === null) continue
-      const mmKey = `${p.race_id}:${p.horse_id}`
-      const mm = matchesByHorse.get(mmKey)
-      const kelly = computeKelly(p, bankroll, mm?.trust_score ?? 0)
-      const stake = kelly?.stake ?? 0
-      if (p.finishing_position === 1) {
+    for (const p of mySettledPicks) {
+      const bet = betsByHorse.get(`${p.race_id}:${p.horse_id}`)
+      if (!bet) continue
+      const stake = Number(bet.bet_amount) || 0
+      if (bet.status === 'won') {
         wins++
-        dayPL += stake * (p.current_odds - 1)
-      } else {
+        dayPL += Number(bet.potential_return) - stake
+      } else if (bet.status === 'lost') {
         losses++
         dayPL -= stake
       }
     }
     return { wins, losses, dayPL }
-  }, [settledPicks, bankroll, matchesByHorse])
+  }, [mySettledPicks, betsByHorse])
 
   const slipSelections = useMemo<Selection[]>(() => {
     if (slipHorseIds.size === 0) return []
@@ -896,7 +898,7 @@ export function AutoBetsPage() {
         )}
 
         {/* No picks */}
-        {!isLoading && picks.length === 0 && settledPicks.length === 0 && (
+        {!isLoading && picks.length === 0 && mySettledPicks.length === 0 && (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Brain className="w-8 h-8 text-gray-600" />
@@ -941,14 +943,14 @@ export function AutoBetsPage() {
           </div>
         )}
 
-        {/* Settled Results */}
-        {!isLoading && settledPicks.length > 0 && (
+        {/* Settled Results — only bets the user actually placed */}
+        {!isLoading && mySettledPicks.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <Trophy className="w-4 h-4 text-gray-400" />
-                <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Results</h2>
-                <span className="text-xs text-gray-500">{settledPicks.length} settled</span>
+                <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">My Results</h2>
+                <span className="text-xs text-gray-500">{mySettledPicks.length} settled</span>
               </div>
               {settledSummary && (
                 <div className="flex items-center gap-3">
@@ -964,7 +966,7 @@ export function AutoBetsPage() {
               )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              {settledPicks.map(pick => (
+              {mySettledPicks.map(pick => (
                 <PickCard
                   key={`${pick.race_id}:${pick.horse_id}`}
                   pick={pick}
@@ -980,7 +982,7 @@ export function AutoBetsPage() {
         )}
 
         {/* Performance link */}
-        {(picks.length > 0 || settledPicks.length > 0) && (
+        {(picks.length > 0 || mySettledPicks.length > 0) && (
           <Link
             to="/performance"
             className="flex items-center justify-between bg-gray-800/60 border border-gray-700 rounded-xl p-4 hover:border-purple-500/30 transition-colors group"
