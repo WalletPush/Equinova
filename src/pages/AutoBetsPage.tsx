@@ -592,7 +592,7 @@ export function AutoBetsPage() {
       }))
   }, [picks, slipHorseIds])
 
-  const isLoading = loadingEntries
+  const isLoading = loadingEntries || mastermindLoading
 
   return (
     <AppLayout>

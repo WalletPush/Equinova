@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 
@@ -80,11 +80,12 @@ export function useMastermind(date?: string) {
         },
         body: JSON.stringify(date ? { date } : {}),
       })
-      if (!res.ok) return null
+      if (!res.ok) throw new Error(`mastermind-scanner ${res.status}`)
       return res.json()
     },
     staleTime: 1000 * 60 * 15,
-    retry: 1,
+    retry: 2,
+    placeholderData: keepPreviousData,
   })
 
   const matchesByHorse = useMemo(() => {
