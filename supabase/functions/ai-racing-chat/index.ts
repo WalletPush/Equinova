@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
           'anthropic-beta': 'mcp-client-2025-11-20',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-3-5-haiku-20241022',
           max_tokens: 1024,
           system: systemPrompt,
           messages,

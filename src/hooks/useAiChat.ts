@@ -46,6 +46,16 @@ export function useAiChat(context: AiChatContext) {
 
       if (abortRef.current) return
 
+      if (res?.success === false) {
+        const raw = res?.error?.message || 'Unknown error'
+        const friendly = raw.includes('rate_limit') ? 'AI is busy — please wait 30 seconds and try again.'
+          : raw.includes('timeout') || raw.includes('abort') ? 'Request timed out — try a simpler question.'
+          : raw
+        setError(friendly)
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${friendly}` }])
+        return
+      }
+
       const aiText = res?.data?.response || res?.response || 'No response received.'
       const aiMsg: ChatMessage = { role: 'assistant', content: aiText }
       setMessages(prev => [...prev, aiMsg])

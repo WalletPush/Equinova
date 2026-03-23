@@ -132,7 +132,7 @@ export function AiChatModal({ context, silkUrl, horseNumber, onClose }: AiChatMo
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-white font-semibold text-base truncate">Chat with AI</h2>
-                <span className="text-[10px] text-blue-400/70 bg-blue-500/10 px-1.5 py-0.5 rounded font-medium flex-shrink-0">Sonnet 4.6</span>
+                <span className="text-[10px] text-blue-400/70 bg-blue-500/10 px-1.5 py-0.5 rounded font-medium flex-shrink-0">AI</span>
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <HorseNameWithSilk
@@ -225,7 +225,7 @@ export function AiChatModal({ context, silkUrl, horseNumber, onClose }: AiChatMo
             </button>
           </div>
           <p className="text-[10px] text-gray-600 mt-1.5 text-center">
-            Powered by Claude Sonnet 4.6 + EquiNOVA
+            Powered by EquiNOVA AI
           </p>
         </div>
       </div>
