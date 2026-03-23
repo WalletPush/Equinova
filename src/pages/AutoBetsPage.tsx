@@ -644,12 +644,12 @@ export function AutoBetsPage() {
             <span className="text-sm font-semibold text-purple-300">How to Use Top Picks</span>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
-            Our AI scans every race and finds horses the{' '}
-            <span className="text-white font-medium">bookmakers have priced too high</span>.
-            When our models think a horse has a better chance of winning than the odds suggest,
-            that's an "edge" — and that horse becomes a pick. We show{' '}
-            <span className="text-white font-medium">one best pick per race</span> and
-            suggest how much to stake based on the size of the edge.
+            Our AI scans every race and looks for horses the{' '}
+            <span className="text-white font-medium">bookmakers have underestimated</span>.
+            When our models believe a horse has a genuinely better chance of winning than the odds suggest,
+            that's an "edge." Most races won't have one — picks{' '}
+            <span className="text-white font-medium">only appear when a real edge exists</span>.
+            When they do, we suggest how much to stake based on the size of that edge.
           </p>
           <div className="space-y-1.5">
             <p className="text-[11px] text-gray-500 font-semibold uppercase tracking-wider">Signal Strength Guide</p>
