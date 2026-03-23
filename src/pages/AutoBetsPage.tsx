@@ -91,10 +91,24 @@ interface TopPick {
   jockey_21d_wr: number
   jockey_dist_wr: number
   finishing_position: number | null
+  outcome: string | null
   edge: number
   implied_prob: number
   odds_movement: 'steaming' | 'drifting' | 'stable' | null
   odds_movement_pct: number | null
+}
+
+function parseOutcome(comment: string): string {
+  const c = comment.toLowerCase()
+  if (c.includes('fell')) return 'FELL'
+  if (c.includes('pulled up')) return 'PU'
+  if (c.includes('unseated')) return 'UR'
+  if (c.includes('brought down')) return 'BD'
+  if (c.includes('refused')) return 'REF'
+  if (c.includes('carried out')) return 'CO'
+  if (c.includes('ran out')) return 'RO'
+  if (c.includes('slipped up')) return 'SU'
+  return 'DNF'
 }
 
 const MIN_EDGE = 0.05
@@ -190,10 +204,8 @@ export function AutoBetsPage() {
 
         const { data: runners } = await supabase
           .from('race_runners')
-          .select('race_id, horse, horse_id, position')
+          .select('race_id, horse, horse_id, position, comment')
           .in('race_id', batch)
-          .not('position', 'is', null)
-          .gt('position', 0)
         if (runners) allRunners = allRunners.concat(runners)
 
         const { data: results } = await supabase
@@ -206,13 +218,20 @@ export function AutoBetsPage() {
       // Build result lookup by horse_id (primary) and name (fallback)
       const resultsByRace: Record<string, Record<string, number>> = {}
       const resultsByHorseId: Record<string, number> = {}
+      const outcomeByHorseId: Record<string, string> = {}
       const racesWithResults = new Set<string>()
       for (const r of allRunners) {
-        if (!resultsByRace[r.race_id]) resultsByRace[r.race_id] = {}
-        const bare = (r.horse || '').replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
-        resultsByRace[r.race_id][bare] = Number(r.position)
+        const pos = r.position != null ? Number(r.position) : 0
+        if (pos > 0) {
+          if (!resultsByRace[r.race_id]) resultsByRace[r.race_id] = {}
+          const bare = (r.horse || '').replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
+          resultsByRace[r.race_id][bare] = pos
+        }
         if (r.horse_id) {
-          resultsByHorseId[`${r.race_id}:${r.horse_id}`] = Number(r.position)
+          resultsByHorseId[`${r.race_id}:${r.horse_id}`] = pos
+          if (pos === 0 && r.comment) {
+            outcomeByHorseId[`${r.race_id}:${r.horse_id}`] = parseOutcome(r.comment)
+          }
         }
         racesWithResults.add(r.race_id)
       }
@@ -231,7 +250,7 @@ export function AutoBetsPage() {
         nonRunnersByRace[res.race_id] = names
       }
 
-      return { entries: allEntries, raceMap, resultsByRace, resultsByHorseId, racesWithResults, nonRunnersByRace }
+      return { entries: allEntries, raceMap, resultsByRace, resultsByHorseId, outcomeByHorseId, racesWithResults, nonRunnersByRace }
     },
     staleTime: 30_000,
   })
@@ -304,7 +323,7 @@ export function AutoBetsPage() {
 
   const { picks, settledPicks } = useMemo(() => {
     if (!entriesData?.entries?.length) return { picks: [] as TopPick[], settledPicks: [] as TopPick[] }
-    const { entries, raceMap, resultsByRace, resultsByHorseId, racesWithResults, nonRunnersByRace } = entriesData
+    const { entries, raceMap, resultsByRace, resultsByHorseId, outcomeByHorseId, racesWithResults, nonRunnersByRace } = entriesData
 
     const isPastDate = selectedDate < ukToday
     const ukTime = getUKTime()
@@ -394,6 +413,7 @@ export function AutoBetsPage() {
           jockey_21d_wr: Number(e.jockey_21_days_win_percentage) || 0,
           jockey_dist_wr: Number(e.jockey_win_percentage_at_distance) || 0,
           finishing_position: null,
+          outcome: null,
           edge,
           implied_prob: impliedProb,
           odds_movement: oddsMovement,
@@ -440,8 +460,11 @@ export function AutoBetsPage() {
             }
           }
 
-          // If race has results but horse not found = unplaced/fell/PU = loss
           bestPick.finishing_position = pos ?? 0
+          if (pos === undefined || pos === 0) {
+            const outcomeKey = `${bestPick.race_id}:${bestPick.horse_id}`
+            bestPick.outcome = outcomeByHorseId?.[outcomeKey] || 'LOST'
+          }
           settled.push(bestPick)
         } else if (raceFinished && !hasResults) {
           settled.push(bestPick)
@@ -941,9 +964,11 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
           </div>
           {isSettled && (
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
-              isWinner ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+              isWinner ? 'bg-green-500/20 text-green-400'
+              : pick.outcome && ['FELL', 'PU', 'UR', 'BD'].includes(pick.outcome) ? 'bg-red-500/20 text-red-400'
+              : 'bg-gray-700 text-gray-400'
             }`}>
-              {isWinner ? <><CheckCircle className="w-3 h-3" /> WON</> : fmtPos(fp)}
+              {isWinner ? <><CheckCircle className="w-3 h-3" /> WON</> : fmtPos(fp, pick.outcome)}
             </span>
           )}
         </div>
@@ -1201,9 +1226,9 @@ function TrustBadge({ score, tier }: { score: number; tier: string }) {
   )
 }
 
-function fmtPos(p: number | null) {
+function fmtPos(p: number | null, outcome?: string | null) {
   if (p === null || p === undefined) return ''
-  if (p === 0) return 'LOST'
+  if (p === 0) return outcome || 'LOST'
   if (p === 1) return '1st'
   if (p === 2) return '2nd'
   if (p === 3) return '3rd'
