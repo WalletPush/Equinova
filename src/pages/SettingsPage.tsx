@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { AppLayout } from '@/components/AppLayout'
+import { NotificationSettings } from '@/components/NotificationSettings'
 import { useAuth } from '@/contexts/AuthContext'
-import { useNotifications } from '@/contexts/NotificationContext'
 import { 
   User, 
   Key, 
@@ -10,13 +10,7 @@ import {
   EyeOff,
   AlertCircle,
   CheckCircle,
-  ExternalLink,
-  Bell,
-  BellOff,
-  Flame,
-  TrendingUp,
-  Target,
-  Check,
+  ExternalLink
 } from 'lucide-react'
 
 export function SettingsPage() {
@@ -198,8 +192,8 @@ export function SettingsPage() {
           </form>
         </div>
 
-        {/* Push Notifications */}
-        <NotificationSection />
+        {/* Notification Settings */}
+        <NotificationSettings />
 
         {/* AI Features Info */}
         <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
@@ -227,166 +221,5 @@ export function SettingsPage() {
         </div>
       </div>
     </AppLayout>
-  )
-}
-
-const ALERT_TYPES = [
-  {
-    id: 'smart_money',
-    name: 'Smart Money Alerts',
-    description: 'Get notified when significant money backs a horse with model edge',
-    icon: Flame,
-    color: 'text-amber-400',
-  },
-  {
-    id: 'top_picks',
-    name: 'Daily Top Picks',
-    description: 'Morning push when Benter edge picks are ready',
-    icon: Target,
-    color: 'text-purple-400',
-  },
-  {
-    id: 'market_movement',
-    name: 'Market Movements',
-    description: 'Significant odds shortening on model-backed horses',
-    icon: TrendingUp,
-    color: 'text-green-400',
-  },
-]
-
-function NotificationSection() {
-  const {
-    isSupported,
-    permission,
-    isSubscribed,
-    requestPermission,
-    subscribe,
-    unsubscribe,
-    enabledTypes,
-    setEnabledTypes,
-  } = useNotifications()
-
-  const handleEnable = async () => {
-    const granted = await requestPermission()
-    if (granted) await subscribe()
-  }
-
-  const handleToggle = async () => {
-    if (isSubscribed) await unsubscribe()
-    else await subscribe()
-  }
-
-  const toggleType = (typeId: string) => {
-    const next = enabledTypes.includes(typeId)
-      ? enabledTypes.filter((t) => t !== typeId)
-      : [...enabledTypes, typeId]
-    setEnabledTypes(next)
-  }
-
-  if (!isSupported) {
-    return (
-      <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-        <div className="flex items-center space-x-3 mb-4">
-          <BellOff className="w-5 h-5 text-gray-400" />
-          <h2 className="text-lg font-semibold text-white">Push Notifications</h2>
-        </div>
-        <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-4">
-          <div className="flex items-center space-x-2 text-orange-400">
-            <AlertCircle className="w-5 h-5" />
-            <span className="font-medium">Not Supported</span>
-          </div>
-          <p className="text-orange-300 text-sm mt-2">
-            Push notifications require a modern browser with service worker support.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-      <div className="flex items-center space-x-3 mb-6">
-        <Bell className="w-5 h-5 text-yellow-400" />
-        <h2 className="text-lg font-semibold text-white">Push Notifications</h2>
-      </div>
-
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h4 className="font-medium text-white mb-1">Notification Permission</h4>
-          <p className="text-sm text-gray-400">
-            Get push alerts for smart money, top picks, and market moves
-          </p>
-        </div>
-        <div className="flex items-center space-x-3">
-          {permission === 'granted' ? (
-            <>
-              <div className="flex items-center space-x-2 text-green-400">
-                <Check className="w-5 h-5" />
-                <span className="text-sm font-medium">Granted</span>
-              </div>
-              <button
-                onClick={handleToggle}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  isSubscribed
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                {isSubscribed ? 'Unsubscribe' : 'Subscribe'}
-              </button>
-            </>
-          ) : permission === 'denied' ? (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
-              <span className="text-red-400 text-sm font-medium">
-                Blocked — enable in browser settings
-              </span>
-            </div>
-          ) : (
-            <button
-              onClick={handleEnable}
-              className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 px-4 py-2 rounded-lg font-medium transition-colors"
-            >
-              Enable Notifications
-            </button>
-          )}
-        </div>
-      </div>
-
-      {permission === 'granted' && isSubscribed && (
-        <div className="space-y-3">
-          <h4 className="font-medium text-white mb-2">Alert Types</h4>
-          {ALERT_TYPES.map((alertType) => {
-            const Icon = alertType.icon
-            const isEnabled = enabledTypes.includes(alertType.id)
-            return (
-              <div
-                key={alertType.id}
-                className="flex items-center justify-between p-4 bg-gray-700/50 border border-gray-600 rounded-lg hover:border-gray-500 transition-colors"
-              >
-                <div className="flex items-start space-x-3">
-                  <Icon className={`w-5 h-5 mt-0.5 ${alertType.color}`} />
-                  <div>
-                    <h5 className="font-medium text-white">{alertType.name}</h5>
-                    <p className="text-sm text-gray-400 mt-1">{alertType.description}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => toggleType(alertType.id)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-gray-800 ${
-                    isEnabled ? 'bg-yellow-500' : 'bg-gray-600'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      isEnabled ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
   )
 }

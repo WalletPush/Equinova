@@ -2,11 +2,11 @@
  * EquiNOVA Mastermind Scanner -- Edge Function
  *
  * Computes 80+ atomic signals for today's entries, matches them against
- * ACTIVE/MONITORING patterns from mastermind_patterns, and returns
- * pattern matches with 21-day rolling stats and reasoning for each
- * Top Pick qualifier.
+ * lifetime profitable patterns from mastermind_patterns (split by segment),
+ * and returns pattern matches with quality scores for each runner.
  *
- * Also checks anti-patterns for veto logic.
+ * Informational only -- no blocking, no anti-patterns, no vetoing.
+ * Shows how many lifetime profitable patterns each runner matches.
  */
 
 Deno.serve(async (req) => {
@@ -50,9 +50,9 @@ Deno.serve(async (req) => {
 
     console.log(`mastermind-scanner: date=${today}`);
 
-    // -- Load patterns (paginate past PostgREST 1000-row cap) --
-    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status,pqs,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,failure_modes,oos_validated";
-    const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&pattern_type=eq.PROFITABLE&order=confidence_score.desc`;
+    // -- Load PROFITABLE patterns only (no anti-patterns) --
+    const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,status";
+    const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&pattern_type=eq.PROFITABLE&order=roi_pct.desc`;
     const patterns: MastermindPattern[] = [];
     for (let page = 0; page < 5; page++) {
       const from = page * 1000;
@@ -66,15 +66,7 @@ Deno.serve(async (req) => {
       if (batch.length < 1000) break;
     }
 
-    const antiUrl = `${supabaseUrl}/rest/v1/mastermind_patterns?select=id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,d21_bets,d21_wins,d21_roi_pct,d21_profit,confidence_score,status&pattern_type=eq.ANTI_PATTERN&status=eq.ACTIVE&roi_pct=lte.-15&total_bets=gte.50&limit=500`;
-    const antiRes = await fetch(antiUrl, { headers: hdrs });
-    const antiPatterns: MastermindPattern[] = antiRes.ok
-      ? await antiRes.json()
-      : [];
-
-    console.log(
-      `Loaded ${patterns.length} patterns, ${antiPatterns.length} anti-patterns`
-    );
+    console.log(`Loaded ${patterns.length} lifetime profitable patterns`);
 
     // -- Load today's races + entries --
     const racesRes = await fetch(
@@ -134,7 +126,6 @@ Deno.serve(async (req) => {
       const segment = classifySegment(race);
       const fieldSize = raceEntries.length;
 
-      // Count trainer runners at meeting
       const trainerCounts = new Map<string, number>();
       for (const e of raceEntries) {
         const tid = e.trainer_id || "";
@@ -149,9 +140,9 @@ Deno.serve(async (req) => {
 
         const signalSet = new Set(signals);
 
-        // Match profitable patterns
+        // Match profitable patterns for this segment
         const applicablePatterns = patterns.filter(
-          (p) => p.segment === "all" || p.segment === segment
+          (p) => p.segment === segment
         );
         const matchedPatterns: PatternMatch[] = [];
         for (const pat of applicablePatterns) {
@@ -165,113 +156,52 @@ Deno.serve(async (req) => {
               pattern_label: pat.pattern_label,
               signal_keys: pat.signal_keys,
               status: pat.status,
-              d21_bets: pat.d21_bets || 0,
-              d21_wins: pat.d21_wins || 0,
-              d21_roi_pct: pat.d21_roi_pct || 0,
-              d21_profit: pat.d21_profit || 0,
               total_bets: pat.total_bets || 0,
               wins: pat.wins || 0,
               win_rate: pat.win_rate || 0,
               roi_pct: pat.roi_pct || 0,
-              confidence_score: pat.confidence_score || 0,
               pattern_type: "PROFITABLE",
-              pqs: pat.pqs || 0,
               stability_windows: pat.stability_windows || 0,
               outlier_trimmed_roi: pat.outlier_trimmed_roi || 0,
               drawdown_health: pat.drawdown_health || 0,
-              failure_modes: pat.failure_modes || [],
             });
           }
         }
 
-        // Match anti-patterns (veto)
-        const matchedAnti: PatternMatch[] = [];
-        for (const pat of antiPatterns) {
-          const keys: string[] = Array.isArray(pat.signal_keys)
-            ? pat.signal_keys
-            : [];
-          if (keys.length === 0) continue;
-          if (
-            pat.segment === "all" ||
-            pat.segment === segment
-          ) {
-            if (keys.every((k) => signalSet.has(k))) {
-              matchedAnti.push({
-                pattern_id: pat.id,
-                pattern_label: pat.pattern_label,
-                signal_keys: pat.signal_keys,
-                status: pat.status,
-                d21_bets: pat.d21_bets || 0,
-                d21_wins: pat.d21_wins || 0,
-                d21_roi_pct: pat.d21_roi_pct || 0,
-                d21_profit: pat.d21_profit || 0,
-                total_bets: pat.total_bets || 0,
-                wins: pat.wins || 0,
-                win_rate: pat.win_rate || 0,
-                roi_pct: pat.roi_pct || 0,
-                confidence_score: pat.confidence_score || 0,
-                pattern_type: "ANTI_PATTERN",
-                pqs: 0,
-                stability_windows: 0,
-                outlier_trimmed_roi: 0,
-                drawdown_health: 0,
-                failure_modes: [],
-              });
-            }
-          }
-        }
-
-        if (matchedPatterns.length === 0 && matchedAnti.length === 0) continue;
-
+        // Sort by quality score
         matchedPatterns.sort(
-          (a, b) => computePqs(b) - computePqs(a)
+          (a, b) => computeQuality(b) - computeQuality(a)
         );
 
-        const activePatterns = matchedPatterns.filter(
-          (p) => p.status === "ACTIVE"
-        );
+        // Trust score: based on count and quality of matched patterns
+        const patternCount = matchedPatterns.length;
+        let trustScore = 0;
+        let trustTier = "none";
 
-        const activePqsScores = activePatterns.map((p) => computePqs(p));
-        const avgPqs = activePqsScores.length > 0
-          ? activePqsScores.reduce((a, b) => a + b, 0) / activePqsScores.length
-          : 0;
-        const antiPenalty = Math.min(40, matchedAnti.length * 10);
-        const ets = Math.max(0, Math.min(100, avgPqs - antiPenalty));
+        if (patternCount > 0) {
+          const qualityScores = matchedPatterns.map((p) => computeQuality(p));
+          const avgQuality = qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length;
+          const countBonus = Math.min(20, patternCount * 5);
+          trustScore = Math.max(0, Math.min(100, Math.round(avgQuality + countBonus)));
 
-        let trustTier: string;
-        let kellyMultiplier: number;
-        if (ets >= 70) { trustTier = "high"; kellyMultiplier = 1.0; }
-        else if (ets >= 40) { trustTier = "medium"; kellyMultiplier = 0.5; }
-        else if (ets >= 20) { trustTier = "low"; kellyMultiplier = 0.25; }
-        else { trustTier = "blocked"; kellyMultiplier = 0.0; }
-
-        const isVetoed = matchedAnti.length >= 3;
-
-        // Gather failure modes from matched patterns
-        const failureModes = new Set<string>();
-        for (const p of activePatterns) {
-          if (Array.isArray(p.failure_modes)) {
-            for (const fm of p.failure_modes) failureModes.add(fm);
-          }
+          if (trustScore >= 70) trustTier = "high";
+          else if (trustScore >= 40) trustTier = "medium";
+          else trustTier = "low";
         }
 
-        // 7 bet questions for frontend
+        // Always include runners that match at least one pattern
+        // Also include runners with no matches if they have model predictions
+        if (matchedPatterns.length === 0) {
+          const ensProba = n(entry.ensemble_proba);
+          if (ensProba <= 0) continue;
+        }
+
         const ensProba = n(entry.ensemble_proba);
         const curOdds = n(entry.current_odds);
         const openOdds = n(entry.opening_odds);
         const betOdds = openOdds > 1 ? openOdds : curOdds;
         const impliedP = betOdds > 1 ? 1 / betOdds : 0;
         const edge = ensProba - impliedP;
-
-        const betQuestions = {
-          fair_probability: Math.round(ensProba * 1000) / 10,
-          market_implied: Math.round(impliedP * 1000) / 10,
-          edge_pct: Math.round(edge * 1000) / 10,
-          evidence_strength: ets,
-          trust_tier: trustTier,
-          worth_betting: edge >= 0.05 && trustTier !== "blocked",
-          stake_fraction: kellyMultiplier,
-        };
 
         allMatches.push({
           horse_name: entry.horse_name || "",
@@ -288,36 +218,25 @@ Deno.serve(async (req) => {
           jockey: entry.jockey_name || "",
           trainer: entry.trainer_name || "",
           matching_patterns: matchedPatterns.slice(0, 15),
-          anti_patterns: matchedAnti,
           active_signals: signals,
-          active_pattern_count: activePatterns.length,
-          total_pattern_count: matchedPatterns.length,
-          is_vetoed: isVetoed,
-          veto_reason: isVetoed
-            ? `${matchedAnti.length} anti-patterns matched`
-            : null,
-          edge_trust_score: Math.round(ets * 10) / 10,
+          pattern_count: patternCount,
+          trust_score: trustScore,
           trust_tier: trustTier,
-          kelly_multiplier: kellyMultiplier,
-          failure_modes: Array.from(failureModes),
-          bet_questions: betQuestions,
         });
       }
     }
 
-    // Sort by active pattern count descending
-    allMatches.sort((a, b) => b.active_pattern_count - a.active_pattern_count);
+    // Sort by pattern count descending
+    allMatches.sort((a, b) => b.pattern_count - a.pattern_count);
 
     return json({
       data: {
         matches: allMatches,
         patterns_loaded: patterns.length,
-        anti_patterns_loaded: antiPatterns.length,
         meta: {
           today_races: todayRaces.length,
           today_entries: entries.length,
           total_matches: allMatches.length,
-          vetoed_count: allMatches.filter((m) => m.is_vetoed).length,
           generated_at: new Date().toISOString(),
         },
       },
@@ -343,29 +262,19 @@ interface Race {
 
 interface MastermindPattern {
   id: string;
-  pattern_key: string;
   pattern_label: string;
   signal_keys: string[];
   segment: string;
-  depth: number;
   pattern_type: string;
   total_bets: number;
   wins: number;
   win_rate: number;
   roi_pct: number;
-  d21_bets: number;
-  d21_wins: number;
-  d21_roi_pct: number;
-  d21_profit: number;
-  confidence_score: number;
   status: string;
-  pqs: number;
   stability_windows: number;
   outlier_trimmed_roi: number;
   max_drawdown: number;
   drawdown_health: number;
-  failure_modes: string[];
-  oos_validated: boolean;
 }
 
 interface PatternMatch {
@@ -373,21 +282,14 @@ interface PatternMatch {
   pattern_label: string;
   signal_keys: string[];
   status: string;
-  d21_bets: number;
-  d21_wins: number;
-  d21_roi_pct: number;
-  d21_profit: number;
   total_bets: number;
   wins: number;
   win_rate: number;
   roi_pct: number;
-  confidence_score: number;
   pattern_type: string;
-  pqs: number;
   stability_windows: number;
   outlier_trimmed_roi: number;
   drawdown_health: number;
-  failure_modes: string[];
 }
 
 interface MastermindMatch {
@@ -405,25 +307,10 @@ interface MastermindMatch {
   jockey: string;
   trainer: string;
   matching_patterns: PatternMatch[];
-  anti_patterns: PatternMatch[];
   active_signals: string[];
-  active_pattern_count: number;
-  total_pattern_count: number;
-  is_vetoed: boolean;
-  veto_reason: string | null;
-  edge_trust_score: number;
+  pattern_count: number;
+  trust_score: number;
   trust_tier: string;
-  kelly_multiplier: number;
-  failure_modes: string[];
-  bet_questions: {
-    fair_probability: number;
-    market_implied: number;
-    edge_pct: number;
-    evidence_strength: number;
-    trust_tier: string;
-    worth_betting: boolean;
-    stake_fraction: number;
-  };
 }
 
 // =======================================================================
@@ -432,13 +319,13 @@ interface MastermindMatch {
 
 const n = (v: unknown): number => parseFloat(v as string) || 0;
 
-function computePqs(p: PatternMatch): number {
+function computeQuality(p: PatternMatch): number {
   const bets = p.total_bets || 0;
-  const sampleScore = Math.min(25, (Math.log2(Math.max(bets, 1)) / Math.log2(1000)) * 25);
+  const sampleScore = Math.min(25, (Math.log2(Math.max(bets, 1)) / Math.log2(500)) * 25);
   const wr = p.win_rate || 0;
   const winScore = Math.min(25, (wr / 40) * 25);
   const roi = p.roi_pct || 0;
-  const roiScore = Math.min(25, Math.max(0, (roi / 30) * 25));
+  const roiScore = Math.min(25, Math.max(0, (roi / 50) * 25));
   const sw = p.stability_windows || 0;
   const stabilityScore = Math.min(15, (sw / 5) * 15);
   const dh = p.drawdown_health || 0;
@@ -504,7 +391,6 @@ function computeSignals(
 ): string[] {
   const signals: string[] = [];
 
-  // -- Model & Edge --
   const ensProb = n(entry.ensemble_proba);
   const lgbmProb = n(entry.benter_proba);
   const xgbProb = n(entry.xgboost_proba);
@@ -547,7 +433,6 @@ function computeSignals(
   if (valueScore >= 1.10) signals.push("value_1_10");
   if (valueScore >= 1.20) signals.push("value_1_20");
 
-  // -- Odds & Market --
   if (odds >= 1 && odds < 3) signals.push("odds_evs_to_2");
   if (odds >= 3 && odds < 5) signals.push("odds_2_to_4");
   if (odds >= 5 && odds < 9) signals.push("odds_4_to_8");
@@ -573,7 +458,6 @@ function computeSignals(
     signals.push("model_market_aligned");
   if (edgePct >= 15 && odds > 9) signals.push("model_market_diverge");
 
-  // -- Ratings --
   const rpr = n(entry.rpr);
   const ts = n(entry.ts);
   const ofr = n(entry.ofr);
@@ -614,7 +498,6 @@ function computeSignals(
     if (pctAbove >= 10) signals.push("rating_standout_10");
   }
 
-  // -- Speed & Form --
   const lastSpd = n(entry.last_speed_figure);
   const meanSpd = n(entry.mean_speed_figure);
   if (lastSpd > meanSpd && lastSpd > 0 && meanSpd > 0) signals.push("speed_improving");
@@ -647,7 +530,6 @@ function computeSignals(
   if (n(entry.career_win_rate) >= 20) signals.push("career_winner");
   if (n(entry.beaten_lengths_trend) < 0) signals.push("beaten_lengths_improving");
 
-  // -- Trainer --
   const t21 = n(entry.trainer_21_days_win_percentage);
   if (t21 >= 20) signals.push("trainer_21d_hot");
   else if (t21 >= 15) signals.push("trainer_21d_warm");
@@ -672,7 +554,6 @@ function computeSignals(
   if (signals.includes("trainer_21d_hot") && signals.includes("trainer_course_specialist"))
     signals.push("trainer_in_form_at_course");
 
-  // -- Jockey --
   const j21 = n(entry.jockey_21_days_win_percentage);
   if (j21 >= 20) signals.push("jockey_21d_hot");
   else if (j21 >= 15) signals.push("jockey_21d_warm");
@@ -689,7 +570,6 @@ function computeSignals(
     signals.push("elite_connections");
   if (tjc === 0 && n(entry.jockey_booking_change) === 1) signals.push("tj_first_combo");
 
-  // -- Horse Context --
   const comment = ((entry.comment as string) || "").toLowerCase();
   if (/\bc\s*&\s*d\b/.test(comment) || /course\s+and\s+distance/.test(comment))
     signals.push("cd_winner");
@@ -704,7 +584,6 @@ function computeSignals(
   if (n(entry.weight_change) < 0) signals.push("weight_drop");
   if (n(entry.horse_ae_at_distance) > 1.0) signals.push("proven_ae");
 
-  // Draw advantage: runner's draw_bias in top 25% of field
   const drawBias = n(entry.draw_bias_at_course);
   if (drawBias > 0) {
     const fieldDraws = raceEntries.map((e) => n(e.draw_bias_at_course)).filter((v) => v > 0);
@@ -713,7 +592,6 @@ function computeSignals(
     if (drawBias <= threshold) signals.push("draw_advantage");
   }
 
-  // -- Race Context --
   if (fieldSize > 0 && fieldSize <= 7) signals.push("small_field");
   if (fieldSize >= 8 && fieldSize <= 13) signals.push("medium_field");
   if (fieldSize >= 14) signals.push("large_field");

@@ -219,30 +219,6 @@ Deno.serve(async (req)=>{
       });
       await Promise.all(promises);
     }
-    // ---- 7) Trigger live Benter Stage 2 recalculation ----
-    // Stage 2 combines frozen Stage 1 probabilities with latest market odds.
-    // Only fires if we actually synced new prices to race_entries.
-    let stage2Result = null;
-    if (reSynced > 0) {
-      try {
-        const s2Resp = await fetch(`${SUPABASE_URL}/functions/v1/recalc-stage2`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({}),
-        });
-        if (s2Resp.ok) {
-          stage2Result = await s2Resp.json().catch(() => null);
-        } else {
-          console.warn(`recalc-stage2 returned ${s2Resp.status}`);
-        }
-      } catch (e2) {
-        console.warn("recalc-stage2 call failed (non-fatal):", e2?.message ?? String(e2));
-      }
-    }
-
     return json({
       success: true,
       message: "horse_market_movement updated (bulk)",
@@ -251,8 +227,7 @@ Deno.serve(async (req)=>{
       bookmaker: BOOKMAKER_DB,
       horses_found: picks.length,
       upserted,
-      race_entries_synced: reSynced,
-      stage2_recalc: stage2Result,
+      race_entries_synced: reSynced
     });
   } catch (e) {
     console.error("racing-market-monitor-cron error:", e?.message ?? String(e));

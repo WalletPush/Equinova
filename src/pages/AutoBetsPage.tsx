@@ -40,7 +40,6 @@ import {
   Eye,
   Shield,
   ShieldCheck,
-  ShieldAlert,
   AlertTriangle,
 } from 'lucide-react'
 
@@ -314,10 +313,10 @@ export function AutoBetsPage() {
         const mmKey = `${raceId}:${e.horse_id}`
         const mm = matchesByHorse.get(mmKey)
 
-        // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ ACTIVE patterns
+        // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ lifetime profitable patterns
         if (odds > MAX_ODDS) {
-          const activeCount = mm?.active_pattern_count ?? 0
-          if (activeCount < LONGSHOT_MIN_ACTIVE_PATTERNS) continue
+          const pCount = mm?.pattern_count ?? 0
+          if (pCount < LONGSHOT_MIN_ACTIVE_PATTERNS) continue
         }
 
         const bestSpeed = Math.max(
@@ -507,8 +506,8 @@ export function AutoBetsPage() {
             and compares it to the market odds. Horses with{' '}
             <span className="text-green-400 font-medium">5%+ edge</span> and at least 15% Benter probability qualify up to 12/1.
             Longshots above 12/1 can qualify if backed by{' '}
-            <span className="text-purple-300 font-medium">2+ active Mastermind patterns</span>.
-            Horses vetoed by anti-patterns are excluded. One pick per race. Kelly Criterion sizes the stake.
+            <span className="text-purple-300 font-medium">2+ lifetime profitable patterns</span>.
+            One pick per race. Kelly Criterion sizes the stake. AI Intelligence shows matched patterns per segment.
           </p>
         </div>
 
@@ -864,9 +863,9 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
 
   const kellyInfo = useMemo(() => computeKelly(pick, userBankroll), [pick, userBankroll])
 
-  const activePatternCount = mastermindMatch?.active_pattern_count ?? 0
+  const patternCount = mastermindMatch?.pattern_count ?? 0
 
-  const borderColor = inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : activePatternCount > 0 ? 'border-purple-500/50' : 'border-purple-500/30'
+  const borderColor = inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : patternCount > 0 ? 'border-purple-500/50' : 'border-purple-500/30'
 
   return (
     <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
@@ -994,20 +993,20 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
           </div>
         )}
 
-        {/* Mastermind Intelligence + Edge Trust */}
+        {/* AI Intelligence — informational trust layer */}
         <div className="mt-3 pt-3 border-t border-gray-800">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 flex-wrap">
               {mastermindMatch && (
                 <TrustBadge
-                  ets={mastermindMatch.edge_trust_score}
+                  score={mastermindMatch.trust_score}
                   tier={mastermindMatch.trust_tier}
                 />
               )}
-              {activePatternCount > 0 && (
+              {patternCount > 0 && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
                   <Brain className="w-3 h-3" />
-                  {activePatternCount}
+                  {patternCount} {patternCount === 1 ? 'pattern' : 'patterns'}
                 </span>
               )}
               {!mastermindMatch && (
@@ -1031,15 +1030,10 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
           <MastermindModal
             horseName={pick.horse_name}
             patterns={mastermindMatch?.matching_patterns ?? []}
-            antiPatterns={mastermindMatch?.anti_patterns ?? []}
-            isVetoed={mastermindMatch?.is_vetoed ?? false}
-            vetoReason={mastermindMatch?.veto_reason ?? null}
+            patternCount={mastermindMatch?.pattern_count ?? 0}
+            trustScore={mastermindMatch?.trust_score ?? 0}
+            trustTier={mastermindMatch?.trust_tier ?? 'none'}
             kellyStake={kellyInfo?.stake}
-            edgeTrustScore={mastermindMatch?.edge_trust_score ?? 0}
-            trustTier={mastermindMatch?.trust_tier ?? 'blocked'}
-            kellyMultiplier={mastermindMatch?.kelly_multiplier ?? 0}
-            failureModes={mastermindMatch?.failure_modes ?? []}
-            betQuestions={mastermindMatch?.bet_questions ?? null}
             onClose={() => setShowMastermind(false)}
           />
         )}
@@ -1120,19 +1114,19 @@ function ProbBar({ label, value, icon: Icon, color }: { label: string; value: nu
   )
 }
 
-function TrustBadge({ ets, tier }: { ets: number; tier: string }) {
+function TrustBadge({ score, tier }: { score: number; tier: string }) {
   const config = {
-    high:    { bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400', icon: ShieldCheck, label: 'High Trust' },
-    medium:  { bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: Shield, label: 'Medium' },
-    low:     { bg: 'bg-orange-500/15', border: 'border-orange-500/30', text: 'text-orange-400', icon: AlertTriangle, label: 'Low' },
-    blocked: { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: ShieldAlert, label: 'Blocked' },
-  }[tier] ?? { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: ShieldAlert, label: '—' }
+    high:   { bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400', icon: ShieldCheck, label: 'Strong' },
+    medium: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: Shield, label: 'Moderate' },
+    low:    { bg: 'bg-orange-500/15', border: 'border-orange-500/30', text: 'text-orange-400', icon: AlertTriangle, label: 'Weak' },
+    none:   { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: Brain, label: 'No signals' },
+  }[tier] ?? { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: Brain, label: 'No signals' }
 
   const Icon = config.icon
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${config.bg} ${config.text} border ${config.border}`}>
       <Icon className="w-3 h-3" />
-      {config.label} {ets > 0 ? `(${ets})` : ''}
+      {config.label} {score > 0 ? `(${score})` : ''}
     </span>
   )
 }

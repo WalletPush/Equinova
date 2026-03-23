@@ -228,11 +228,41 @@ P(i wins) = exp(u_i) / Σ_j exp(u_j)
 - Lost bets need no further adjustment (stake was already deducted on placement)
 - NEVER insert bets directly into the `bets` table without also adjusting `user_bankroll` — this causes bankroll corruption
 
+## ML Script Iterations & Backups
+
+### Iteration 1 — "Train and predict base level" (March 22, 2026)
+
+**Location:** `~/EquiNOVA/scripts/Train and predict base level/`
+
+This is the **baseline starting point** for all future model iterations. It contains the GROK-style simplified scripts that ARE picking winners (26.6% win rate on validation). Any future model changes MUST be compared against this baseline before being promoted to production.
+
+**What's in it (1.1 GB total):**
+- **Core training scripts:** `train_lightgbm_v2.py`, `train_random_forest_v2.py`, `train_xgboost_v2.py`, `train_benter_v2.py`
+- **Prediction:** `predict_v2.py`
+- **Utilities:** `training_utils.py`, `push_to_supabase.py`
+- **Pipeline:** `equinova_daily_runner.py`, `data_collection.py`, `10_model_scheduler.py`, `backfill_pipeline.py`
+- **Feature engineering:** All 01–09 + 2a/2b/4a scripts
+- **Data collection:** Z1–Z8 scripts
+- **Mastermind:** All mastermind_*.py and signal scanner scripts
+- **65 trained .joblib model files** — the actual trained weights for all segments
+- **28 metadata JSON files** — hyperparameters, feature columns, training metrics
+- **.env** — API keys and config
+
+**Key characteristics of this baseline:**
+- GROK-style simplicity: RandomUnderSampler, profit-based Optuna objective, no isotonic calibration
+- Uses ALL 52+ features from backfill data (including AW, draw bias, residual features)
+- Benter model: Rank-Order CLogit (top_k=5) + 5-source combiner (Stage 1 + market + LGBM + XGB + RF)
+- True Out-Of-Fold predictions (no leakage)
+- Top Picks criteria: edge >= 5%, odds <= 12/1, ensemble_proba >= 15%, 2+ models agree
+- Training window: 2025-04-01 to 2026-02-28, holdout: 2026-03-01 to 2026-03-14
+
+**⚠️ RULE: Before promoting ANY new model iteration, compare its holdout metrics AND live prediction win rate against this baseline. If it's worse, DO NOT ship it.**
+
 ## Current State (as of March 2026)
 
-- Backfill pipeline running from 2025-04-24 to 2026-03-16 (~327 days)
-- Results for Feb-Mar 2026 already synced from Supabase to local .db files
-- Models last retrained Mar 18, 2026 (train: Nov 2023–May 2025, val: Jun 2025, holdout: Feb–Mar 2026)
-- Once backfill completes: rebuild prediction ledger → retrain all models on full dataset → push new predictions
-- Daily predictions run automatically at 9 AM via cron (`equinova_daily_runner.py`)
-- Live results so far: 50% win rate on Top Picks with positive P/L (Kelly sizing working correctly)
+- Backfill data covers 2025-04-01 to 2026-03-22 (~356 days)
+- Supabase has predictions for Mar 1–22, 2026
+- Models last retrained Mar 22, 2026 (Iteration 1 baseline)
+- Daily predictions run automatically at 9 AM Indonesia time via cron (`equinova_daily_runner.py`)
+- AI Intelligence (Mastermind scanner) now works on ALL dates, not just today
+- GitHub branches `main`, `new_features`, and `back_up` all synced at commit `6d1d606`

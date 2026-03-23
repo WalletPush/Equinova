@@ -262,96 +262,6 @@ Deno.serve(async (req)=>{
         }
       }
     }
-    // Step 5b: Settle multi-leg bets (doubles, trebles, fourfolds)
-    let settledMultiLeg = 0;
-    try {
-      // Find pending bets with legs that reference this race_id
-      const multiLegRes = await fetch(
-        `${supabaseUrl}/rest/v1/bets?status=eq.pending&bet_subtype=neq.single&legs=not.is.null&select=*`,
-        { method: 'GET', headers: { 'Authorization': `Bearer ${supabaseKey}`, 'apikey': supabaseKey } }
-      );
-      if (multiLegRes.ok) {
-        const multiLegBets = await multiLegRes.json();
-        for (const bet of multiLegBets) {
-          let legs: { horse_id: string; race_id: string; horse_name: string; odds: number }[];
-          try { legs = typeof bet.legs === 'string' ? JSON.parse(bet.legs) : bet.legs; }
-          catch { continue; }
-          if (!Array.isArray(legs)) continue;
-
-          // Only process bets that have a leg in this race
-          const hasThisRace = legs.some(l => l.race_id === race_id);
-          if (!hasThisRace) continue;
-
-          // Check ALL legs — each leg's race must have results
-          let allSettled = true;
-          let allWon = true;
-          for (const leg of legs) {
-            const legRunnersRes = await fetch(
-              `${supabaseUrl}/rest/v1/race_runners?race_id=eq.${leg.race_id}&select=horse_id,position&position=gt.0`,
-              { method: 'GET', headers: { 'Authorization': `Bearer ${supabaseKey}`, 'apikey': supabaseKey } }
-            );
-            if (!legRunnersRes.ok) { allSettled = false; break; }
-            const legRunners = await legRunnersRes.json();
-            if (!legRunners || legRunners.length === 0) { allSettled = false; break; }
-
-            const legWinner = legRunners.find((r: any) => r.position === 1);
-            if (!legWinner) { allSettled = false; break; }
-
-            const legHorseId = String(leg.horse_id).trim();
-            const winnerHorseId = String(legWinner.horse_id).trim();
-            if (legHorseId !== winnerHorseId) { allWon = false; }
-          }
-
-          if (!allSettled) continue;
-
-          const newStatus = allWon ? 'won' : 'lost';
-          const updateRes = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet.id}`, {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${supabaseKey}`,
-              'apikey': supabaseKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ status: newStatus, updated_at: new Date().toISOString() }),
-          });
-
-          if (updateRes.ok) {
-            settledMultiLeg++;
-            console.log(`Multi-leg bet ${bet.id} (${bet.bet_subtype}): ${newStatus}`);
-
-            if (allWon && bet.potential_return) {
-              try {
-                const brRes = await fetch(
-                  `${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}&select=current_amount`,
-                  { method: 'GET', headers: { 'Authorization': `Bearer ${supabaseKey}`, 'apikey': supabaseKey } }
-                );
-                if (brRes.ok) {
-                  const brData = await brRes.json();
-                  const existing = brData.length > 0 ? Number(brData[0].current_amount) : 0;
-                  const newAmount = existing + Number(bet.potential_return);
-                  await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}`, {
-                    method: 'PATCH',
-                    headers: {
-                      'Authorization': `Bearer ${supabaseKey}`,
-                      'apikey': supabaseKey,
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ current_amount: newAmount, updated_at: new Date().toISOString() }),
-                  });
-                  bankrollUpdates++;
-                  console.log(`Multi-leg win bankroll: +£${bet.potential_return} for user ${bet.user_id}`);
-                }
-              } catch (e) {
-                console.warn(`Failed to update bankroll for multi-leg win:`, e.message);
-              }
-            }
-          }
-        }
-      }
-    } catch (multiLegError) {
-      console.warn('Error settling multi-leg bets:', multiLegError.message);
-    }
-
     // Step 6: Update selections with results
     let updatedSelections = 0;
     for (const runner of runners){
@@ -442,7 +352,6 @@ Deno.serve(async (req)=>{
         race_entries_updated: updatedEntries,
         ml_model_performance_records: mlModelUpdates,
         bets_updated: updatedBets,
-        multi_leg_bets_settled: settledMultiLeg,
         bankroll_updates: bankrollUpdates,
         selections_updated: updatedSelections,
         shortlist_updated: updatedShortlist,

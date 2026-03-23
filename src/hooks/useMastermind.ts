@@ -7,31 +7,14 @@ export interface PatternMatch {
   pattern_label: string
   signal_keys: string[]
   status: string
-  d21_bets: number
-  d21_wins: number
-  d21_roi_pct: number
-  d21_profit: number
   total_bets: number
   wins: number
   win_rate: number
   roi_pct: number
-  confidence_score: number
   pattern_type: string
-  pqs: number
   stability_windows: number
   outlier_trimmed_roi: number
   drawdown_health: number
-  failure_modes: string[]
-}
-
-export interface BetQuestions {
-  fair_probability: number
-  market_implied: number
-  edge_pct: number
-  evidence_strength: number
-  trust_tier: string
-  worth_betting: boolean
-  stake_fraction: number
 }
 
 export interface MastermindMatch {
@@ -49,29 +32,20 @@ export interface MastermindMatch {
   jockey: string
   trainer: string
   matching_patterns: PatternMatch[]
-  anti_patterns: PatternMatch[]
   active_signals: string[]
-  active_pattern_count: number
-  total_pattern_count: number
-  is_vetoed: boolean
-  veto_reason: string | null
-  edge_trust_score: number
+  pattern_count: number
+  trust_score: number
   trust_tier: string
-  kelly_multiplier: number
-  failure_modes: string[]
-  bet_questions: BetQuestions
 }
 
 interface MastermindResponse {
   data: {
     matches: MastermindMatch[]
     patterns_loaded: number
-    anti_patterns_loaded: number
     meta: {
       today_races: number
       today_entries: number
       total_matches: number
-      vetoed_count: number
       generated_at: string
     }
   }

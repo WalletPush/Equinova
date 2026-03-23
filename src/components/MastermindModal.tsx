@@ -1,50 +1,38 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
 import {
-  X, Brain, ShieldAlert, ShieldCheck, Shield, TrendingUp,
-  BarChart3, AlertTriangle, CheckCircle, XCircle, Gauge,
+  X, Brain, ShieldCheck, Shield, TrendingUp,
+  AlertTriangle, Gauge,
 } from 'lucide-react'
-import type { PatternMatch, BetQuestions } from '../hooks/useMastermind'
+import type { PatternMatch } from '../hooks/useMastermind'
 
 interface MastermindModalProps {
   horseName: string
   patterns: PatternMatch[]
-  antiPatterns: PatternMatch[]
-  isVetoed: boolean
-  vetoReason: string | null
-  kellyStake?: number | null
-  edgeTrustScore: number
+  patternCount: number
+  trustScore: number
   trustTier: string
-  kellyMultiplier: number
-  failureModes: string[]
-  betQuestions: BetQuestions | null
+  kellyStake?: number | null
   onClose: () => void
 }
 
 const TIER_CONFIG: Record<string, { color: string; bg: string; border: string; icon: typeof Shield; label: string }> = {
-  high:    { color: 'text-green-400',  bg: 'bg-green-500/20',  border: 'border-green-500/30',  icon: ShieldCheck, label: 'High Trust' },
-  medium:  { color: 'text-yellow-400', bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', icon: Shield,      label: 'Medium Trust' },
-  low:     { color: 'text-orange-400', bg: 'bg-orange-500/15', border: 'border-orange-500/30', icon: AlertTriangle, label: 'Low Trust' },
-  blocked: { color: 'text-gray-500',   bg: 'bg-gray-700/50',   border: 'border-gray-600',      icon: ShieldAlert,   label: 'Blocked' },
+  high:   { color: 'text-green-400',  bg: 'bg-green-500/20',  border: 'border-green-500/30',  icon: ShieldCheck,    label: 'Strong Signals' },
+  medium: { color: 'text-yellow-400', bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', icon: Shield,         label: 'Some Signals' },
+  low:    { color: 'text-orange-400', bg: 'bg-orange-500/15', border: 'border-orange-500/30', icon: AlertTriangle,  label: 'Weak Signals' },
+  none:   { color: 'text-gray-500',   bg: 'bg-gray-700/50',   border: 'border-gray-600',      icon: Brain,          label: 'No Signals' },
 }
 
 export function MastermindModal({
   horseName,
   patterns,
-  antiPatterns,
-  isVetoed,
-  vetoReason,
-  kellyStake,
-  edgeTrustScore,
+  patternCount,
+  trustScore,
   trustTier,
-  kellyMultiplier,
-  failureModes,
-  betQuestions,
+  kellyStake,
   onClose,
 }: MastermindModalProps) {
-  const activePatterns = patterns.filter(p => p.status === 'ACTIVE')
-  const monitoringPatterns = patterns.filter(p => p.status === 'MONITORING')
-  const tierCfg = TIER_CONFIG[trustTier] ?? TIER_CONFIG.blocked
+  const tierCfg = TIER_CONFIG[trustTier] ?? TIER_CONFIG.none
   const TierIcon = tierCfg.icon
 
   const modal = (
@@ -63,7 +51,7 @@ export function MastermindModal({
               <Brain className="w-5 h-5 text-purple-400" />
             </div>
             <div>
-              <h2 className="text-white font-semibold text-lg">Mastermind Intelligence</h2>
+              <h2 className="text-white font-semibold text-lg">AI Intelligence</h2>
               <p className="text-gray-400 text-sm">{horseName}</p>
             </div>
           </div>
@@ -74,7 +62,7 @@ export function MastermindModal({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Edge Trust Score */}
+          {/* Trust Score */}
           <div className={`${tierCfg.bg} border ${tierCfg.border} rounded-xl p-4`}>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -84,130 +72,48 @@ export function MastermindModal({
                 </span>
               </div>
               <div className="text-right">
-                <span className={`text-2xl font-bold ${tierCfg.color}`}>{edgeTrustScore}</span>
+                <span className={`text-2xl font-bold ${tierCfg.color}`}>{trustScore}</span>
                 <span className="text-gray-500 text-xs ml-1">/ 100</span>
               </div>
             </div>
-            <ETSBar score={edgeTrustScore} />
+            <TrustBar score={trustScore} />
             <div className="flex items-center justify-between mt-3 text-xs">
               <span className="text-gray-400">
-                Kelly multiplier: <span className="text-white font-semibold">{kellyMultiplier}x</span>
+                {patternCount} lifetime profitable {patternCount === 1 ? 'pattern' : 'patterns'} matched
               </span>
               {kellyStake != null && kellyStake > 0 && (
                 <span className="text-yellow-400 font-semibold flex items-center gap-1">
                   <Gauge className="w-3 h-3" />
-                  £{kellyStake.toFixed(2)}
+                  Kelly: {'\u00A3'}{kellyStake.toFixed(2)}
                 </span>
               )}
             </div>
           </div>
 
-          {/* Bet Decision Summary */}
-          {betQuestions && (
-            <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4 space-y-2.5">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Bet Decision</h3>
-              <BetRow label="Fair probability" value={`${betQuestions.fair_probability}%`} />
-              <BetRow label="Market implied" value={`${betQuestions.market_implied}%`} />
-              <BetRow
-                label="Edge"
-                value={`${betQuestions.edge_pct > 0 ? '+' : ''}${betQuestions.edge_pct}%`}
-                highlight={betQuestions.edge_pct >= 5 ? 'green' : betQuestions.edge_pct > 0 ? 'yellow' : 'red'}
-              />
-              <BetRow label="Evidence strength" value={`${betQuestions.evidence_strength}`} />
-              <BetRow label="Trust tier" value={betQuestions.trust_tier} />
-              <BetRow
-                label="Worth betting?"
-                value={betQuestions.worth_betting ? 'YES' : 'NO'}
-                highlight={betQuestions.worth_betting ? 'green' : 'red'}
-                icon={betQuestions.worth_betting ? CheckCircle : XCircle}
-              />
-              <BetRow label="Stake fraction" value={`${betQuestions.stake_fraction}x quarter-Kelly`} />
-            </div>
-          )}
-
-          {/* Failure Modes */}
-          {failureModes.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {failureModes.map((fm, i) => (
-                <span key={i} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                  <AlertTriangle className="w-2.5 h-2.5" />
-                  {fm}
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Veto Warning */}
-          {isVetoed && (
-            <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <ShieldAlert className="w-5 h-5 text-red-400" />
-                <span className="text-red-400 font-semibold text-sm uppercase tracking-wider">
-                  Vetoed
-                </span>
-              </div>
-              <p className="text-red-300 text-sm">{vetoReason}</p>
-            </div>
-          )}
-
-          {/* Active Patterns */}
-          {activePatterns.length > 0 && (
+          {/* Matched Patterns */}
+          {patterns.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <TrendingUp className="w-4 h-4 text-green-400" />
                 <span className="text-green-400 font-semibold text-sm uppercase tracking-wider">
-                  {activePatterns.length} Active Pattern{activePatterns.length !== 1 ? 's' : ''}
+                  Lifetime Profitable Patterns
                 </span>
               </div>
               <div className="space-y-2">
-                {activePatterns.map((pat, idx) => (
-                  <PatternCard key={idx} pattern={pat} variant="active" />
+                {patterns.map((pat, idx) => (
+                  <PatternCard key={idx} pattern={pat} />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Monitoring Patterns */}
-          {monitoringPatterns.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <BarChart3 className="w-4 h-4 text-yellow-400" />
-                <span className="text-yellow-400 font-semibold text-sm uppercase tracking-wider">
-                  {monitoringPatterns.length} Monitoring
-                </span>
-              </div>
-              <div className="space-y-2">
-                {monitoringPatterns.map((pat, idx) => (
-                  <PatternCard key={idx} pattern={pat} variant="monitoring" />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Anti-Patterns */}
-          {antiPatterns.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <ShieldAlert className="w-4 h-4 text-red-400" />
-                <span className="text-red-400 font-semibold text-sm uppercase tracking-wider">
-                  {antiPatterns.length} Anti-Pattern{antiPatterns.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-              <div className="space-y-2">
-                {antiPatterns.slice(0, 5).map((pat, idx) => (
-                  <PatternCard key={idx} pattern={pat} variant="anti" />
-                ))}
-                {antiPatterns.length > 5 && (
-                  <p className="text-xs text-gray-500 text-center">+{antiPatterns.length - 5} more</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {patterns.length === 0 && antiPatterns.length === 0 && (
+          {patterns.length === 0 && (
             <div className="text-center py-8 text-gray-500">
               <Brain className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p>No pattern matches for this runner</p>
+              <p className="text-sm">No lifetime profitable patterns matched</p>
+              <p className="text-xs text-gray-600 mt-1">
+                This runner doesn't match any proven signal combinations for its segment
+              </p>
             </div>
           )}
         </div>
@@ -218,12 +124,12 @@ export function MastermindModal({
   return createPortal(modal, document.body)
 }
 
-function ETSBar({ score }: { score: number }) {
+function TrustBar({ score }: { score: number }) {
   const segments = [
-    { min: 0, max: 20, color: 'bg-gray-600', label: '' },
-    { min: 20, max: 40, color: 'bg-orange-500', label: '' },
-    { min: 40, max: 70, color: 'bg-yellow-500', label: '' },
-    { min: 70, max: 100, color: 'bg-green-500', label: '' },
+    { min: 0, max: 25, color: 'bg-gray-600' },
+    { min: 25, max: 50, color: 'bg-orange-500' },
+    { min: 50, max: 75, color: 'bg-yellow-500' },
+    { min: 75, max: 100, color: 'bg-green-500' },
   ]
 
   return (
@@ -246,68 +152,26 @@ function ETSBar({ score }: { score: number }) {
       </div>
       <div className="flex justify-between mt-1 text-[9px] text-gray-600">
         <span>0</span>
-        <span>20</span>
-        <span>40</span>
-        <span>70</span>
+        <span>25</span>
+        <span>50</span>
+        <span>75</span>
         <span>100</span>
       </div>
     </div>
   )
 }
 
-function BetRow({ label, value, highlight, icon: Icon }: {
-  label: string
-  value: string
-  highlight?: 'green' | 'yellow' | 'red'
-  icon?: React.ElementType
-}) {
-  const valueColor = highlight === 'green' ? 'text-green-400'
-    : highlight === 'red' ? 'text-red-400'
-    : highlight === 'yellow' ? 'text-yellow-400'
-    : 'text-white'
-
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-xs text-gray-400">{label}</span>
-      <span className={`text-xs font-semibold ${valueColor} flex items-center gap-1`}>
-        {Icon && <Icon className="w-3 h-3" />}
-        {value}
-      </span>
-    </div>
-  )
-}
-
-function PatternCard({ pattern, variant }: { pattern: PatternMatch; variant: 'active' | 'monitoring' | 'anti' }) {
-  const borderColor = variant === 'active' ? 'border-green-700/30' : variant === 'monitoring' ? 'border-yellow-700/30' : 'border-red-700/30'
-  const bgColor = variant === 'active' ? 'bg-green-900/15' : variant === 'monitoring' ? 'bg-yellow-900/10' : 'bg-red-900/15'
-
-  const has21d = pattern.d21_bets > 0
-  const roi = has21d ? pattern.d21_roi_pct : pattern.roi_pct
-  const bets = has21d ? pattern.d21_bets : pattern.total_bets
-  const wins = has21d ? pattern.d21_wins : pattern.wins
+function PatternCard({ pattern }: { pattern: PatternMatch }) {
+  const roi = pattern.roi_pct
+  const bets = pattern.total_bets
+  const wins = pattern.wins
   const wr = bets > 0 ? (wins / bets) * 100 : 0
-  const period = has21d ? 'last 21d' : 'historical'
-
   const roiColor = roi > 0 ? 'text-green-400' : 'text-red-400'
   const wrColor = wr >= 30 ? 'text-green-400' : wr > 0 ? 'text-yellow-400' : 'text-gray-500'
 
-  const pqs = pattern.pqs ?? 0
-  const showQuality = variant === 'active' && pqs > 0
-
   return (
-    <div className={`${bgColor} border ${borderColor} rounded-lg p-3`}>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-white text-sm font-medium">{pattern.pattern_label}</p>
-        {showQuality && (
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-            pqs >= 70 ? 'bg-green-500/20 text-green-400' :
-            pqs >= 40 ? 'bg-yellow-500/15 text-yellow-400' :
-            'bg-gray-700 text-gray-400'
-          }`}>
-            PQS {pqs}
-          </span>
-        )}
-      </div>
+    <div className="bg-green-900/15 border border-green-700/30 rounded-lg p-3">
+      <p className="text-white text-sm font-medium mb-2">{pattern.pattern_label}</p>
       <div className="flex items-center gap-4 text-xs flex-wrap">
         <span className={roiColor}>
           {roi > 0 ? '+' : ''}{roi.toFixed(1)}% ROI
@@ -316,21 +180,14 @@ function PatternCard({ pattern, variant }: { pattern: PatternMatch; variant: 'ac
           {bets} bets
         </span>
         <span className={wrColor}>
-          {wins}W ({wr > 0 ? wr.toFixed(0) : '—'}%)
+          {wins}W ({wr > 0 ? wr.toFixed(0) : '\u2014'}%)
         </span>
-        <span className="text-gray-500">
-          {period}
-        </span>
+        <span className="text-gray-500">lifetime</span>
       </div>
-      {showQuality && (
-        <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
-          <span>Stability: {pattern.stability_windows}/5</span>
-          <span>Drawdown: {((pattern.drawdown_health ?? 0) * 100).toFixed(0)}%</span>
-          {pattern.failure_modes?.length > 0 && (
-            <span className="text-amber-500">{pattern.failure_modes[0]}</span>
-          )}
-        </div>
-      )}
+      <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
+        <span>Stability: {pattern.stability_windows}/5</span>
+        <span>Drawdown: {((pattern.drawdown_health ?? 0) * 100).toFixed(0)}%</span>
+      </div>
     </div>
   )
 }
