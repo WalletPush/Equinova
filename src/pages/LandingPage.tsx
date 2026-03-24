@@ -431,7 +431,7 @@ export function LandingPage() {
               That wasn't a fluke. Here's the evidence.
             </h3>
             <p className="text-gray-500 mb-10">
-              6 picks. 6 winners. <strong className="text-emerald-400">+£251.06 profit</strong> in a single day. Click any card.
+              Click any card to expand.
             </p>
           </motion.div>
 
@@ -440,30 +440,20 @@ export function LandingPage() {
             whileInView="visible"
             viewport={{ once: true, margin: '-80px' }}
             variants={stagger}
-            className="grid grid-cols-2 md:grid-cols-3 gap-4"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
           >
             {winningPicks.map((pick, i) => (
               <motion.button
                 key={pick.horse}
                 variants={fadeUp}
                 onClick={() => setLightboxIndex(i)}
-                className="group relative rounded-xl overflow-hidden border border-gray-700/40 hover:border-amber-500/40 transition-all duration-200 hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                className="rounded-xl overflow-hidden border border-gray-700/40 hover:border-amber-500/40 transition-all duration-200 hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-amber-500/40"
               >
                 <img
                   src={pick.src}
                   alt={`${pick.horse} — WON`}
                   className="w-full"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                <div className="absolute bottom-0 left-0 right-0 p-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-200">
-                  <div className="flex items-end justify-between">
-                    <div className="text-left">
-                      <p className="text-white font-semibold text-sm">{pick.horse}</p>
-                      <p className="text-gray-400 text-xs">{pick.venue} &middot; {pick.odds}</p>
-                    </div>
-                    <p className="text-emerald-400 font-bold text-sm">{pick.profit}</p>
-                  </div>
-                </div>
               </motion.button>
             ))}
           </motion.div>
