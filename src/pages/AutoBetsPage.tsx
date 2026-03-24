@@ -1130,10 +1130,10 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
             {!isSettled && (
               <button
                 onClick={() => setShowAiChat(true)}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/15 text-blue-400 border border-blue-500/25 hover:bg-blue-500/25 hover:border-blue-500/40 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600/90 text-white border border-purple-500/50 hover:bg-purple-500 hover:border-purple-400/60 transition-colors shadow-sm shadow-purple-500/20"
               >
-                <MessageSquare className="w-3 h-3" />
-                Chat AI
+                <MessageSquare className="w-3.5 h-3.5" />
+                Chat With AI
               </button>
             )}
             {isSettled && (
