@@ -5,6 +5,8 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   BarChart3,
   Database,
@@ -14,7 +16,9 @@ import {
   Target,
   LineChart,
   Shield,
+  X,
 } from 'lucide-react'
+import { AnimatePresence } from 'framer-motion'
 
 const fadeUp = {
   hidden: { opacity: 0, y: 32 },
@@ -23,6 +27,94 @@ const fadeUp = {
 
 const stagger = {
   visible: { transition: { staggerChildren: 0.12 } },
+}
+
+const winningPicks = [
+  { src: '/images/win-falco.png', horse: 'Falco Des Pins', edge: '+24.2%', profit: '+£35.00', odds: '5/2', venue: 'Leicester' },
+  { src: '/images/win-ohsoperfect.png', horse: 'Oh So Perfect', edge: '+65.8%', profit: '+£80.00', odds: '11/2', venue: 'Chelmsford' },
+  { src: '/images/win-goodoldbill.png', horse: 'Goodoldbill', edge: '+33.9%', profit: '+£40.25', odds: '10/1', venue: 'Newcastle' },
+  { src: '/images/win-smurfette.png', horse: 'Smurfette', edge: '+17.6%', profit: '+£25.13', odds: '9/4', venue: 'Southwell' },
+  { src: '/images/win-lawsupreme.png', horse: 'Law Supreme', edge: '+36.0%', profit: '+£45.00', odds: '4/1', venue: 'Wolverhampton' },
+  { src: '/images/win-faycequevoudras.png', horse: 'Fay Ce Que Voudras', edge: '+19.0%', profit: '+£25.68', odds: '3/1', venue: 'Leicester' },
+]
+
+function Lightbox({ picks, startIndex, onClose }: { picks: typeof winningPicks; startIndex: number; onClose: () => void }) {
+  const [index, setIndex] = useState(startIndex)
+  const pick = picks[index]
+
+  const prev = () => setIndex((i) => (i === 0 ? picks.length - 1 : i - 1))
+  const next = () => setIndex((i) => (i === picks.length - 1 ? 0 : i + 1))
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-w-lg w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-12 right-0 text-gray-400 hover:text-white transition-colors"
+        >
+          <X className="w-7 h-7" />
+        </button>
+
+        <button
+          onClick={prev}
+          className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-14 text-gray-400 hover:text-white transition-colors hidden sm:block"
+        >
+          <ChevronLeft className="w-8 h-8" />
+        </button>
+
+        <button
+          onClick={next}
+          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-14 text-gray-400 hover:text-white transition-colors hidden sm:block"
+        >
+          <ChevronRight className="w-8 h-8" />
+        </button>
+
+        <motion.img
+          key={pick.src}
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.2 }}
+          src={pick.src}
+          alt={`${pick.horse} — ${pick.edge} edge, WON ${pick.profit}`}
+          className="w-full rounded-2xl border border-gray-700/60 shadow-2xl"
+        />
+
+        <div className="flex items-center justify-between mt-4 px-1">
+          <div>
+            <p className="text-white font-bold text-lg">{pick.horse}</p>
+            <p className="text-gray-400 text-sm">{pick.venue} &middot; {pick.odds}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-emerald-400 font-bold text-lg">{pick.profit}</p>
+            <p className="text-amber-400 text-sm font-medium">{pick.edge} edge</p>
+          </div>
+        </div>
+
+        <div className="flex justify-center gap-2 mt-4 sm:hidden">
+          <button onClick={prev} className="bg-gray-800 rounded-lg p-2 text-gray-400 hover:text-white">
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <button onClick={next} className="bg-gray-800 rounded-lg p-2 text-gray-400 hover:text-white">
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+
+        <p className="text-center text-gray-600 text-xs mt-3">
+          {index + 1} / {picks.length}
+        </p>
+      </div>
+    </motion.div>
+  )
 }
 
 function FAQItem({ question, answer }: { question: string; answer: string }) {
@@ -125,12 +217,25 @@ function PricingCard({
 }
 
 export function LandingPage() {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+
   const scrollToPricing = () => {
     document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })
   }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white overflow-x-hidden">
+      {/* ── LIGHTBOX ─────────────────────────── */}
+      <AnimatePresence>
+        {lightboxIndex !== null && (
+          <Lightbox
+            picks={winningPicks}
+            startIndex={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ── HEADER ─────────────────────────────── */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-gray-900/80 backdrop-blur-lg border-b border-white/5">
         <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 py-3">
@@ -312,6 +417,55 @@ export function LandingPage() {
                 </p>
               </div>
             </motion.div>
+          </motion.div>
+
+          {/* ── EVIDENCE GALLERY ──────────────── */}
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: '-80px' }}
+            variants={fadeUp}
+            className="mt-24 text-center"
+          >
+            <h3 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
+              That wasn't a fluke. Here's the evidence.
+            </h3>
+            <p className="text-gray-500 mb-10">
+              6 picks. 6 winners. <strong className="text-emerald-400">+£251.06 profit</strong> in a single day. Click any card.
+            </p>
+          </motion.div>
+
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: '-80px' }}
+            variants={stagger}
+            className="grid grid-cols-2 md:grid-cols-3 gap-4"
+          >
+            {winningPicks.map((pick, i) => (
+              <motion.button
+                key={pick.horse}
+                variants={fadeUp}
+                onClick={() => setLightboxIndex(i)}
+                className="group relative rounded-xl overflow-hidden border border-gray-700/40 hover:border-amber-500/40 transition-all duration-200 hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              >
+                <img
+                  src={pick.src}
+                  alt={`${pick.horse} — WON`}
+                  className="w-full"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                <div className="absolute bottom-0 left-0 right-0 p-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-200">
+                  <div className="flex items-end justify-between">
+                    <div className="text-left">
+                      <p className="text-white font-semibold text-sm">{pick.horse}</p>
+                      <p className="text-gray-400 text-xs">{pick.venue} &middot; {pick.odds}</p>
+                    </div>
+                    <p className="text-emerald-400 font-bold text-sm">{pick.profit}</p>
+                  </div>
+                </div>
+              </motion.button>
+            ))}
           </motion.div>
         </div>
       </section>
