@@ -53,9 +53,8 @@ export function MastermindModal({
   const tierCfg = TIER_CONFIG[trustTier] ?? TIER_CONFIG.none
   const TierIcon = tierCfg.icon
 
-  const multLabel = kellyMultiplier >= 1.5 ? '1.5x' : kellyMultiplier >= 1.0 ? '1.0x' : kellyMultiplier >= 0.5 ? '0.5x' : '0.25x'
   const stakeLabel = stakeFraction > 0
-    ? `${stakeFraction.toFixed(2)}% (${multLabel} quarter-Kelly)`
+    ? `${stakeFraction.toFixed(2)}% of bankroll`
     : 'N/A'
 
   const modal = (
@@ -74,7 +73,7 @@ export function MastermindModal({
               <Brain className="w-5 h-5 text-purple-400" />
             </div>
             <div>
-              <h2 className="text-white font-semibold text-lg">Mastermind Intelligence</h2>
+              <h2 className="text-white font-semibold text-lg">AI Intelligence</h2>
               <p className="text-gray-400 text-sm">{horseName}</p>
             </div>
           </div>
@@ -117,22 +116,22 @@ export function MastermindModal({
           <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4">
             <h3 className="text-white text-sm font-semibold mb-3 uppercase tracking-wider">Bet Decision</h3>
             <div className="space-y-2">
-              <BetRow label="Fair probability" value={`${fairProbability.toFixed(1)}%`} />
-              <BetRow label="Market implied" value={`${marketImplied.toFixed(1)}%`} />
+              <BetRow label="Model Win Chance" value={`${fairProbability.toFixed(1)}%`} />
+              <BetRow label="Market Price" value={`${marketImplied.toFixed(1)}%`} />
               <BetRow
-                label="Edge"
+                label="Value Edge"
                 value={`${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)}%`}
                 valueColor={edgePct >= 5 ? 'text-green-400' : edgePct > 0 ? 'text-yellow-400' : 'text-red-400'}
               />
-              <BetRow label="Evidence strength" value={`${trustScore}`} />
-              <BetRow label="Trust tier" value={trustTier} />
+              <BetRow label="Confidence" value={`${trustScore}`} />
+              <BetRow label="Confidence Level" value={trustTier} />
               <BetRow
-                label="Worth betting?"
-                value={worthBetting ? 'YES' : 'NO'}
-                valueColor={worthBetting ? 'text-green-400' : 'text-red-400'}
+                label="Recommended?"
+                value={worthBetting ? 'YES' : 'Watch Market'}
+                valueColor={worthBetting ? 'text-green-400' : 'text-yellow-400'}
                 icon={worthBetting ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : undefined}
               />
-              <BetRow label="Stake fraction" value={stakeLabel} />
+              <BetRow label="Stake" value={stakeLabel} />
             </div>
           </div>
 
@@ -286,7 +285,7 @@ function PatternCard({ pattern, variant }: { pattern: PatternMatch; variant: 'li
           pqs >= 40 ? 'bg-yellow-500/20 text-yellow-400' :
           'bg-gray-600/20 text-gray-400'
         }`}>
-          PQS {pqs.toFixed(1)}
+          Score {pqs.toFixed(1)}
         </span>
       </div>
       <div className="flex items-center gap-4 text-xs flex-wrap">
