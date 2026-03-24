@@ -85,6 +85,7 @@ interface TopPick {
   ts: number
   ofr: number
   comment: string
+  spotlight: string
   best_speed: number
   avg_fp: number
   trainer_course_wr: number
@@ -196,7 +197,7 @@ export function AutoBetsPage() {
             'race_id', 'horse_id', 'horse_name', 'current_odds', 'opening_odds',
             'silk_url', 'number', 'jockey_name', 'trainer_name',
             'ensemble_proba', 'benter_proba', 'rf_proba', 'xgboost_proba',
-            'rpr', 'ts', 'ofr', 'comment',
+            'rpr', 'ts', 'ofr', 'comment', 'spotlight',
             'best_speed_figure_at_distance', 'best_speed_figure_at_track',
             'best_speed_figure_on_course_going_distance',
             'avg_finishing_position',
@@ -422,6 +423,7 @@ export function AutoBetsPage() {
           ts: Number(e.ts) || 0,
           ofr: Number(e.ofr) || 0,
           comment: e.comment || '',
+          spotlight: e.spotlight || '',
           best_speed: bestSpeed,
           avg_fp: Number(e.avg_finishing_position) || 0,
           trainer_course_wr: Number(e.trainer_win_percentage_at_course) || 0,
@@ -1255,11 +1257,11 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
         </div>
 
         {/* Expert comment */}
-        {pick.comment && (
+        {(pick.spotlight || pick.comment) && (
           <div className="mt-3 pt-3 border-t border-gray-800">
             <div className="flex items-start gap-2">
               <MessageSquare className="w-3.5 h-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-gray-300 leading-relaxed italic">{pick.comment}</p>
+              <p className="text-xs text-gray-300 leading-relaxed italic">{pick.spotlight || pick.comment}</p>
             </div>
           </div>
         )}
