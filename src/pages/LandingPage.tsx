@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowRight,
   ChevronDown,
@@ -17,8 +17,8 @@ import {
   LineChart,
   Shield,
   X,
+  Eye,
 } from 'lucide-react'
-import { AnimatePresence } from 'framer-motion'
 
 const fadeUp = {
   hidden: { opacity: 0, y: 32 },
@@ -30,12 +30,12 @@ const stagger = {
 }
 
 const winningPicks = [
-  { src: '/images/win-falco.png', horse: 'Falco Des Pins', edge: '+24.2%', profit: '+£35.00', odds: '5/2', venue: 'Leicester' },
-  { src: '/images/win-ohsoperfect.png', horse: 'Oh So Perfect', edge: '+65.8%', profit: '+£80.00', odds: '11/2', venue: 'Chelmsford' },
-  { src: '/images/win-goodoldbill.png', horse: 'Goodoldbill', edge: '+33.9%', profit: '+£40.25', odds: '10/1', venue: 'Newcastle' },
-  { src: '/images/win-smurfette.png', horse: 'Smurfette', edge: '+17.6%', profit: '+£25.13', odds: '9/4', venue: 'Southwell' },
-  { src: '/images/win-lawsupreme.png', horse: 'Law Supreme', edge: '+36.0%', profit: '+£45.00', odds: '4/1', venue: 'Wolverhampton' },
-  { src: '/images/win-faycequevoudras.png', horse: 'Fay Ce Que Voudras', edge: '+19.0%', profit: '+£25.68', odds: '3/1', venue: 'Leicester' },
+  { src: '/images/win-falco.png', horse: 'Falco Des Pins' },
+  { src: '/images/win-ohsoperfect.png', horse: 'Oh So Perfect' },
+  { src: '/images/win-goodoldbill.png', horse: 'Goodoldbill' },
+  { src: '/images/win-smurfette.png', horse: 'Smurfette' },
+  { src: '/images/win-lawsupreme.png', horse: 'Law Supreme' },
+  { src: '/images/win-faycequevoudras.png', horse: 'Fay Ce Que Voudras' },
 ]
 
 function Lightbox({ picks, startIndex, onClose }: { picks: typeof winningPicks; startIndex: number; onClose: () => void }) {
@@ -267,10 +267,10 @@ export function LandingPage() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold leading-[1.1] tracking-tight mb-6">
-              Beat the bookmakers
+              The Benter Logic.
               <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500">
-                with a better algorithm.
+                Rebuilt for modern racing.
               </span>
             </h1>
           </motion.div>
@@ -281,9 +281,9 @@ export function LandingPage() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="text-lg sm:text-xl text-gray-300 max-w-2xl mx-auto mb-10 leading-relaxed"
           >
-            EquiNova scans every UK and Irish race card to find where the
-            bookmakers have priced it wrong&nbsp;&mdash; then tells you exactly
-            how much to stake.
+            EquiNova scans every UK and Irish race to uncover where bookmaker
+            odds are wrong&nbsp;&mdash; then shows you the edge, the reasoning,
+            and the exact stake size.
           </motion.p>
 
           <motion.div
@@ -308,7 +308,7 @@ export function LandingPage() {
           <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-3 text-sm text-gray-400">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-amber-400" />
-              <span>Analysing <strong className="text-white">every UK &amp; Irish race</strong> daily</span>
+              <span>Every <strong className="text-white">UK &amp; Irish race</strong> analysed daily</span>
             </div>
             <div className="flex items-center gap-2">
               <Database className="w-4 h-4 text-amber-400" />
@@ -316,11 +316,11 @@ export function LandingPage() {
             </div>
             <div className="flex items-center gap-2">
               <Brain className="w-4 h-4 text-amber-400" />
-              <span><strong className="text-white">4 independent ML models</strong></span>
+              <span><strong className="text-white">Benter-inspired engine</strong> + 3 ML models</span>
             </div>
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-amber-400" />
-              <span>Kelly criterion <strong className="text-white">staking built in</strong></span>
+              <span><strong className="text-white">Kelly Criterion</strong> staking built in</span>
             </div>
           </div>
         </div>
@@ -336,20 +336,27 @@ export function LandingPage() {
           className="max-w-3xl mx-auto px-4 sm:px-6 text-center"
         >
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-8">
-            Most punters lose for the same reasons.
+            Most punters are not betting with an edge.
           </h2>
-          <div className="space-y-4 text-lg text-gray-400 leading-relaxed">
+          <div className="space-y-5 text-lg text-gray-400 leading-relaxed">
             <p>
-              They follow tipsters who show no working. Chase losses with bigger stakes.
-              Pick horses on gut feeling, jockey silks, or whatever the Racing Post
-              headline says. There's no model. No edge calculation. No staking discipline.
+              They're following tipsters with no model. Chasing yesterday's losses.
+              Backing horses on instinct, noise, and narrative.
             </p>
             <p>
-              The bookmakers have teams of quantitative analysts pricing every race.
-              You're betting against <em>them</em>&nbsp;&mdash; and you're doing it blind.
+              Meanwhile, bookmakers price every race with serious data, sharp
+              markets, and relentless discipline.
             </p>
-            <p className="text-white font-medium text-xl pt-2">
-              EquiNova levels the field.
+            <p className="text-white font-medium">
+              That's the real problem.
+            </p>
+            <p className="text-gray-400">
+              You're not just picking a horse. You're betting into a market
+              built by professionals.
+            </p>
+            <p className="text-amber-400 font-semibold text-xl pt-2">
+              EquiNova gives you a way to fight back&nbsp;&mdash; with probabilities,
+              value detection, and bankroll discipline.
             </p>
           </div>
         </motion.div>
@@ -375,29 +382,42 @@ export function LandingPage() {
 
             <motion.div variants={fadeUp}>
               <p className="text-amber-400 font-semibold uppercase tracking-widest text-xs mb-4">
-                Real Pick. Real Result.
+                What A Real Edge Looks Like
               </p>
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-6 leading-tight">
-                This is what a data-driven
+                Not just a winner.
                 <br />
-                pick looks like.
+                A <span className="text-emerald-400">mispriced</span> winner.
               </h2>
               <div className="space-y-4 text-gray-400 leading-relaxed">
                 <p>
-                  Kingcormac. Hereford, 2:00 Chase. The Benter model gave it a
-                  <strong className="text-white"> 62.2% win probability</strong> against the market's 30.8%.
-                  That's a <strong className="text-emerald-400">+31.4% edge</strong>.
+                  Kingcormac &mdash; Hereford, 2:00 Chase.
                 </p>
-                <p>
-                  All four models agreed&nbsp;&mdash; LightGBM at 93%, Random Forest at 94%, XGBoost at 94%.
-                  Kelly sizing calculated a <strong className="text-white">£13.50 stake</strong>.
-                </p>
-                <p>
-                  The horse won at 9/4. That's
-                  <strong className="text-emerald-400"> +£43.88 profit</strong> on a single race.
-                </p>
-                <p className="text-white font-medium">
-                  No guesswork. No tipster opinion. Just maths.
+                <div className="bg-gray-800/60 border border-gray-700/40 rounded-xl p-5 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Model probability</span>
+                    <span className="text-white font-semibold">62.2%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Market implied probability</span>
+                    <span className="text-white font-semibold">30.8%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Edge</span>
+                    <span className="text-emerald-400 font-bold">+31.4%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Suggested stake</span>
+                    <span className="text-white font-semibold">£13.50</span>
+                  </div>
+                  <div className="flex justify-between border-t border-gray-700/40 pt-2">
+                    <span className="text-gray-500">Result</span>
+                    <span className="text-emerald-400 font-bold">WON &mdash; +£43.88</span>
+                  </div>
+                </div>
+                <p className="text-white font-medium pt-2">
+                  This is what EquiNova is built to find: not just winners&nbsp;&mdash;
+                  mispriced winners.
                 </p>
               </div>
             </motion.div>
@@ -456,28 +476,36 @@ export function LandingPage() {
           className="max-w-3xl mx-auto px-4 sm:px-6 relative z-10"
         >
           <p className="text-amber-400 font-semibold uppercase tracking-widest text-xs mb-4 text-center">
-            The Foundation
+            The Model Behind The Model
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-8 text-center">
-            Built on a billion-dollar algorithm.
+            Inspired by the framework that changed
+            <br className="hidden sm:block" />
+            horse-race betting forever.
           </h2>
           <div className="space-y-5 text-gray-400 text-lg leading-relaxed">
             <p>
-              In the 1990s, a mathematician named William Benter built a model that
-              extracted over <strong className="text-white">$1 billion</strong> from Hong Kong horse racing.
-              His system wasn't luck. It was a conditional logit model that combined
-              horse form data with real-time market odds to find value the public
-              couldn't see.
+              William Benter became famous for using quantitative modelling to
+              find value in horse-racing markets at a level most bettors could
+              never match.
+            </p>
+            <p className="text-white font-medium text-xl border-l-2 border-amber-500 pl-5">
+              His core insight was simple: the real edge is not picking winners.
+              It's finding where the odds are wrong.
             </p>
             <p>
-              EquiNova is built on that same mathematical framework&nbsp;&mdash; adapted
-              for UK and Irish racing, powered by modern machine learning. A two-stage
-              Benter model runs at the core: Stage 1 calculates raw probabilities from
-              60+ features. Stage 2 integrates live market odds to find where the
-              bookmakers have it wrong.
+              EquiNova is built on that same principle.
+            </p>
+            <p>
+              Our engine estimates each horse's true win probability from 60+
+              variables, compares that against live market prices, and highlights
+              where value exists. Then it applies disciplined Kelly-based staking
+              so you know exactly how much to risk.
             </p>
             <p className="text-white font-medium">
-              This isn't a tipster with opinions. It's an engine with equations.
+              This is not a tip sheet.
+              <br />
+              It's a modern value-betting engine for UK &amp; Irish racing.
             </p>
           </div>
         </motion.div>
@@ -494,10 +522,10 @@ export function LandingPage() {
             className="text-center mb-16"
           >
             <p className="text-amber-400 font-semibold uppercase tracking-widest text-xs mb-4">
-              Three Steps
+              How It Works
             </p>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              How EquiNova works.
+              How EquiNova finds your edge.
             </h2>
           </motion.div>
 
@@ -512,20 +540,20 @@ export function LandingPage() {
               {
                 step: '01',
                 icon: Database,
-                title: 'We collect everything.',
-                desc: 'Form history, speed figures, jockey and trainer stats by distance and course, track conditions, market movements. 60+ features per runner, refreshed daily across every UK and Irish meeting.',
+                title: 'It builds a fair-price view of every race.',
+                desc: 'EquiNova processes 60+ variables per runner — form, speed, track conditions, trainer patterns, jockey performance, market behaviour, and more.',
               },
               {
                 step: '02',
                 icon: Brain,
-                title: '4 models analyse independently.',
-                desc: 'LightGBM, XGBoost, Random Forest, and the Benter conditional logit model each produce their own probability estimate. When multiple models agree on a pick, confidence is high.',
+                title: 'It compares real probability vs market price.',
+                desc: 'Using a Benter-inspired framework plus modern ML models, EquiNova estimates true win probability and spots where bookmaker odds are out of line.',
               },
               {
                 step: '03',
                 icon: Target,
-                title: 'You get picks with exact stakes.',
-                desc: 'Edge percentages, confidence scores, and Kelly criterion stakes sized to your bankroll. You see exactly why each pick was selected and how much to risk.',
+                title: 'It turns edge into action.',
+                desc: 'You get the pick, the edge %, the confidence, and the exact Kelly-sized stake based on your bankroll. No guesswork. No emotional staking. No blind bets.',
               },
             ].map(({ step, icon: Icon, title, desc }) => (
               <motion.div
@@ -608,8 +636,69 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── WHAT YOU GET ───────────────────────── */}
+      {/* ── TIPSTERS VS EQUINOVA ────────────────── */}
       <section className="py-20 sm:py-28 bg-gray-800/30">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6">
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: '-80px' }}
+            variants={fadeUp}
+            className="text-center mb-14"
+          >
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Tipsters sell opinions.
+              <br />
+              <span className="text-amber-400">EquiNova shows the maths.</span>
+            </h2>
+            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+              Most racing services ask for trust. EquiNova gives you a framework.
+            </p>
+          </motion.div>
+
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: '-80px' }}
+            variants={stagger}
+            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"
+          >
+            {[
+              { icon: BarChart3, label: 'Estimated probability' },
+              { icon: TrendingUp, label: 'Market probability' },
+              { icon: Target, label: 'Edge %' },
+              { icon: Brain, label: 'Model agreement' },
+              { icon: Activity, label: 'Exact stake sizing' },
+              { icon: LineChart, label: 'Historical pattern support' },
+            ].map(({ icon: Icon, label }) => (
+              <motion.div
+                key={label}
+                variants={fadeUp}
+                className="flex items-center gap-4 bg-gray-800/60 border border-gray-700/40 rounded-xl p-5"
+              >
+                <div className="w-10 h-10 bg-amber-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-5 h-5 text-amber-400" />
+                </div>
+                <span className="text-white font-medium">{label}</span>
+              </motion.div>
+            ))}
+          </motion.div>
+
+          <motion.p
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: '-80px' }}
+            variants={fadeUp}
+            className="text-center text-gray-400 mt-10 text-lg max-w-2xl mx-auto"
+          >
+            You're not blindly following a pick. You're making a bet with a
+            defined edge and controlled risk.
+          </motion.p>
+        </div>
+      </section>
+
+      {/* ── WHAT YOU GET ───────────────────────── */}
+      <section className="py-20 sm:py-28">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <motion.div
             initial="hidden"
@@ -641,8 +730,8 @@ export function LandingPage() {
               },
               {
                 icon: Brain,
-                title: '4 independent ML models',
-                desc: 'LightGBM, XGBoost, Random Forest, and Benter. Transparent confidence bars show where models agree.',
+                title: 'Benter-inspired engine + 3 ML models',
+                desc: 'A two-stage value detection system plus LightGBM, XGBoost, and Random Forest. Transparent confidence bars show where models agree.',
               },
               {
                 icon: Target,
@@ -655,7 +744,7 @@ export function LandingPage() {
                 desc: 'Market movement detection shows which horses are steaming or drifting. Probabilities recalculate with late money.',
               },
               {
-                icon: LineChart,
+                icon: Eye,
                 title: 'AI signal scanner',
                 desc: 'Discovers profitable 2-way and 3-way signal combinations backed by hundreds of historical bets.',
               },
@@ -682,7 +771,7 @@ export function LandingPage() {
       </section>
 
       {/* ── PRICING ────────────────────────────── */}
-      <section id="pricing" className="py-20 sm:py-28">
+      <section id="pricing" className="py-20 sm:py-28 bg-gray-800/30">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <motion.div
             initial="hidden"
@@ -695,10 +784,12 @@ export function LandingPage() {
               Pricing
             </p>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
-              Less than a pound a day.
+              One good edge can pay for the month.
             </h2>
             <p className="text-gray-400 text-lg max-w-xl mx-auto">
-              One winning pick pays for your entire month. Choose the plan that works for you.
+              For less than £1 a day, EquiNova gives you a model-driven view of
+              every UK &amp; Irish meeting&nbsp;&mdash; with probability, edge,
+              and staking built in.
             </p>
           </motion.div>
 
@@ -715,7 +806,8 @@ export function LandingPage() {
               period="/ month"
               features={[
                 'Daily analysis for every UK & Irish meeting',
-                '4 independent ML model predictions',
+                'Benter-inspired value detection engine',
+                '3 independent ML model predictions',
                 'Kelly criterion stake sizing',
                 'AI signal scanner with pattern matching',
                 'Live odds tracking & market movement',
@@ -733,7 +825,8 @@ export function LandingPage() {
               features={[
                 'Everything in Monthly',
                 'Daily analysis for every UK & Irish meeting',
-                '4 independent ML model predictions',
+                'Benter-inspired value detection engine',
+                '3 independent ML model predictions',
                 'Kelly criterion stake sizing',
                 'AI signal scanner with pattern matching',
                 'Full performance dashboard',
@@ -748,7 +841,7 @@ export function LandingPage() {
       </section>
 
       {/* ── FAQ ─────────────────────────────────── */}
-      <section className="py-20 sm:py-28 bg-gray-800/30">
+      <section className="py-20 sm:py-28">
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
           <motion.div
             initial="hidden"
@@ -772,19 +865,19 @@ export function LandingPage() {
             {[
               {
                 q: 'What exactly is EquiNova?',
-                a: 'An AI platform that analyses every UK and Irish horse race using four independent machine learning models. It identifies value bets — where our models see a higher win probability than the market implies — and tells you exactly how much to stake using Kelly criterion sizing.',
+                a: 'A quantitative betting engine for UK and Irish horse racing. It uses a Benter-inspired two-stage model plus three independent ML models to estimate true win probabilities, compare them against bookmaker odds, and identify mispriced runners — then tells you exactly how much to stake using the Kelly criterion.',
               },
               {
                 q: 'How is this different from a tipster?',
-                a: 'Tipsters give you opinions. EquiNova gives you maths. Every prediction comes with transparent model probabilities, edge percentages, confidence scores, and pattern-matched historical data. You can see exactly why each pick was selected.',
+                a: 'Tipsters give you opinions. EquiNova gives you a framework. Every prediction comes with estimated probability, market probability, edge percentage, model agreement, and Kelly-sized stakes. You can see exactly why each pick was selected and make an informed decision.',
+              },
+              {
+                q: 'What is the Benter-inspired model?',
+                a: 'It\'s a two-stage value detection system inspired by the mathematical framework William Benter used to find value in Hong Kong racing. Stage 1 estimates a horse\'s true win probability from 60+ features. Stage 2 compares that against live market odds to find where bookmakers have it wrong.',
               },
               {
                 q: 'Do I need technical knowledge?',
-                a: 'None. You log in, see today\'s races, and the picks are ready. Confidence bars, edge percentages, and stake sizes are all calculated for you. The AI does the heavy lifting.',
-              },
-              {
-                q: 'What is the Benter model?',
-                a: 'A two-stage system based on the work of William Benter, who used conditional logit models to extract over $1 billion from Hong Kong racing. Stage 1 calculates raw probabilities from 60+ horse features. Stage 2 integrates live market odds to find mispriced runners.',
+                a: 'None. You log in, see today\'s races, and the picks are ready with confidence bars, edge percentages, and exact stake sizes. The engine does the heavy lifting.',
               },
               {
                 q: 'Can I cancel at any time?',
@@ -822,17 +915,22 @@ export function LandingPage() {
           variants={fadeUp}
           className="relative z-10 max-w-3xl mx-auto px-4 sm:px-6 text-center"
         >
-          <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-6">
-            Your edge is waiting.
+          <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
+            Stop betting like a punter.
+          </h2>
+          <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-6">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500">
+              Start betting like a model.
+            </span>
           </h2>
           <p className="text-xl text-gray-300 mb-10 max-w-xl mx-auto">
-            Stop betting blind. Start betting with four machine learning models behind every pick.
+            The market is priced by professionals. Bet with an engine that fights back.
           </p>
           <button
             onClick={scrollToPricing}
             className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-gray-900 px-10 py-4 rounded-xl font-bold text-lg transition-all duration-200 transform hover:scale-105 inline-flex items-center gap-3 shadow-lg shadow-amber-500/20"
           >
-            Get Started Now
+            See Today's Picks
             <ArrowRight className="w-6 h-6" />
           </button>
         </motion.div>
