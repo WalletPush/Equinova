@@ -55,7 +55,7 @@ function Lightbox({ picks, startIndex, onClose }: { picks: typeof winningPicks; 
       onClick={onClose}
     >
       <div
-        className="relative max-w-lg w-full"
+        className="relative max-w-4xl w-full"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -85,20 +85,9 @@ function Lightbox({ picks, startIndex, onClose }: { picks: typeof winningPicks; 
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.2 }}
           src={pick.src}
-          alt={`${pick.horse} — ${pick.edge} edge, WON ${pick.profit}`}
+          alt={`${pick.horse} — WON`}
           className="w-full rounded-2xl border border-gray-700/60 shadow-2xl"
         />
-
-        <div className="flex items-center justify-between mt-4 px-1">
-          <div>
-            <p className="text-white font-bold text-lg">{pick.horse}</p>
-            <p className="text-gray-400 text-sm">{pick.venue} &middot; {pick.odds}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-emerald-400 font-bold text-lg">{pick.profit}</p>
-            <p className="text-amber-400 text-sm font-medium">{pick.edge} edge</p>
-          </div>
-        </div>
 
         <div className="flex justify-center gap-2 mt-4 sm:hidden">
           <button onClick={prev} className="bg-gray-800 rounded-lg p-2 text-gray-400 hover:text-white">
@@ -108,10 +97,6 @@ function Lightbox({ picks, startIndex, onClose }: { picks: typeof winningPicks; 
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
-
-        <p className="text-center text-gray-600 text-xs mt-3">
-          {index + 1} / {picks.length}
-        </p>
       </div>
     </motion.div>
   )
