@@ -267,12 +267,10 @@ export function LandingPage() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold leading-[1.1] tracking-tight mb-6">
-              4 Machine Learning Models.
-              <br />
-              60+ Data Points Per Horse.
+              Beat the bookmakers
               <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500">
-                One Clear Edge.
+                with a better algorithm.
               </span>
             </h1>
           </motion.div>
@@ -283,8 +281,9 @@ export function LandingPage() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="text-lg sm:text-xl text-gray-300 max-w-2xl mx-auto mb-10 leading-relaxed"
           >
-            EquiNova analyses every UK and Irish race card daily and tells you
-            exactly where the value is&nbsp;&mdash; with the stake size to match.
+            EquiNova scans every UK and Irish race card to find where the
+            bookmakers have priced it wrong&nbsp;&mdash; then tells you exactly
+            how much to stake.
           </motion.p>
 
           <motion.div
