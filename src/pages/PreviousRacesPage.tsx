@@ -462,6 +462,7 @@ export function PreviousRacesPage() {
               const mmKey = `${race.race_id}:${e.horse_id}`
               const mm = mmByKey.get(mmKey)
               if (!mm || mm.pattern_count === 0) continue
+              if (mm.trust_tier !== 'high') continue
 
               if (odds > MM_MAX_ODDS && mm.pattern_count < MM_LONGSHOT_PATTERNS) continue
 
