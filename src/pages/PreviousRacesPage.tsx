@@ -398,17 +398,16 @@ export function PreviousRacesPage() {
 
         {/* ── Top Picks Performance ──────────────────────────── */}
         {completed.length > 0 && (() => {
-          // Build one pick per race from mastermind matches: highest trust_score wins
-          const bestByRace = new Map<string, MastermindMatch>()
-          for (const m of mastermindMatches) {
-            if (m.pattern_count === 0) continue
-            const existing = bestByRace.get(m.race_id)
-            if (!existing || m.trust_score > existing.trust_score) {
-              bestByRace.set(m.race_id, m)
-            }
-          }
+          const MM_MIN_EDGE = 0.05
+          const MM_MAX_ODDS = 13.0
+          const MM_MIN_ENSEMBLE = 0.15
+          const MM_LONGSHOT_PATTERNS = 2
 
-          if (bestByRace.size === 0 && !mastermindLoading) return null
+          // Build mastermind lookup by race_id:horse_id
+          const mmByKey = new Map<string, MastermindMatch>()
+          for (const m of mastermindMatches) {
+            mmByKey.set(`${m.race_id}:${m.horse_id}`, m)
+          }
 
           // Cross-reference picks with race results
           interface PickResult {
@@ -416,17 +415,46 @@ export function PreviousRacesPage() {
             position: number | null
             sp: string
             won: boolean
-            profit: number // at £1 level stakes
+            profit: number
             courseName: string
           }
 
+          // For each completed race, find the best qualifying pick (same logic as Top Picks page)
           const pickResults: PickResult[] = []
-          for (const [raceId, mm] of bestByRace) {
-            const race = completed.find(r => r.race_id === raceId)
-            if (!race) continue
-            const runners = race.runners || []
-            const bareMM = bareHorseName(mm.horse_name)
 
+          for (const race of completed) {
+            const entries = race.topEntries || []
+            const runners = race.runners || []
+            if (entries.length === 0) continue
+
+            let bestPick: { entry: RaceEntry; mm: MastermindMatch; edge: number } | null = null
+
+            for (const e of entries) {
+              const openOdds = Number(e.opening_odds) || 0
+              const curOdds = Number(e.current_odds) || 0
+              const odds = openOdds > 1 ? openOdds : curOdds
+              const ensProba = Number(e.ensemble_proba) || 0
+
+              if (odds <= 1 || ensProba <= 0) continue
+              if (ensProba < MM_MIN_ENSEMBLE) continue
+
+              const edge = ensProba - (1 / odds)
+              if (edge < MM_MIN_EDGE) continue
+
+              const mmKey = `${race.race_id}:${e.horse_id}`
+              const mm = mmByKey.get(mmKey)
+              if (!mm || mm.pattern_count === 0) continue
+
+              if (odds > MM_MAX_ODDS && mm.pattern_count < MM_LONGSHOT_PATTERNS) continue
+
+              if (!bestPick || edge > bestPick.edge) {
+                bestPick = { entry: e, mm, edge }
+              }
+            }
+
+            if (!bestPick) continue
+
+            const bareMM = bareHorseName(bestPick.mm.horse_name)
             let matchedRunner: RaceRunner | undefined
             for (const r of runners) {
               const bn = bareHorseName(r.horse)
@@ -442,7 +470,7 @@ export function PreviousRacesPage() {
             const profit = won ? spToProfit(sp) : -1
 
             pickResults.push({
-              match: mm,
+              match: bestPick.mm,
               position: pos,
               sp,
               won,
@@ -450,6 +478,8 @@ export function PreviousRacesPage() {
               courseName: race.course_name,
             })
           }
+
+          if (pickResults.length === 0 && !mastermindLoading) return null
 
           pickResults.sort((a, b) => raceTimeToMinutes(a.match.off_time) - raceTimeToMinutes(b.match.off_time))
 
