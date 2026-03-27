@@ -8,6 +8,7 @@ import { supabase, Race, type RaceEntry } from '@/lib/supabase'
 import { detectProfitableSignals, type ProfitableSignal } from '@/lib/confluenceScore'
 import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { useMastermind, type MastermindMatch } from '@/hooks/useMastermind'
+import { useBankroll } from '@/hooks/useBankroll'
 import { formatTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
 import { 
   Calendar,
@@ -156,6 +157,7 @@ export function PreviousRacesPage() {
   const [expandedRaces, setExpandedRaces] = useState<Set<string>>(new Set())
   const lifetimeSignalStats = useLifetimeSignalStats()
   const { matches: mastermindMatches, isLoading: mastermindLoading } = useMastermind(selectedDate)
+  const { bankroll } = useBankroll()
 
   // ─── Live UK clock (ticks every second when viewing today) ──────
   const [ukTime, setUkTime] = useState(() =>
@@ -409,17 +411,33 @@ export function PreviousRacesPage() {
             mmByKey.set(`${m.race_id}:${m.horse_id}`, m)
           }
 
-          // Cross-reference picks with race results
+          // Kelly computation (mirrors AutoBetsPage)
+          function kellyTrustMultiplier(ts: number): number {
+            if (ts >= 80) return 1.5
+            if (ts >= 60) return 1.0
+            if (ts >= 30) return 0.5
+            return 0.25
+          }
+          function kellyStake(ensProba: number, odds: number, trustScore: number, bank: number): number | null {
+            if (odds <= 1 || bank <= 0 || ensProba <= 0) return null
+            const edge = ensProba - 1 / odds
+            if (edge <= 0.01) return null
+            const k = edge / (odds - 1)
+            const frac = Math.min((k / 4) * kellyTrustMultiplier(trustScore), 0.05)
+            const stake = Math.round(bank * frac * 2) / 2
+            return stake >= 1 ? stake : null
+          }
+
           interface PickResult {
             match: MastermindMatch
             position: number | null
             sp: string
             won: boolean
             profit: number
+            stake: number
             courseName: string
           }
 
-          // For each completed race, find the best qualifying pick (same logic as Top Picks page)
           const pickResults: PickResult[] = []
 
           for (const race of completed) {
@@ -454,6 +472,13 @@ export function PreviousRacesPage() {
 
             if (!bestPick) continue
 
+            // Kelly gate — skip if no valid stake
+            const openO = Number(bestPick.entry.opening_odds) || 0
+            const curO = Number(bestPick.entry.current_odds) || 0
+            const stakeOdds = openO > 1 ? openO : curO
+            const stake = kellyStake(Number(bestPick.entry.ensemble_proba), stakeOdds, bestPick.mm.trust_score, bankroll)
+            if (!stake) continue
+
             const bareMM = bareHorseName(bestPick.mm.horse_name)
             let matchedRunner: RaceRunner | undefined
             for (const r of runners) {
@@ -467,7 +492,7 @@ export function PreviousRacesPage() {
             const pos = matchedRunner?.position ?? null
             const sp = matchedRunner?.sp ?? ''
             const won = pos === 1
-            const profit = won ? spToProfit(sp) : -1
+            const profit = won ? stake * spToProfit(sp) : -stake
 
             pickResults.push({
               match: bestPick.mm,
@@ -475,6 +500,7 @@ export function PreviousRacesPage() {
               sp,
               won,
               profit,
+              stake,
               courseName: race.course_name,
             })
           }
@@ -518,11 +544,12 @@ export function PreviousRacesPage() {
                       <TrustIcon className="w-3 h-3" />
                       {tc.label}
                     </span>
+                    <span className="text-[10px] text-gray-500 min-w-[32px] text-right">£{p.stake.toFixed(0)}</span>
                     {p.sp && <span className="text-sm font-mono text-gray-300 min-w-[40px] text-right">{p.sp}</span>}
                     <span className={`text-sm font-semibold min-w-[56px] text-right ${
                       p.won ? 'text-green-400' : 'text-red-400'
                     }`}>
-                      {p.won ? '+' : ''}£{p.profit.toFixed(2)}
+                      {p.profit > 0 ? '+' : ''}£{p.profit.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -546,7 +573,7 @@ export function PreviousRacesPage() {
                   <div className={`text-lg font-bold ${totalProfit > 0 ? 'text-green-400' : 'text-red-400'}`}>
                     {totalProfit > 0 ? '+' : ''}£{totalProfit.toFixed(2)}
                   </div>
-                  <div className="text-[10px] text-gray-500">net P&L (£1 stakes)</div>
+                  <div className="text-[10px] text-gray-500">net P&L (Kelly stakes)</div>
                 </div>
               </div>
 
@@ -593,7 +620,7 @@ export function PreviousRacesPage() {
 
               {pickResults.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-700 flex items-center justify-between text-xs">
-                  <span className="text-gray-400">£1 level stakes · {winners.length}W / {losers.length}L · Strike rate {pickResults.length > 0 ? Math.round((winners.length / pickResults.length) * 100) : 0}%</span>
+                  <span className="text-gray-400">Kelly stakes · {winners.length}W / {losers.length}L · Strike rate {pickResults.length > 0 ? Math.round((winners.length / pickResults.length) * 100) : 0}%</span>
                   <span className={`font-semibold ${totalProfit > 0 ? 'text-green-400' : totalProfit < 0 ? 'text-red-400' : 'text-gray-400'}`}>
                     Net P&L: {totalProfit > 0 ? '+' : ''}£{totalProfit.toFixed(2)}
                   </span>
