@@ -1,158 +1,29 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
-import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
-import { ProfitableSignalBadges } from '@/components/ProfitableSignalBadges'
-import { supabase, Race, type RaceEntry } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { logger } from '@/lib/logger'
-import { detectProfitableSignals, type ProfitableSignal } from '@/lib/confluenceScore'
 import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
-import { useMastermind, type MastermindMatch } from '@/hooks/useMastermind'
+import { useMastermind } from '@/hooks/useMastermind'
 import { useBankroll } from '@/hooks/useBankroll'
-import { formatTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
-import { 
+import { getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
+import {
+  ResultsTopPicksPerformance,
+  CompletedRaceCard,
+  DailyIntelligenceReport,
+  PendingRacesSection,
+  type ResultsRace,
+} from '@/components/results'
+import {
   Calendar,
   Clock,
-  MapPin,
-  Trophy,
-  Users,
   ChevronLeft,
   ChevronRight,
   Search,
-  ChevronDown,
-  ChevronUp,
   CheckCircle2,
-  Timer,
-  Medal,
-  Brain,
-  TrendingUp,
-  TrendingDown,
-  Zap,
-  BarChart3,
-  Target,
-  Lightbulb,
-  AlertTriangle,
-  Loader2,
-  Shield,
-  ShieldCheck,
-  XCircle
 } from 'lucide-react'
 
-// ─── Runner type from race_runners table ────────────────────────────
-interface RaceRunner {
-  id: number
-  race_id: string
-  position: number | null
-  horse: string
-  number: number
-  sp: string
-  btn: number | null
-  ovr_btn: number | null
-  time: string | null
-  comment: string | null
-}
-
-// ─── Parse outcome from comment for horses that didn't finish ───────
-// Returns "Fell", "Pulled Up", "Unseated", "Brought Down", "Refused", or "DNF"
-function parseNonFinishOutcome(runner: RaceRunner | undefined): string {
-  if (!runner) return 'N/R'
-  const c = (runner.comment || '').toLowerCase()
-  if (c.includes('unseated')) return 'Unseated'
-  if (c.includes('fell')) return 'Fell'
-  if (c.includes('pulled up')) return 'Pulled Up'
-  if (c.includes('brought down')) return 'Brought Down'
-  if (c.includes('refused')) return 'Refused'
-  if (c.includes('slipped up')) return 'Slipped Up'
-  if (c.includes('carried out')) return 'Carried Out'
-  // If they're in race_runners but no position and no clear outcome, they started but didn't finish
-  return 'DNF'
-}
-
-// ─── Extended race type with runners ────────────────────────────────
-interface ResultsRace extends Race {
-  runners?: RaceRunner[]
-}
-
-// ─── Strip country suffix e.g. "(IRE)", "(GB)", "(FR)" for matching ─
-function bareHorseName(name: string): string {
-  return name.replace(/\s*\([A-Z]{2,3}\)\s*$/, '').toLowerCase().trim()
-}
-
-// ─── Parse fractional SP string to decimal profit (£1 level stake) ──
-function spToProfit(sp: string | null): number {
-  if (!sp) return 0
-  const s = sp.trim().toLowerCase()
-  if (s === 'evens' || s === 'evs') return 1
-  if (s.includes('/')) {
-    const [num, den] = s.split('/')
-    const n = parseFloat(num), d = parseFloat(den)
-    if (d > 0) return n / d
-  }
-  const dec = parseFloat(s)
-  if (!isNaN(dec) && dec > 1) return dec - 1
-  return 0
-}
-
-// ─── Medal colors for positions ─────────────────────────────────────
-function positionBadge(pos: number | null) {
-  if (pos === 1) return { bg: 'bg-yellow-500', text: 'text-gray-900', label: '1st' }
-  if (pos === 2) return { bg: 'bg-gray-400', text: 'text-gray-900', label: '2nd' }
-  if (pos === 3) return { bg: 'bg-amber-600', text: 'text-white', label: '3rd' }
-  if (pos) return { bg: 'bg-gray-600', text: 'text-white', label: `${pos}th` }
-  return { bg: 'bg-gray-700', text: 'text-gray-400', label: '-' }
-}
-
-/**
- * For each model, find its top pick among horses that actually ran.
- * Returns a map: horseName (bare) → list of model labels that picked it.
- */
-function getModelPicksMap(
-  entries: import('@/lib/supabase').RaceEntry[] | undefined,
-  runners: RaceRunner[] | undefined
-): Map<string, { label: string; color: string }[]> {
-  const map = new Map<string, { label: string; color: string }[]>()
-  if (!entries || entries.length === 0) return map
-
-  const ranNames = runners && runners.length > 0
-    ? new Set(runners.map(r => bareHorseName(r.horse)))
-    : null
-
-  for (const model of MODEL_DEFS) {
-    const f = model.field as keyof typeof entries[0]
-    const sorted = [...entries]
-      .filter(e => (e[f] as number) > 0)
-      .sort((a, b) => (b[f] as number) - (a[f] as number))
-
-    let pick: typeof entries[0] | null = null
-    if (ranNames) {
-      for (const entry of sorted) {
-        const bn = bareHorseName(entry.horse_name)
-        let found = ranNames.has(bn)
-        if (!found) {
-          for (const rn of ranNames) {
-            if (rn.startsWith(bn) || bn.startsWith(rn)) { found = true; break }
-          }
-        }
-        if (found) { pick = entry; break }
-      }
-    } else {
-      pick = sorted[0] || null
-    }
-
-    if (pick) {
-      const bn = bareHorseName(pick.horse_name)
-      const existing = map.get(bn) || []
-      existing.push({ label: model.label, color: model.color })
-      map.set(bn, existing)
-    }
-  }
-
-  return map
-}
-
 export function PreviousRacesPage() {
-  // ─── Default to today (UK timezone) ─────────────────────────────
   const [selectedDate, setSelectedDate] = useState(() => getUKDate())
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedRaces, setExpandedRaces] = useState<Set<string>>(new Set())
@@ -160,7 +31,6 @@ export function PreviousRacesPage() {
   const { matches: mastermindMatches, isLoading: mastermindLoading } = useMastermind(selectedDate)
   const { bankroll } = useBankroll()
 
-  // ─── Live UK clock (ticks every second when viewing today) ──────
   const [ukTime, setUkTime] = useState(() =>
     new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', second: '2-digit' })
   )
@@ -177,12 +47,10 @@ export function PreviousRacesPage() {
     return () => clearInterval(tick)
   }, [isToday])
 
-  // ─── Daily analysis state ────────────────────────────────────────
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisExpanded, setAnalysisExpanded] = useState(true)
   const queryClient = useQueryClient()
 
-  // Fetch existing analysis for the selected date
   const { data: analysisData } = useQuery({
     queryKey: ['daily-analysis', selectedDate],
     queryFn: async () => {
@@ -204,7 +72,6 @@ export function PreviousRacesPage() {
         body: { date: selectedDate }
       })
       if (error) throw error
-      // Invalidate to refetch stored analysis
       queryClient.invalidateQueries({ queryKey: ['daily-analysis', selectedDate] })
     } catch (err) {
       logger.error('Analysis failed:', err)
@@ -213,7 +80,6 @@ export function PreviousRacesPage() {
     }
   }
 
-  // ─── Data fetching ──────────────────────────────────────────────
   const { data: racesData, isLoading, error, isFetching } = useQuery({
     queryKey: ['results-races', selectedDate],
     queryFn: async () => {
@@ -224,17 +90,15 @@ export function PreviousRacesPage() {
       if (!data?.data) throw new Error(data?.error?.message || 'Race data API failed')
       return data.data
     },
-    staleTime: isToday ? 1000 * 30 : 1000 * 60 * 10, // 30s today, 10min historical
-    refetchInterval: isToday ? 60_000 : false,         // auto-refresh every 60s for today
+    staleTime: isToday ? 1000 * 30 : 1000 * 60 * 10,
+    refetchInterval: isToday ? 60_000 : false,
     retry: 3,
     retryDelay: 1000,
     placeholderData: keepPreviousData
   })
 
   const allRaces: ResultsRace[] = (racesData as any)?.races || []
-  const completedRaces = (racesData as any)?.completed_races ?? 0
 
-  // ─── Split into completed & pending, apply search ───────────────
   const { completed, pending } = useMemo(() => {
     const matchesSearch = (race: ResultsRace) =>
       race.course_name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -251,15 +115,12 @@ export function PreviousRacesPage() {
       }
     }
 
-    // Completed: most recent result first (descending off_time)
     done.sort((a, b) => raceTimeToMinutes(b.off_time) - raceTimeToMinutes(a.off_time))
-    // Pending: chronological (next race first)
     waiting.sort((a, b) => raceTimeToMinutes(a.off_time) - raceTimeToMinutes(b.off_time))
 
     return { completed: done, pending: waiting }
   }, [allRaces, searchTerm])
 
-  // ─── Toggle expand/collapse ─────────────────────────────────────
   const toggleExpand = (raceId: string) => {
     setExpandedRaces(prev => {
       const next = new Set(prev)
@@ -269,41 +130,6 @@ export function PreviousRacesPage() {
     })
   }
 
-  // ─── Find ML predicted winner for a race ────────────────────────
-  // Golden rule: if the horse RAN, it's the ML pick (fell/PU/UR doesn't matter).
-  // Only skip to next best if the top pick was a genuine NON-RUNNER
-  // (i.e. does NOT appear in race_runners at all).
-  const getMlPredictedWinner = (race: ResultsRace) => {
-    if (!race.topEntries || race.topEntries.length === 0) return null
-
-    // If we have results, check each topEntry against the runners list
-    if (race.runners && race.runners.length > 0) {
-      // All horses that actually ran (present in race_runners = they started)
-      const ranNames = new Set(race.runners.map(r => bareHorseName(r.horse)))
-
-      for (const entry of race.topEntries) {
-        const bareName = bareHorseName(entry.horse_name)
-        let found = ranNames.has(bareName)
-        if (!found) {
-          for (const rn of ranNames) {
-            if (rn.startsWith(bareName) || bareName.startsWith(rn)) {
-              found = true
-              break
-            }
-          }
-        }
-        if (found) return entry
-      }
-
-      // No topEntry matched any runner — return null
-      return null
-    }
-
-    // Pre-race (no runners data yet) — return top ML pick
-    return race.topEntries[0]
-  }
-
-  // ─── Date navigation ───────────────────────────────────────────
   const goToPreviousDay = () => {
     const date = new Date(selectedDate + 'T12:00:00')
     date.setDate(date.getDate() - 1)
@@ -325,7 +151,6 @@ export function PreviousRacesPage() {
 
   const canGoNext = selectedDate < ukToday
 
-  // ─── Render ─────────────────────────────────────────────────────
   return (
     <AppLayout>
       <div className="p-4 space-y-5">
@@ -383,7 +208,6 @@ export function PreviousRacesPage() {
             )}
           </div>
 
-          {/* Progress indicator */}
           {!isLoading && allRaces.length > 0 && (
             <div className="mt-3 flex items-center space-x-3">
               <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
@@ -400,453 +224,26 @@ export function PreviousRacesPage() {
         </div>
 
         {/* ── Top Picks Performance ──────────────────────────── */}
-        {completed.length > 0 && (() => {
-          const MM_MIN_EDGE = 0.05
-          const MM_MAX_ODDS = 13.0
-          const MM_MIN_ENSEMBLE = 0.15
-          const MM_LONGSHOT_PATTERNS = 2
-
-          // Build mastermind lookup by race_id:horse_id
-          const mmByKey = new Map<string, MastermindMatch>()
-          for (const m of mastermindMatches) {
-            mmByKey.set(`${m.race_id}:${m.horse_id}`, m)
-          }
-
-          // Kelly computation (mirrors AutoBetsPage)
-          function kellyTrustMultiplier(ts: number): number {
-            if (ts >= 80) return 1.5
-            if (ts >= 60) return 1.0
-            if (ts >= 30) return 0.5
-            return 0.25
-          }
-          function kellyStake(ensProba: number, odds: number, trustScore: number, bank: number): number | null {
-            if (odds <= 1 || bank <= 0 || ensProba <= 0) return null
-            const edge = ensProba - 1 / odds
-            if (edge <= 0.01) return null
-            const k = edge / (odds - 1)
-            const frac = Math.min((k / 4) * kellyTrustMultiplier(trustScore), 0.05)
-            const stake = Math.round(bank * frac * 2) / 2
-            return stake >= 1 ? stake : null
-          }
-
-          interface PickResult {
-            match: MastermindMatch
-            position: number | null
-            sp: string
-            won: boolean
-            profit: number
-            stake: number
-            courseName: string
-          }
-
-          const pickResults: PickResult[] = []
-
-          for (const race of completed) {
-            const entries = race.topEntries || []
-            const runners = race.runners || []
-            if (entries.length === 0) continue
-
-            let bestPick: { entry: RaceEntry; mm: MastermindMatch; edge: number } | null = null
-
-            for (const e of entries) {
-              const openOdds = Number(e.opening_odds) || 0
-              const curOdds = Number(e.current_odds) || 0
-              const odds = openOdds > 1 ? openOdds : curOdds
-              const ensProba = Number(e.ensemble_proba) || 0
-
-              if (odds <= 1 || ensProba <= 0) continue
-              if (ensProba < MM_MIN_ENSEMBLE) continue
-
-              const edge = ensProba - (1 / odds)
-              if (edge < MM_MIN_EDGE) continue
-
-              const mmKey = `${race.race_id}:${e.horse_id}`
-              const mm = mmByKey.get(mmKey)
-              if (!mm || mm.pattern_count === 0) continue
-              if (mm.trust_tier !== 'high') continue
-
-              if (odds > MM_MAX_ODDS && mm.pattern_count < MM_LONGSHOT_PATTERNS) continue
-
-              if (!bestPick || edge > bestPick.edge) {
-                bestPick = { entry: e, mm, edge }
-              }
-            }
-
-            if (!bestPick) continue
-
-            // Kelly gate — skip if no valid stake
-            const openO = Number(bestPick.entry.opening_odds) || 0
-            const curO = Number(bestPick.entry.current_odds) || 0
-            const stakeOdds = openO > 1 ? openO : curO
-            const stake = kellyStake(Number(bestPick.entry.ensemble_proba), stakeOdds, bestPick.mm.trust_score, bankroll)
-            if (!stake) continue
-
-            const bareMM = bareHorseName(bestPick.mm.horse_name)
-            let matchedRunner: RaceRunner | undefined
-            for (const r of runners) {
-              const bn = bareHorseName(r.horse)
-              if (bn === bareMM || bn.startsWith(bareMM) || bareMM.startsWith(bn)) {
-                matchedRunner = r
-                break
-              }
-            }
-
-            const pos = matchedRunner?.position ?? null
-            const sp = matchedRunner?.sp ?? ''
-            const won = pos === 1
-            const profit = won ? stake * spToProfit(sp) : -stake
-
-            pickResults.push({
-              match: bestPick.mm,
-              position: pos,
-              sp,
-              won,
-              profit,
-              stake,
-              courseName: race.course_name,
-            })
-          }
-
-          if (pickResults.length === 0 && !mastermindLoading) return null
-
-          pickResults.sort((a, b) => raceTimeToMinutes(a.match.off_time) - raceTimeToMinutes(b.match.off_time))
-
-          const winners = pickResults.filter(p => p.won)
-          const losers = pickResults.filter(p => !p.won)
-          const totalProfit = pickResults.reduce((s, p) => s + p.profit, 0)
-
-          const trustConfig: Record<string, { bg: string; border: string; text: string; icon: typeof ShieldCheck; label: string }> = {
-            high:   { bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400', icon: ShieldCheck, label: 'Strong' },
-            medium: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: Shield, label: 'Moderate' },
-            low:    { bg: 'bg-orange-500/15', border: 'border-orange-500/30', text: 'text-orange-400', icon: AlertTriangle, label: 'Weak' },
-          }
-          const defaultTrust = { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: Brain, label: 'No signals' }
-
-          const renderPick = (p: PickResult, i: number) => {
-            const tc = trustConfig[p.match.trust_tier] ?? defaultTrust
-            const TrustIcon = tc.icon
-            return (
-              <div key={`${p.match.race_id}-${i}`} className="py-2 px-3 bg-gray-800/50 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3 min-w-0">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      p.won ? 'bg-yellow-500' : 'bg-red-500/30'
-                    }`}>
-                      {p.won
-                        ? <Trophy className="w-3 h-3 text-gray-900" />
-                        : <XCircle className="w-3 h-3 text-red-400" />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-white truncate">{p.match.horse_name}</div>
-                      <div className="text-[10px] text-gray-500">{p.courseName} · {formatTime(p.match.off_time)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-3 flex-shrink-0">
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${tc.bg} ${tc.text} border ${tc.border}`}>
-                      <TrustIcon className="w-3 h-3" />
-                      {tc.label}
-                    </span>
-                    <span className="text-[10px] text-gray-500 min-w-[32px] text-right">£{p.stake.toFixed(0)}</span>
-                    {p.sp && <span className="text-sm font-mono text-gray-300 min-w-[40px] text-right">{p.sp}</span>}
-                    <span className={`text-sm font-semibold min-w-[56px] text-right ${
-                      p.won ? 'text-green-400' : 'text-red-400'
-                    }`}>
-                      {p.profit > 0 ? '+' : ''}£{p.profit.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )
-          }
-
-          return (
-            <div className="bg-gradient-to-b from-gray-800/80 to-gray-800/40 border border-gray-700 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-2">
-                  <Target className="w-5 h-5 text-yellow-400" />
-                  <h2 className="text-base font-semibold text-white">
-                    Top Picks
-                    <span className="ml-2 text-sm font-normal text-gray-400">
-                      {pickResults.length} pick{pickResults.length !== 1 ? 's' : ''} from {completed.length} race{completed.length !== 1 ? 's' : ''}
-                    </span>
-                  </h2>
-                </div>
-                <div className="text-right">
-                  <div className={`text-lg font-bold ${totalProfit > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {totalProfit > 0 ? '+' : ''}£{totalProfit.toFixed(2)}
-                  </div>
-                  <div className="text-[10px] text-gray-500">net P&L (Kelly stakes)</div>
-                </div>
-              </div>
-
-              {mastermindLoading && pickResults.length === 0 && (
-                <div className="flex items-center justify-center py-4 space-x-2">
-                  <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
-                  <span className="text-sm text-gray-400">Loading signals…</span>
-                </div>
-              )}
-
-              {pickResults.length > 0 && (
-                <div className="space-y-3">
-                  {/* Winners */}
-                  {winners.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <Trophy className="w-3.5 h-3.5 text-green-400" />
-                        <span className="text-xs font-semibold text-green-400 uppercase tracking-wider">
-                          Winners ({winners.length})
-                        </span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {winners.map((p, i) => renderPick(p, i))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Losers */}
-                  {losers.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <XCircle className="w-3.5 h-3.5 text-red-400" />
-                        <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">
-                          Losers ({losers.length})
-                        </span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {losers.map((p, i) => renderPick(p, i))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {pickResults.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-700 flex items-center justify-between text-xs">
-                  <span className="text-gray-400">Kelly stakes · {winners.length}W / {losers.length}L · Strike rate {pickResults.length > 0 ? Math.round((winners.length / pickResults.length) * 100) : 0}%</span>
-                  <span className={`font-semibold ${totalProfit > 0 ? 'text-green-400' : totalProfit < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                    Net P&L: {totalProfit > 0 ? '+' : ''}£{totalProfit.toFixed(2)}
-                  </span>
-                </div>
-              )}
-            </div>
-          )
-        })()}
+        {completed.length > 0 && (
+          <ResultsTopPicksPerformance
+            completed={completed}
+            mastermindMatches={mastermindMatches}
+            mastermindLoading={mastermindLoading}
+            bankroll={bankroll}
+          />
+        )}
 
         {/* ── Daily Intelligence Panel ─────────────────────────── */}
         {completed.length > 0 && (
           <div className="space-y-3">
-            {/* Analysis button or existing analysis */}
-            {!analysisData ? (
-              <button
-                onClick={runAnalysis}
-                disabled={isAnalyzing || pending.length > 0}
-                className="w-full bg-gradient-to-r from-yellow-500/20 to-amber-500/20 border border-yellow-500/40 rounded-xl p-4 hover:from-yellow-500/30 hover:to-amber-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="flex items-center justify-center space-x-3">
-                  {isAnalyzing ? (
-                    <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
-                  ) : (
-                    <Brain className="w-5 h-5 text-yellow-400" />
-                  )}
-                  <span className="text-yellow-400 font-semibold">
-                    {isAnalyzing ? 'Analyzing...' : 'Assess Results — Generate Daily Intelligence'}
-                  </span>
-                </div>
-                {pending.length > 0 && !isAnalyzing && (
-                  <p className="text-xs text-gray-500 mt-1">Available once all races are completed</p>
-                )}
-              </button>
-            ) : (
-              <div className="bg-gray-800/90 border border-yellow-500/30 rounded-xl">
-                {/* Header */}
-                <button
-                  onClick={() => setAnalysisExpanded(!analysisExpanded)}
-                  className="w-full flex items-center justify-between p-4 hover:bg-gray-800 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Brain className="w-5 h-5 text-yellow-400" />
-                    <h2 className="text-base font-semibold text-white">Daily Intelligence Report</h2>
-                    <span className="text-xs bg-yellow-500/15 text-yellow-400 px-2 py-0.5 rounded">
-                      {analysisData.completed_races} races analyzed
-                    </span>
-                  </div>
-                  {analysisExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-                </button>
-
-                {analysisExpanded && (
-                  <div className="px-4 pb-4 space-y-4">
-                    {/* ML Accuracy Cards */}
-                    {analysisData.ml_accuracy && (
-                      <div>
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">ML Model Performance</h3>
-                        <div className="grid grid-cols-5 gap-2">
-                          {Object.entries(analysisData.ml_accuracy as Record<string, any>)
-                            .sort(([,a]: any, [,b]: any) => b.win_rate - a.win_rate)
-                            .map(([model, stats]: [string, any]) => (
-                            <div key={model} className={`rounded-lg p-2.5 text-center ${
-                              stats.win_rate >= 30 ? 'bg-green-500/10 border border-green-500/20' :
-                              stats.win_rate >= 20 ? 'bg-yellow-500/10 border border-yellow-500/20' :
-                              'bg-gray-700/30 border border-gray-700'
-                            }`}>
-                              <div className="text-[10px] text-gray-400 uppercase font-medium">{model}</div>
-                              <div className={`text-lg font-bold ${
-                                stats.win_rate >= 30 ? 'text-green-400' : stats.win_rate >= 20 ? 'text-yellow-400' : 'text-gray-300'
-                              }`}>{stats.win_rate}%</div>
-                              <div className="text-[10px] text-gray-500">{stats.wins}/{stats.picks} wins</div>
-                              {stats.roi_pct !== undefined && (
-                                <div className={`text-[10px] font-semibold mt-0.5 ${
-                                  stats.roi_pct > 0 ? 'text-green-400' : stats.roi_pct < 0 ? 'text-red-400' : 'text-gray-500'
-                                }`}>
-                                  {stats.roi_pct > 0 ? '+' : ''}{stats.roi_pct}% ROI
-                                </div>
-                              )}
-                              {stats.profit !== undefined && (
-                                <div className={`text-[10px] ${
-                                  stats.profit > 0 ? 'text-green-500/70' : stats.profit < 0 ? 'text-red-500/70' : 'text-gray-600'
-                                }`}>
-                                  {stats.profit > 0 ? '+' : ''}&pound;{stats.profit.toFixed(2)}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Signal Performance Table */}
-                    {(() => {
-                      const signalLabels: Record<string, string> = {
-                        steamer_ml_pick: 'Backed + ML Pick',
-                        ml_ratings_consensus: 'ML + RPR + TS',
-                        ratings_consensus: 'RPR + TS Consensus',
-                        ml_pick_top_rpr: 'ML Pick + Top RPR',
-                        ml_top_pick: 'ML Top Pick',
-                        top_rpr: 'Top RPR in Field',
-                        top_ts: 'Top Topspeed',
-                        steamer: 'Market Confidence',
-                        single_trainer: 'Single Trainer Entry',
-                        speed_standout: 'Speed Figure Standout',
-                        drifter: 'Market Drifter',
-                        trainer_form: 'Trainer in Form (21d)',
-                        jockey_form: 'Jockey in Form (21d)',
-                        course_specialist: 'Course Specialist',
-                        distance_form: 'Distance Specialist',
-                        steamer_single_trainer: 'Backed + Single Trainer',
-                        steamer_trainer_form: 'Backed + Trainer Form',
-                        triple_signal: 'Triple Signal',
-                        ml_pick_trainer_form: 'ML + Trainer Form',
-                        single_trainer_in_form: 'Single Trainer in Form',
-                        steamer_jockey_form: 'Backed + Jockey Form',
-                        ml_pick_course_specialist: 'ML + Course Specialist'
-                      }
-
-                      // Gather all signal stats from all the _stats fields
-                      const allStats: any[] = []
-                      const addStat = (data: any) => {
-                        if (data && data.occurrences > 0) allStats.push(data)
-                      }
-                      addStat(analysisData.steamer_stats)
-                      addStat(analysisData.single_trainer_stats)
-                      addStat(analysisData.top_rpr_stats)
-                      addStat(analysisData.top_ts_stats)
-                      addStat(analysisData.trainer_form_stats)
-                      addStat(analysisData.jockey_form_stats)
-                      addStat(analysisData.course_specialist_stats)
-                      addStat(analysisData.distance_specialist_stats)
-                      addStat(analysisData.speed_figure_stats)
-                      if (analysisData.combined_signal_stats) {
-                        for (const s of Object.values(analysisData.combined_signal_stats as Record<string, any>)) {
-                          addStat(s)
-                        }
-                      }
-                      allStats.sort((a, b) => b.win_rate - a.win_rate)
-
-                      if (allStats.length === 0) return null
-                      return (
-                        <div>
-                          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Signal Performance &amp; ROI (£1 Level Stakes)</h3>
-                          <div className="flex items-center justify-between py-1 px-3 mb-1">
-                            <span className="text-[10px] text-gray-600 uppercase">Signal</span>
-                            <div className="flex items-center space-x-3">
-                              <span className="text-[10px] text-gray-600 uppercase min-w-[36px] text-right">Bets</span>
-                              <span className="text-[10px] text-gray-600 uppercase min-w-[40px] text-right">Win%</span>
-                              <span className="text-[10px] text-gray-600 uppercase min-w-[52px] text-right">P&amp;L</span>
-                              <span className="text-[10px] text-gray-600 uppercase min-w-[44px] text-right">ROI</span>
-                            </div>
-                          </div>
-                          <div className="space-y-1">
-                            {allStats.map((s: any) => {
-                              const label = signalLabels[s.signal_type] || s.signal_type
-                              const isCompound = s.signal_type?.includes('_') && !['single_trainer','ml_top_pick','top_rpr','top_ts','trainer_form','jockey_form','course_specialist','distance_form','speed_standout'].includes(s.signal_type)
-                              const hasRoi = s.roi_pct !== undefined && s.roi_pct !== null
-                              const profit = s.profit ?? 0
-                              return (
-                                <div key={s.signal_type} className={`flex items-center justify-between py-1.5 px-3 rounded ${
-                                  hasRoi && profit > 0 ? 'bg-green-500/10' : s.win_rate >= 40 ? 'bg-green-500/10' : s.win_rate >= 20 ? 'bg-gray-700/30' : 'bg-gray-800/30'
-                                }`}>
-                                  <div className="flex items-center space-x-2 flex-1 min-w-0">
-                                    {isCompound ? <Zap className="w-3 h-3 text-yellow-400 flex-shrink-0" /> : <Target className="w-3 h-3 text-gray-500 flex-shrink-0" />}
-                                    <span className="text-sm text-gray-300 truncate">{label}</span>
-                                  </div>
-                                  <div className="flex items-center space-x-3 flex-shrink-0">
-                                    <span className="text-xs text-gray-500 min-w-[36px] text-right">{s.occurrences} bets</span>
-                                    <span className={`text-xs font-bold min-w-[40px] text-right ${
-                                      s.win_rate >= 40 ? 'text-green-400' : s.win_rate >= 20 ? 'text-yellow-400' : s.win_rate <= 10 ? 'text-red-400' : 'text-gray-300'
-                                    }`}>{s.win_rate}%</span>
-                                    {hasRoi && (
-                                      <>
-                                        <span className={`text-xs font-semibold min-w-[52px] text-right ${
-                                          profit > 0 ? 'text-green-400' : profit < 0 ? 'text-red-400' : 'text-gray-500'
-                                        }`}>
-                                          {profit > 0 ? '+' : ''}&pound;{profit.toFixed(2)}
-                                        </span>
-                                        <span className={`text-[10px] font-bold min-w-[44px] text-right px-1 py-0.5 rounded ${
-                                          s.roi_pct > 0 ? 'bg-green-500/15 text-green-400' : s.roi_pct < -20 ? 'bg-red-500/15 text-red-400' : 'text-gray-500'
-                                        }`}>
-                                          {s.roi_pct > 0 ? '+' : ''}{s.roi_pct}%
-                                        </span>
-                                      </>
-                                    )}
-                                    {!hasRoi && (
-                                      <span className="text-xs text-gray-500 min-w-[40px] text-right">{s.wins}/{s.occurrences}</span>
-                                    )}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )
-                    })()}
-
-                    {/* Key Insights */}
-                    {analysisData.top_insights && (analysisData.top_insights as string[]).length > 0 && (
-                      <div>
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Key Insights</h3>
-                        <div className="space-y-1.5">
-                          {(analysisData.top_insights as string[]).map((insight: string, i: number) => (
-                            <div key={i} className="flex items-start space-x-2 text-sm">
-                              <Lightbulb className="w-3.5 h-3.5 text-yellow-400 mt-0.5 flex-shrink-0" />
-                              <span className="text-gray-300">{insight}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Re-run button */}
-                    <button
-                      onClick={runAnalysis}
-                      disabled={isAnalyzing}
-                      className="text-xs text-gray-500 hover:text-gray-400 flex items-center space-x-1 transition-colors"
-                    >
-                      {isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
-                      <span>{isAnalyzing ? 'Re-analyzing...' : 'Re-run analysis'}</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <DailyIntelligenceReport
+              analysisData={analysisData}
+              expanded={analysisExpanded}
+              onToggleExpanded={() => setAnalysisExpanded(!analysisExpanded)}
+              onReRunAnalysis={runAnalysis}
+              isAnalyzing={isAnalyzing}
+              pendingCount={pending.length}
+            />
           </div>
         )}
 
@@ -860,7 +257,6 @@ export function PreviousRacesPage() {
             </p>
           </div>
         )}
-
 
         {/* ── Loading ─────────────────────────────────────────── */}
         {(isLoading || isFetching) && (
@@ -900,226 +296,21 @@ export function PreviousRacesPage() {
               <h2 className="text-base font-semibold text-gray-300">Completed Races</h2>
             </div>
 
-            {completed.map((race) => {
-              const isExpanded = expandedRaces.has(race.race_id)
-              const runners = (race.runners || []).slice().sort((a, b) => {
-                if (a.position == null && b.position == null) return 0
-                if (a.position == null) return 1
-                if (b.position == null) return -1
-                return a.position - b.position
-              })
-              const top3 = runners.filter(r => r.position != null && r.position <= 3)
-              const rest = runners.filter(r => r.position == null || r.position > 3)
-              const mlPick = getMlPredictedWinner(race)
-              const winner = runners.find(r => r.position === 1)
-
-              // Build map of which models picked each horse
-              const modelPicksMap = getModelPicksMap(race.topEntries, race.runners)
-
-              return (
-                <div key={race.race_id} className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-xl">
-                  {/* Race header */}
-                  <Link to={`/race/${race.race_id}`} className="block p-4 hover:bg-gray-800/90 transition-colors">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-1">
-                          <h3 className="text-base font-semibold text-white">{race.course_name}</h3>
-                          <span className="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-xs font-medium">{race.race_class}</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-400">
-                          <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{formatTime(race.off_time)}</span>
-                          <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{race.distance}</span>
-                          <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{race.field_size} ran</span>
-                          {race.prize && <span className="flex items-center gap-1"><Trophy className="w-3.5 h-3.5" />&pound;{race.prize.replace(/[£,]/g, '')}</span>}
-                          <span className="text-gray-500">Going: {race.going}</span>
-                        </div>
-                      </div>
-                      <span className="text-xs bg-green-500/15 text-green-400 px-2 py-1 rounded font-medium">Result</span>
-                    </div>
-                  </Link>
-
-                  {/* Top 3 finishers */}
-                  <div className="px-4 pb-2 space-y-1.5">
-                    {top3.map(runner => {
-                      const badge = positionBadge(runner.position)
-                      const bn = bareHorseName(runner.horse)
-                      const modelPicks = modelPicksMap.get(bn) || []
-
-                      // Detect profitable signals for this runner
-                      let runnerSignals: ProfitableSignal[] = []
-                      if (lifetimeSignalStats && race.topEntries) {
-                        const entry = race.topEntries.find(e => bareHorseName(e.horse_name) === bn)
-                        if (entry) {
-                          const badges = modelPicksMap.get(bn) || []
-                          runnerSignals = detectProfitableSignals(entry, race.topEntries, badges, undefined, lifetimeSignalStats, 'lifetime')
-                        }
-                      }
-
-                      return (
-                        <div key={runner.id} className="py-1.5 px-3 bg-gray-700/30 rounded-lg">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3 min-w-0">
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.bg} ${badge.text}`}>
-                                {runner.position}
-                              </div>
-                              {runner.number > 0 && (
-                                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
-                                  {runner.number}
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <div className="text-white text-sm font-medium flex items-center gap-1.5 flex-wrap">
-                                  <span className="truncate">{runner.horse}</span>
-                                  {modelPicks.length > 0 && (
-                                    <span className="flex items-center gap-1 flex-shrink-0">
-                                      {modelPicks.map(mp => (
-                                        <ModelBadge
-                                          key={mp.label}
-                                          label={mp.label}
-                                          color={mp.color}
-                                          showCheck={runner.position === 1}
-                                        />
-                                      ))}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-4 text-right flex-shrink-0">
-                              {runner.btn != null && runner.position !== 1 && (
-                                <span className="text-xs text-gray-400">{runner.btn} len</span>
-                              )}
-                              {runner.sp && (
-                                <span className="text-sm text-gray-200 font-mono min-w-[48px] text-right">{runner.sp}</span>
-                              )}
-                            </div>
-                          </div>
-                          {runnerSignals.length > 0 && (
-                            <div className="mt-1 ml-10">
-                              <ProfitableSignalBadges signals={runnerSignals} compact />
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {/* ML models summary callout */}
-                  {race.topEntries && race.topEntries.length > 0 && (() => {
-                    const winnerBn = winner ? bareHorseName(winner.horse) : null
-                    const winnerModels = winnerBn ? (modelPicksMap.get(winnerBn) || []) : []
-                    const anyModelCorrect = winnerModels.length > 0
-
-                    if (!anyModelCorrect && mlPick) {
-                      const matched = runners.find(r => bareHorseName(r.horse) === bareHorseName(mlPick.horse_name))
-                      const pos = matched?.position
-                      const outcome = pos
-                        ? `Finished: ${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}`
-                        : parseNonFinishOutcome(matched)
-                      return (
-                        <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs bg-gray-700/40 text-gray-400">
-                          <span className="font-medium">No model predicted the winner</span>
-                          <span className="ml-1">— Ensemble pick {mlPick.horse_name} {outcome}</span>
-                        </div>
-                      )
-                    }
-
-                    if (anyModelCorrect) {
-                      return (
-                        <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg text-xs bg-green-500/10 border border-green-500/20 text-green-400">
-                          <span className="font-medium">
-                            {winnerModels.length === 5 ? 'All models' : winnerModels.map(m => m.label).join(', ')}
-                          </span>
-                          {' '}predicted the winner {winner!.horse}
-                          {winner!.sp && <span className="text-gray-500 ml-1">({winner!.sp})</span>}
-                          <span className="ml-1 font-semibold">✓</span>
-                        </div>
-                      )
-                    }
-
-                    return null
-                  })()}
-
-                  {/* Expand button for full finishing order */}
-                  {rest.length > 0 && (
-                    <button
-                      onClick={() => toggleExpand(race.race_id)}
-                      className="w-full flex items-center justify-center gap-1 py-2 text-xs text-gray-400 hover:text-gray-300 border-t border-gray-700/50 transition-colors"
-                    >
-                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                      {isExpanded ? 'Hide full order' : `Show all ${runners.length} finishers`}
-                    </button>
-                  )}
-
-                  {/* Expanded finishing order */}
-                  {isExpanded && rest.length > 0 && (
-                    <div className="px-4 pb-3 space-y-1 border-t border-gray-700/50 pt-2">
-                      {rest.map(runner => {
-                        const badge = positionBadge(runner.position)
-                        return (
-                          <div key={runner.id} className="flex items-center justify-between py-1 px-3 bg-gray-700/20 rounded">
-                            <div className="flex items-center space-x-3">
-                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${badge.bg} ${badge.text}`}>
-                                {runner.position ?? '-'}
-                              </div>
-                              {runner.number > 0 && (
-                                <span className="text-xs text-gray-500 w-5 text-center">{runner.number}</span>
-                              )}
-                              <span className="text-gray-300 text-sm">{runner.horse}</span>
-                            </div>
-                            <div className="flex items-center space-x-4 text-right">
-                              {runner.ovr_btn != null && (
-                                <span className="text-xs text-gray-500">{runner.ovr_btn} btn</span>
-                              )}
-                              {runner.sp && (
-                                <span className="text-xs text-gray-400 font-mono">{runner.sp}</span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                      {runners[0]?.time && (
-                        <div className="text-xs text-gray-500 text-center mt-2">
-                          Winning time: {runners[0].time}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {completed.map((race) => (
+              <CompletedRaceCard
+                key={race.race_id}
+                race={race}
+                isExpanded={expandedRaces.has(race.race_id)}
+                onToggleExpand={() => toggleExpand(race.race_id)}
+                lifetimeSignalStats={lifetimeSignalStats}
+              />
+            ))}
           </div>
         )}
 
         {/* ── Pending Races (today only) ──────────────────────── */}
         {isToday && pending.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center space-x-2">
-              <Timer className="w-5 h-5 text-gray-400" />
-              <h2 className="text-base font-semibold text-gray-300">Awaiting Results</h2>
-            </div>
-
-            {pending.map(race => (
-              <Link key={race.race_id} to={`/race/${race.race_id}`} className="block">
-                <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-4 opacity-60 hover:opacity-80 transition-opacity">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center space-x-3 mb-1">
-                        <h3 className="text-base font-medium text-gray-300">{race.course_name}</h3>
-                        <span className="bg-gray-700/50 text-gray-400 px-2 py-0.5 rounded text-xs">{race.race_class}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{formatTime(race.off_time)}</span>
-                        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{race.distance}</span>
-                        <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{race.field_size} runners</span>
-                      </div>
-                    </div>
-                    <span className="text-xs bg-gray-700/50 text-gray-400 px-2 py-1 rounded">Awaiting Result</span>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <PendingRacesSection races={pending} />
         )}
 
         {/* ── Auto-refresh notice ─────────────────────────────── */}

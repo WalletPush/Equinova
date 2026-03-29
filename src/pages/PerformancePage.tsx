@@ -6,118 +6,19 @@ import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
 import { callSupabaseFunction } from '@/lib/supabase'
-import { formatOdds } from '@/lib/odds'
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, ReferenceLine, ReferenceDot, Line,
-  BarChart, Bar, Cell,
-} from 'recharts'
-import {
-  TrendingUp, TrendingDown, Trophy, Target, Loader2,
-  ChevronDown, ChevronUp, BarChart3, Wallet, CheckCircle,
-  XCircle, Clock, Zap, Plus, Download, ShieldCheck,
-  Activity, ArrowDownRight, Brain, Users,
-} from 'lucide-react'
-
-interface UserBet {
-  id: number
-  user_id: string
-  race_id: string
-  race_date: string
-  course: string
-  off_time: string
-  horse_name: string
-  horse_id: string
-  trainer_name: string
-  jockey_name: string
-  current_odds: string
-  bet_amount: number
-  bet_type: string
-  status: 'pending' | 'won' | 'lost'
-  potential_return: number
-  created_at: string
-  updated_at: string
-  trust_tier?: string | null
-  trust_score?: number | null
-  edge_pct?: number | null
-  ensemble_proba?: number | null
-  signal_combo_key?: string | null
-}
-
-interface DaySummary {
-  date: string
-  bets: UserBet[]
-  wins: number
-  losses: number
-  pending: number
-  dayPL: number
-  daySettledStaked: number
-  runningPL: number
-  runningSettledStaked: number
-  runningBettingROI: number
-}
-
-type PeriodFilter = '7d' | '14d' | '30d' | '90d' | 'lifetime'
-type ActiveTab = 'overview' | 'monthly' | 'trust'
-
-function fmtPL(v: number) {
-  return `${v >= 0 ? '+' : '-'}£${Math.abs(v).toFixed(2)}`
-}
-
-function formatDateShort(dateStr: string) {
-  const d = new Date(dateStr + 'T12:00:00')
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-}
-
-function formatMonthLabel(monthStr: string) {
-  const [year, month] = monthStr.split('-')
-  const d = new Date(Number(year), Number(month) - 1)
-  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
-}
-
-const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
-  { value: '7d', label: '7D' },
-  { value: '14d', label: '14D' },
-  { value: '30d', label: '30D' },
-  { value: '90d', label: '90D' },
-  { value: 'lifetime', label: 'All' },
-]
-
-function PLTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null
-  const d = payload[0].payload
-  return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-xl text-xs">
-      <div className="text-gray-400 mb-1">{d.label}</div>
-      <div className={`font-bold ${d.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>You: {fmtPL(d.pl)}</div>
-      {d.systemPL != null && (
-        <div className="text-cyan-400 mt-0.5">System: {fmtPL(d.systemPL)}</div>
-      )}
-      <div className="text-gray-500 mt-0.5">Bankroll: £{d.bankroll.toFixed(2)}</div>
-    </div>
-  )
-}
-
-function TrustTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null
-  const d = payload[0].payload
-  return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-xl text-xs">
-      <div className="text-gray-400 mb-1">{d.name} Trust</div>
-      <div className={`font-bold ${d.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-        ROI: {d.roi >= 0 ? '+' : ''}{d.roi}%
-      </div>
-      <div className="text-gray-500 mt-0.5">Win Rate: {d.winRate}%</div>
-    </div>
-  )
-}
-
-// ─── Settled-only P/L helpers ─────────────────────────────────────────
-function settledPLForBet(b: UserBet): number {
-  if (b.status === 'won') return Number(b.potential_return) - Number(b.bet_amount)
-  if (b.status === 'lost') return -Number(b.bet_amount)
-  return 0
-}
+import { fmtPL, formatDateShort, formatMonthLabel, settledPLForBet, PERIOD_OPTIONS } from '@/lib/performanceUtils'
+import { PerformanceKPIGrid } from '@/components/performance/PerformanceKPIGrid'
+import { PerformanceEquityChart } from '@/components/performance/PerformanceEquityChart'
+import { PerformanceInsightsStrip } from '@/components/performance/PerformanceInsightsStrip'
+import { PerformanceYouVsSystem } from '@/components/performance/PerformanceYouVsSystem'
+import { PerformanceDailyBreakdown } from '@/components/performance/PerformanceDailyBreakdown'
+import { PerformanceMonthlyTab } from '@/components/performance/PerformanceMonthlyTab'
+import { PerformanceTrustTab } from '@/components/performance/PerformanceTrustTab'
+import type {
+  UserBet, DaySummary, PeriodFilter, ActiveTab,
+  SystemBenchmark, TotalStats, Insight, MonthSummary, TrustTierSummary,
+} from '@/components/performance/types'
+import { Loader2, BarChart3, Zap, Plus, Download } from 'lucide-react'
 
 export function PerformancePage() {
   const { user } = useAuth()
@@ -177,8 +78,6 @@ export function PerformancePage() {
     })
   }, [bets, period])
 
-  // Derive starting bankroll from ALL bets (settled + pending).
-  // bankroll = starting + settledPL - pendingExposure  ⟹  starting = bankroll - settledPL + pendingExposure
   const startingBankroll = useMemo(() => {
     if (!bets.length) return bankroll
     let settledPL = 0
@@ -191,7 +90,6 @@ export function PerformancePage() {
     return bankroll - settledPL + pendingExposure
   }, [bets, bankroll])
 
-  // All-time bankroll return based on SETTLED results only
   const bankrollGrowth = useMemo(() => {
     if (!bets.length || startingBankroll <= 0) return 0
     let settledPL = 0
@@ -201,7 +99,7 @@ export function PerformancePage() {
     return (settledPL / startingBankroll) * 100
   }, [bets, startingBankroll])
 
-  const systemBenchmark = useMemo(() => {
+  const systemBenchmark = useMemo<SystemBenchmark | null>(() => {
     if (!systemData?.ml_models?.by_date) return null
     const byDate = systemData.ml_models.by_date as Record<string, Record<string, { total_picks: number; wins: number; win_rate: number; top3_rate: number; profit: number; roi_pct: number }>>
     const agg = (systemData.ml_models.aggregated as any)?.ensemble
@@ -223,8 +121,7 @@ export function PerformancePage() {
     }
   }, [systemData])
 
-  // ─── Core stats — ALL P/L is settled-only ──────────────────────────
-  const { dailySummaries, totalStats } = useMemo(() => {
+  const { dailySummaries, totalStats } = useMemo<{ dailySummaries: DaySummary[]; totalStats: TotalStats | null }>(() => {
     if (!filteredBets.length) return { dailySummaries: [], totalStats: null }
 
     const byDay = new Map<string, UserBet[]>()
@@ -326,7 +223,6 @@ export function PerformancePage() {
     }
   }, [filteredBets, bankroll, startingBankroll])
 
-  // System benchmark: zero-base from the first day of the user's filtered period
   const chartData = useMemo(() => {
     if (!dailySummaries.length) return []
     let running = 0
@@ -388,9 +284,9 @@ export function PerformancePage() {
     return maxIdx > 0 && maxDD > 0 ? { idx: maxIdx, label: chartData[maxIdx].label, pl: chartData[maxIdx].pl, dd: maxDD } : null
   }, [chartData])
 
-  const insights = useMemo(() => {
+  const insights = useMemo<Insight[]>(() => {
     if (!totalStats || totalStats.settledCount === 0) return []
-    const items: { text: string; color: string }[] = []
+    const items: Insight[] = []
 
     if (systemBenchmark && systemBenchmark.totalPicks > 0) {
       const sysWR = systemBenchmark.winRate
@@ -425,8 +321,7 @@ export function PerformancePage() {
     return items.slice(0, 3)
   }, [totalStats, systemBenchmark])
 
-  // Monthly: settled P/L only, ROI = P/L ÷ staked (true betting ROI)
-  const monthSummaries = useMemo(() => {
+  const monthSummaries = useMemo<MonthSummary[]>(() => {
     if (!filteredBets.length) return []
     const byMonth = new Map<string, UserBet[]>()
     for (const b of filteredBets) {
@@ -452,8 +347,7 @@ export function PerformancePage() {
       })
   }, [filteredBets])
 
-  // Trust tier: settled P/L only, ROI = P/L ÷ staked
-  const trustTierSummaries = useMemo(() => {
+  const trustTierSummaries = useMemo<TrustTierSummary[]>(() => {
     const hasTrustData = filteredBets.some(b => b.trust_tier)
     if (!hasTrustData) return []
     const tiers = [
@@ -477,7 +371,7 @@ export function PerformancePage() {
       const avgEdge = edgeBets.length > 0
         ? edgeBets.reduce((s, b) => s + Number(b.edge_pct ?? 0), 0) / edgeBets.length * 100 : 0
       return { key, bgClass, textClass, barColor, totalBets: tierBets.length, wins, losses, settledStaked, pl, roi, winRate: wr, avgStake, avgEdge }
-    }).filter(Boolean) as { key: string; bgClass: string; textClass: string; barColor: string; totalBets: number; wins: number; losses: number; settledStaked: number; pl: number; roi: number; winRate: number; avgStake: number; avgEdge: number }[]
+    }).filter(Boolean) as TrustTierSummary[]
   }, [filteredBets])
 
   const exportCSV = useCallback(() => {
@@ -560,7 +454,6 @@ export function PerformancePage() {
           </div>
         </div>
 
-        {/* Add funds inline */}
         {showAddFunds && (
           <div className="bg-gray-800/80 border border-yellow-500/20 rounded-xl p-4 flex items-center gap-3">
             <input type="number" step="1" min="1" value={addAmount} onChange={e => setAddAmount(e.target.value)}
@@ -575,7 +468,6 @@ export function PerformancePage() {
           </div>
         )}
 
-        {/* Empty state */}
         {bets.length === 0 && !isLoading && (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -592,10 +484,8 @@ export function PerformancePage() {
           </div>
         )}
 
-        {/* Main dashboard */}
         {bets.length > 0 && (
           <>
-            {/* Period filter */}
             <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5 w-fit">
               {PERIOD_OPTIONS.map(opt => (
                 <button key={opt.value} onClick={() => setPeriod(opt.value)}
@@ -609,263 +499,39 @@ export function PerformancePage() {
 
             {filteredBets.length > 0 ? (
               <>
-                {/* 6 KPI Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {/* 1. Bankroll */}
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Wallet className="w-4 h-4 text-yellow-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Bankroll</span>
-                    </div>
-                    <div className="text-xl font-bold text-white">£{bankroll.toFixed(2)}</div>
-                    <div className={`text-xs mt-0.5 ${bankrollGrowth >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {bankrollGrowth >= 0 ? '+' : ''}{bankrollGrowth.toFixed(1)}% all-time
-                    </div>
-                  </div>
-
-                  {/* 2. Settled P/L — realised profit only */}
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Trophy className="w-4 h-4 text-amber-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Settled P/L</span>
-                    </div>
-                    <div className={`text-xl font-bold ${(totalStats?.settledPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {fmtPL(totalStats?.settledPL ?? 0)}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {totalStats?.settledCount ?? 0} settled
-                      {(totalStats?.totalPending ?? 0) > 0 && (
-                        <span className="text-yellow-500"> · {totalStats?.totalPending}P (£{(totalStats?.pendingExposure ?? 0).toFixed(0)} at risk)</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 3. Win Rate */}
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Target className="w-4 h-4 text-blue-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
-                    </div>
-                    <div className="text-xl font-bold text-white">{(totalStats?.winRate ?? 0).toFixed(1)}%</div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {totalStats?.totalWins ?? 0}W / {totalStats?.totalLosses ?? 0}L
-                    </div>
-                  </div>
-
-                  {/* 4. Bankroll Return — P/L ÷ starting bankroll */}
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      {(totalStats?.bankrollReturn ?? 0) >= 0
-                        ? <TrendingUp className="w-4 h-4 text-green-400" />
-                        : <TrendingDown className="w-4 h-4 text-red-400" />}
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Bankroll Return</span>
-                    </div>
-                    <div className={`text-xl font-bold ${(totalStats?.bankrollReturn ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {(totalStats?.bankrollReturn ?? 0) >= 0 ? '+' : ''}{(totalStats?.bankrollReturn ?? 0).toFixed(1)}%
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">from £{startingBankroll.toFixed(0)} bankroll</div>
-                  </div>
-
-                  {/* 5. Betting ROI — P/L ÷ total staked */}
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Activity className="w-4 h-4 text-cyan-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Betting ROI</span>
-                    </div>
-                    <div className={`text-xl font-bold ${(totalStats?.bettingROI ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {(totalStats?.bettingROI ?? 0) >= 0 ? '+' : ''}{(totalStats?.bettingROI ?? 0).toFixed(1)}%
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">£{(totalStats?.totalSettledStaked ?? 0).toFixed(0)} staked</div>
-                  </div>
-
-                  {/* 6. Expectancy — settled P/L ÷ settled count */}
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <ArrowDownRight className="w-4 h-4 text-purple-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Expectancy</span>
-                    </div>
-                    <div className={`text-xl font-bold ${(totalStats?.expectancy ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {fmtPL(totalStats?.expectancy ?? 0)}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      per settled bet · PF: {totalStats ? (totalStats.profitFactor >= 99 ? '∞' : totalStats.profitFactor.toFixed(2)) : '0.00'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Equity Curve — settled P/L only */}
-                {chartData.length > 1 && (
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-sm font-semibold text-gray-300">Settled P/L Curve</h2>
-                      {systemBenchmark && (
-                        <div className="flex items-center gap-3 text-[10px]">
-                          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-400 inline-block rounded" /> You</span>
-                          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-cyan-400 inline-block rounded border-dashed" style={{ borderTop: '1px dashed #06b6d4', height: 0, background: 'none' }} /> System</span>
-                        </div>
-                      )}
-                    </div>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="plFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.35} />
-                            <stop offset={`${gradientOffset * 100}%`} stopColor="#22c55e" stopOpacity={0.05} />
-                            <stop offset={`${gradientOffset * 100}%`} stopColor="#ef4444" stopOpacity={0.05} />
-                            <stop offset="100%" stopColor="#ef4444" stopOpacity={0.35} />
-                          </linearGradient>
-                          <linearGradient id="plStroke" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset={`${gradientOffset * 100}%`} stopColor="#22c55e" stopOpacity={1} />
-                            <stop offset={`${gradientOffset * 100}%`} stopColor="#ef4444" stopOpacity={1} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                        <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `£${v}`} width={45} />
-                        <Tooltip content={<PLTooltip />} cursor={{ stroke: '#4b5563', strokeDasharray: '4 4' }} />
-                        <ReferenceLine y={0} stroke="#4b5563" strokeDasharray="4 4" />
-                        <Area type="monotone" dataKey="pl" stroke="url(#plStroke)" fill="url(#plFill)" strokeWidth={2} name="Your P/L"
-                          dot={false} activeDot={{ r: 4, fill: '#fbbf24', stroke: '#1f2937', strokeWidth: 2 }} />
-                        {systemBenchmark && (
-                          <Line type="monotone" dataKey="systemPL" stroke="#06b6d4" strokeWidth={1.5} strokeDasharray="5 3"
-                            dot={false} activeDot={{ r: 3, fill: '#06b6d4' }} name="System" connectNulls />
-                        )}
-                        {maxDrawdownPoint && (
-                          <ReferenceDot x={maxDrawdownPoint.label} y={maxDrawdownPoint.pl} r={5}
-                            fill="#ef4444" stroke="#7f1d1d" strokeWidth={2}>
-                          </ReferenceDot>
-                        )}
-                      </AreaChart>
-                    </ResponsiveContainer>
-                    {maxDrawdownPoint && totalStats && totalStats.maxDrawdown > 0 && (
-                      <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-500">
-                        <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-                        Max drawdown: <span className="text-red-400 font-medium">-£{totalStats.maxDrawdown.toFixed(2)}</span>
-                        <span className="text-gray-600">({totalStats.maxDrawdownPct.toFixed(1)}% of peak)</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Insights Strip */}
                 {totalStats && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
-                      <div className="text-[10px] text-gray-500 uppercase">Avg Stake</div>
-                      <div className="text-sm font-semibold text-white">{totalStats.avgStakePct.toFixed(1)}%</div>
-                      <div className={`text-[10px] ${riskColor}`}>{riskLevel}</div>
-                    </div>
-                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
-                      <div className="text-[10px] text-gray-500 uppercase">Best Day</div>
-                      <div className="text-sm font-semibold text-green-400">
-                        {totalStats.bestDay ? fmtPL(totalStats.bestDay.dayPL) : '-'}
-                      </div>
-                      <div className="text-[10px] text-gray-600">
-                        {totalStats.bestDay ? formatDateShort(totalStats.bestDay.date) : ''}
-                      </div>
-                    </div>
-                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
-                      <div className="text-[10px] text-gray-500 uppercase">Worst Day</div>
-                      <div className="text-sm font-semibold text-red-400">
-                        {totalStats.worstDay ? fmtPL(totalStats.worstDay.dayPL) : '-'}
-                      </div>
-                      <div className="text-[10px] text-gray-600">
-                        {totalStats.worstDay ? formatDateShort(totalStats.worstDay.date) : ''}
-                      </div>
-                    </div>
-                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
-                      <div className="text-[10px] text-gray-500 uppercase">Drawdown</div>
-                      <div className="text-sm font-semibold text-red-400">
-                        {totalStats.maxDrawdown > 0 ? `-£${totalStats.maxDrawdown.toFixed(0)}` : '£0'}
-                      </div>
-                      <div className="text-[10px] text-gray-600">
-                        {totalStats.maxDrawdownPct.toFixed(1)}% of peak
-                      </div>
-                    </div>
-                  </div>
+                  <PerformanceKPIGrid
+                    bankroll={bankroll}
+                    bankrollGrowth={bankrollGrowth}
+                    totalStats={totalStats}
+                    startingBankroll={startingBankroll}
+                  />
                 )}
 
-                {/* AI Insights Box */}
-                {insights.length > 0 && (
-                  <div className="bg-gradient-to-r from-cyan-950/40 to-blue-950/40 border border-cyan-500/20 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-2.5">
-                      <Brain className="w-4 h-4 text-cyan-400" />
-                      <span className="text-xs font-semibold text-cyan-300 uppercase tracking-wider">AI Insights</span>
-                    </div>
-                    <div className="space-y-2">
-                      {insights.map((insight, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs">
-                          <span className={`mt-0.5 ${insight.color}`}>&#x2022;</span>
-                          <span className="text-gray-300 leading-relaxed">{insight.text}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                <PerformanceEquityChart
+                  chartData={chartData}
+                  gradientOffset={gradientOffset}
+                  maxDrawdownPoint={maxDrawdownPoint}
+                  totalStats={totalStats!}
+                  systemBenchmark={systemBenchmark}
+                />
+
+                {totalStats && (
+                  <PerformanceInsightsStrip
+                    totalStats={totalStats}
+                    insights={insights}
+                    riskLevel={riskLevel}
+                    riskColor={riskColor}
+                  />
                 )}
 
-                {/* System vs You Comparison */}
                 {systemBenchmark && systemBenchmark.totalPicks > 0 && totalStats && (
-                  <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Users className="w-4 h-4 text-gray-400" />
-                      <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">You vs System</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 text-center text-[11px]">
-                      <div>
-                        <div className="text-gray-500 mb-1.5">Win Rate</div>
-                        <div className="flex items-center justify-center gap-2">
-                          <div>
-                            <div className={`text-base font-bold ${totalStats.winRate > systemBenchmark.winRate ? 'text-green-400' : 'text-white'}`}>
-                              {totalStats.winRate.toFixed(0)}%
-                            </div>
-                            <div className="text-[9px] text-gray-600">You</div>
-                          </div>
-                          <div className="text-gray-600 text-[10px]">vs</div>
-                          <div>
-                            <div className={`text-base font-bold ${systemBenchmark.winRate > totalStats.winRate ? 'text-cyan-400' : 'text-white'}`}>
-                              {systemBenchmark.winRate.toFixed(0)}%
-                            </div>
-                            <div className="text-[9px] text-gray-600">System</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 mb-1.5">Betting ROI</div>
-                        <div className="flex items-center justify-center gap-2">
-                          <div>
-                            <div className={`text-base font-bold ${totalStats.bettingROI >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {totalStats.bettingROI >= 0 ? '+' : ''}{totalStats.bettingROI.toFixed(0)}%
-                            </div>
-                            <div className="text-[9px] text-gray-600">You</div>
-                          </div>
-                          <div className="text-gray-600 text-[10px]">vs</div>
-                          <div>
-                            <div className={`text-base font-bold ${systemBenchmark.roi >= 0 ? 'text-cyan-400' : 'text-red-400'}`}>
-                              {systemBenchmark.roi >= 0 ? '+' : ''}{systemBenchmark.roi.toFixed(0)}%
-                            </div>
-                            <div className="text-[9px] text-gray-600">System</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 mb-1.5">Settled</div>
-                        <div className="flex items-center justify-center gap-2">
-                          <div>
-                            <div className="text-base font-bold text-white">{totalStats.settledCount}</div>
-                            <div className="text-[9px] text-gray-600">You</div>
-                          </div>
-                          <div className="text-gray-600 text-[10px]">vs</div>
-                          <div>
-                            <div className="text-base font-bold text-white">{systemBenchmark.totalPicks}</div>
-                            <div className="text-[9px] text-gray-600">System</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <PerformanceYouVsSystem
+                    totalStats={totalStats}
+                    systemBenchmark={systemBenchmark}
+                  />
                 )}
 
-                {/* Tab bar */}
                 <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5">
                   {([
                     { key: 'overview' as const, label: 'Overview' },
@@ -881,225 +547,25 @@ export function PerformancePage() {
                   ))}
                 </div>
 
-                {/* ====== OVERVIEW TAB ====== */}
-                {activeTab === 'overview' && (
-                  <>
-                    <div className="flex items-center gap-1 bg-gray-800/60 rounded-lg p-0.5">
-                      <button onClick={() => setActiveView('daily')}
-                        className={`flex-1 px-3 py-1 text-[11px] font-medium rounded transition-all ${
-                          activeView === 'daily' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
-                        }`}>
-                        Daily Breakdown
-                      </button>
-                      <button onClick={() => setActiveView('all')}
-                        className={`flex-1 px-3 py-1 text-[11px] font-medium rounded transition-all ${
-                          activeView === 'all' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
-                        }`}>
-                        All Bets ({totalStats?.totalBets ?? 0})
-                      </button>
-                    </div>
-
-                    {activeView === 'daily' && (
-                      <div className="space-y-2">
-                        {[...dailySummaries].reverse().map(day => {
-                          const isExpanded = expandedDay === day.date
-                          const dayColor = day.dayPL >= 20 ? 'bg-green-500/10 border-green-500/25'
-                            : day.dayPL > 0 ? 'bg-green-500/5 border-green-500/15'
-                            : day.dayPL <= -20 ? 'bg-red-500/10 border-red-500/25'
-                            : day.dayPL < 0 ? 'bg-red-500/5 border-red-500/15'
-                            : 'bg-gray-800/40 border-gray-700/50'
-                          return (
-                            <div key={day.date} className={`rounded-xl overflow-hidden border transition-colors ${
-                              isExpanded ? 'bg-gray-800/60 border-yellow-500/30' : dayColor
-                            }`}>
-                              <button onClick={() => setExpandedDay(isExpanded ? null : day.date)}
-                                className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-800/60 transition-colors">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-0.5">
-                                    <span className="text-sm font-semibold text-white">{formatDateShort(day.date)}</span>
-                                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
-                                      day.dayPL > 0 ? 'bg-green-500/15 text-green-400'
-                                        : day.dayPL < 0 ? 'bg-red-500/15 text-red-400'
-                                        : 'bg-gray-700 text-gray-400'
-                                    }`}>{fmtPL(day.dayPL)}</span>
-                                  </div>
-                                  <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                                    <span>{day.bets.length} bets</span>
-                                    <span className="text-green-500">{day.wins}W</span>
-                                    <span className="text-red-500">{day.losses}L</span>
-                                    {day.pending > 0 && <span className="text-yellow-500">{day.pending}P</span>}
-                                    <span className="text-gray-600">|</span>
-                                    <span className={day.runningBettingROI >= 0 ? 'text-green-500' : 'text-red-500'}>
-                                      ROI: {day.runningBettingROI >= 0 ? '+' : ''}{day.runningBettingROI.toFixed(1)}%
-                                    </span>
-                                  </div>
-                                </div>
-                                {isExpanded
-                                  ? <ChevronUp className="w-4 h-4 text-yellow-400" />
-                                  : <ChevronDown className="w-4 h-4 text-gray-500" />}
-                              </button>
-                              {isExpanded && (
-                                <div className="border-t border-gray-700/50 px-3 py-2 space-y-1">
-                                  {day.bets.map(bet => <BetRow key={bet.id} bet={bet} />)}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-
-                        {totalStats && (
-                          <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mt-3">
-                            <div className="grid grid-cols-3 gap-4 text-center">
-                              <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Settled P/L</div>
-                                <div className={`text-lg font-bold ${totalStats.settledPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {fmtPL(totalStats.settledPL)}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Bankroll</div>
-                                <div className="text-lg font-bold text-white">£{bankroll.toFixed(2)}</div>
-                              </div>
-                              <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Betting ROI</div>
-                                <div className={`text-lg font-bold ${totalStats.bettingROI >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {totalStats.bettingROI >= 0 ? '+' : ''}{totalStats.bettingROI.toFixed(1)}%
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {activeView === 'all' && (
-                      <div className="space-y-1.5">
-                        {[...filteredBets].reverse().map(bet => <BetRow key={bet.id} bet={bet} showDate />)}
-                      </div>
-                    )}
-                  </>
+                {activeTab === 'overview' && totalStats && (
+                  <PerformanceDailyBreakdown
+                    dailySummaries={dailySummaries}
+                    expandedDay={expandedDay}
+                    onToggleDay={(date) => setExpandedDay(expandedDay === date ? null : date)}
+                    totalStats={totalStats}
+                    bankroll={bankroll}
+                    activeView={activeView}
+                    filteredBets={filteredBets}
+                    onSetActiveView={setActiveView}
+                  />
                 )}
 
-                {/* ====== MONTHLY TAB ====== */}
                 {activeTab === 'monthly' && (
-                  <div className="space-y-3">
-                    {monthSummaries.length === 0 ? (
-                      <div className="text-center py-12 text-gray-500 text-sm">No data for this period</div>
-                    ) : monthSummaries.map(m => (
-                      <div key={m.month} className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-sm font-semibold text-white">{m.label}</span>
-                          <span className={`text-sm font-bold ${m.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {fmtPL(m.pl)}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-3 text-center text-[11px]">
-                          <div>
-                            <div className="text-gray-500 mb-0.5">Settled</div>
-                            <div className="text-white font-medium">{m.settled}{m.pending > 0 && <span className="text-yellow-500"> +{m.pending}P</span>}</div>
-                          </div>
-                          <div>
-                            <div className="text-gray-500 mb-0.5">Win Rate</div>
-                            <div className="text-white font-medium">{m.winRate.toFixed(0)}%</div>
-                          </div>
-                          <div>
-                            <div className="text-gray-500 mb-0.5">Staked</div>
-                            <div className="text-white font-medium">£{m.settledStaked.toFixed(0)}</div>
-                          </div>
-                          <div>
-                            <div className="text-gray-500 mb-0.5">Betting ROI</div>
-                            <div className={`font-medium ${m.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {m.roi >= 0 ? '+' : ''}{m.roi.toFixed(1)}%
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-3 h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                          <div className="h-full bg-green-500/60 rounded-full transition-all" style={{ width: `${Math.min(m.winRate, 100)}%` }} />
-                        </div>
-                        <div className="mt-2 flex items-center gap-3 text-[10px] text-gray-500">
-                          <span className="text-green-500">{m.wins} won</span>
-                          <span className="text-red-500">{m.losses} lost</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <PerformanceMonthlyTab monthSummaries={monthSummaries} />
                 )}
 
-                {/* ====== TRUST TIER TAB ====== */}
                 {activeTab === 'trust' && (
-                  <div className="space-y-4">
-                    {trustTierSummaries.length === 0 ? (
-                      <div className="text-center py-12">
-                        <ShieldCheck className="w-12 h-12 text-gray-700 mx-auto mb-3" />
-                        <h3 className="text-gray-400 font-medium mb-1">Trust Tier Analytics Coming Soon</h3>
-                        <p className="text-gray-600 text-sm max-w-sm mx-auto">
-                          Future bets placed through AI Top Picks will be tagged with confidence tiers,
-                          enabling detailed performance analysis by trust level.
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                          <h3 className="text-sm font-semibold text-gray-300 mb-3">Betting ROI by Trust Tier</h3>
-                          <ResponsiveContainer width="100%" height={140}>
-                            <BarChart data={trustTierSummaries.map(t => ({
-                              name: t.key, roi: Number(t.roi.toFixed(1)), winRate: Number(t.winRate.toFixed(1)),
-                            }))}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                              <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false}
-                                tickFormatter={(v: number) => `${v}%`} width={40} />
-                              <Tooltip content={<TrustTooltip />} />
-                              <Bar dataKey="roi" radius={[4, 4, 0, 0]}>
-                                {trustTierSummaries.map((t, i) => (
-                                  <Cell key={i} fill={t.barColor} fillOpacity={0.7} />
-                                ))}
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-
-                        {trustTierSummaries.map(t => (
-                          <div key={t.key} className={`border rounded-xl p-4 ${t.bgClass}`}>
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2">
-                                <ShieldCheck className={`w-4 h-4 ${t.textClass}`} />
-                                <span className={`text-sm font-semibold ${t.textClass}`}>{t.key} Trust</span>
-                              </div>
-                              <span className={`text-sm font-bold ${t.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {fmtPL(t.pl)}
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-4 gap-3 text-center text-[11px]">
-                              <div>
-                                <div className="text-gray-500 mb-0.5">Bets</div>
-                                <div className="text-white font-medium">{t.totalBets}</div>
-                              </div>
-                              <div>
-                                <div className="text-gray-500 mb-0.5">Win Rate</div>
-                                <div className="text-white font-medium">{t.winRate.toFixed(0)}%</div>
-                              </div>
-                              <div>
-                                <div className="text-gray-500 mb-0.5">Avg Stake</div>
-                                <div className="text-white font-medium">£{t.avgStake.toFixed(2)}</div>
-                              </div>
-                              <div>
-                                <div className="text-gray-500 mb-0.5">Betting ROI</div>
-                                <div className={`font-medium ${t.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {t.roi >= 0 ? '+' : ''}{t.roi.toFixed(1)}%
-                                </div>
-                              </div>
-                            </div>
-                            {t.avgEdge > 0 && (
-                              <div className="mt-2 pt-2 border-t border-gray-700/30 text-[10px] text-gray-500">
-                                Avg edge: <span className="text-cyan-400">{t.avgEdge.toFixed(1)}%</span>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
+                  <PerformanceTrustTab trustTierSummaries={trustTierSummaries} />
                 )}
               </>
             ) : (
@@ -1115,80 +581,5 @@ export function PerformancePage() {
         )}
       </div>
     </AppLayout>
-  )
-}
-
-function BetRow({ bet, showDate = false }: { bet: UserBet; showDate?: boolean }) {
-  const odds = bet.current_odds
-  const amount = Number(bet.bet_amount)
-  const potentialReturn = Number(bet.potential_return)
-
-  let pl = 0
-  if (bet.status === 'won') pl = potentialReturn - amount
-  else if (bet.status === 'lost') pl = -amount
-
-  return (
-    <div className={`flex items-center gap-2 py-2 px-3 rounded-lg text-xs ${
-      bet.status === 'won' ? 'bg-green-500/5 border border-green-500/15' :
-      bet.status === 'pending' ? 'bg-yellow-500/5 border border-yellow-500/15' :
-      'bg-gray-800/30 border border-gray-700/30'
-    }`}>
-      <div className="flex-shrink-0">
-        {bet.status === 'won' && <CheckCircle className="w-4 h-4 text-green-400" />}
-        {bet.status === 'lost' && <XCircle className="w-4 h-4 text-gray-600" />}
-        {bet.status === 'pending' && <Clock className="w-4 h-4 text-yellow-400" />}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className={`font-semibold truncate ${
-            bet.status === 'won' ? 'text-green-300' : bet.status === 'pending' ? 'text-white' : 'text-gray-300'
-          }`}>
-            {bet.horse_name}
-          </span>
-          {bet.trust_tier && (
-            <span className={`text-[8px] px-1 py-0.5 rounded font-bold uppercase leading-none flex-shrink-0 ${
-              bet.trust_tier === 'Strong' ? 'bg-green-500/20 text-green-400' :
-              bet.trust_tier === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
-              'bg-orange-500/20 text-orange-400'
-            }`}>
-              {bet.trust_tier}
-            </span>
-          )}
-        </div>
-        <div className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1.5">
-          {showDate && <span>{formatDateShort(bet.race_date || bet.created_at?.split('T')[0])}</span>}
-          {showDate && <span className="text-gray-700">&middot;</span>}
-          <span>{bet.off_time?.substring(0, 5)}</span>
-          <span className="text-gray-700">&middot;</span>
-          <span>{bet.course}</span>
-          {bet.edge_pct != null && (
-            <>
-              <span className="text-gray-700">&middot;</span>
-              <span className="text-cyan-400">{(Number(bet.edge_pct) * 100).toFixed(0)}% edge</span>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="text-right flex-shrink-0 w-12">
-        <div className="text-gray-300 font-mono text-[11px]">{formatOdds(odds)}</div>
-      </div>
-
-      <div className="text-right flex-shrink-0 w-14">
-        <div className="text-gray-300 text-[11px]">£{amount.toFixed(2)}</div>
-        <div className="text-[8px] text-gray-600">stake</div>
-      </div>
-
-      <div className="text-right flex-shrink-0 w-16">
-        {bet.status === 'pending' ? (
-          <div className="text-yellow-400 font-semibold text-[11px]">Pending</div>
-        ) : (
-          <div className={`font-bold text-[11px] ${pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {fmtPL(pl)}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }

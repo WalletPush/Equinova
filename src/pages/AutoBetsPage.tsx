@@ -2,20 +2,18 @@ import React, { useMemo, useState, useCallback, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
-import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
-import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { BankrollSetupModal } from '@/components/BankrollSetupModal'
 import { BetSlip } from '@/components/BetSlip'
-import { MastermindModal } from '@/components/MastermindModal'
-import { AiChatModal } from '@/components/AiChatModal'
+import { PickCard, SmartMoneyCard } from '@/components/top-picks'
+import type { SmartMoneyAlert, TopPick } from '@/components/top-picks/types'
 import { supabase, callSupabaseFunction } from '@/lib/supabase'
-import { formatOdds } from '@/lib/odds'
-import { MarketMovementBadge } from '@/components/MarketMovement'
 import { useBankroll } from '@/hooks/useBankroll'
 import { useMastermind, useAutoBetSettings } from '@/hooks/useMastermind'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNotifications } from '@/contexts/NotificationContext'
 import { getUKTime, getUKDate, raceTimeToMinutes } from '@/lib/dateUtils'
+import { computeKelly } from '@/lib/kelly'
+import { parseOutcome } from '@/lib/raceOutcome'
 import type { Selection } from '@/lib/exoticKelly'
 import {
   Trophy,
@@ -29,92 +27,15 @@ import {
   ChevronRight,
   Brain,
   Sparkles,
-  Gauge,
-  MessageSquare,
-  Activity,
   Calendar,
-  Plus,
-  Minus,
   Zap,
   Bell,
   Flame,
-  Eye,
-  Shield,
-  ShieldCheck,
   AlertTriangle,
 } from 'lucide-react'
 
-interface SmartMoneyAlert {
-  id: string
-  race_id: string
-  horse_id: string
-  horse_name: string
-  course: string
-  off_time: string
-  date: string
-  opening_odds: number
-  current_odds: number
-  pct_backed: number
-  morning_ensemble: number
-  live_ensemble: number
-  morning_edge: number
-  live_edge: number
-  kelly_stake: number
-  triggered_at: string
-  notified: boolean
-}
-
-interface TopPick {
-  race_id: string
-  horse_id: string
-  horse_name: string
-  course: string
-  off_time: string
-  race_type: string
-  current_odds: number
-  opening_odds: number
-  silk_url: string | null
-  number: number | null
-  jockey: string
-  trainer: string
-  ensemble_proba: number
-  benter_proba: number
-  rf_proba: number
-  xgboost_proba: number
-  rpr: number
-  ts: number
-  ofr: number
-  comment: string
-  spotlight: string
-  best_speed: number
-  avg_fp: number
-  trainer_course_wr: number
-  trainer_21d_wr: number
-  jockey_21d_wr: number
-  jockey_dist_wr: number
-  finishing_position: number | null
-  outcome: string | null
-  edge: number
-  implied_prob: number
-  odds_movement: 'steaming' | 'drifting' | 'stable' | null
-  odds_movement_pct: number | null
-}
-
-function parseOutcome(comment: string): string {
-  const c = comment.toLowerCase()
-  if (c.includes('fell')) return 'FELL'
-  if (c.includes('pulled up')) return 'PU'
-  if (c.includes('unseated')) return 'UR'
-  if (c.includes('brought down')) return 'BD'
-  if (c.includes('refused')) return 'REF'
-  if (c.includes('carried out')) return 'CO'
-  if (c.includes('ran out')) return 'RO'
-  if (c.includes('slipped up')) return 'SU'
-  return 'DNF'
-}
-
 const MIN_EDGE = 0.05
-const MAX_ODDS = 13.0  // 12/1 in decimal
+const MAX_ODDS = 13.0
 const MIN_ENSEMBLE_PROBA = 0.40
 const LONGSHOT_MIN_ACTIVE_PATTERNS = 2
 
@@ -220,7 +141,6 @@ export function AutoBetsPage() {
         if (results) allResults = allResults.concat(results)
       }
 
-      // Build result lookup by horse_id (primary) and name (fallback)
       const resultsByRace: Record<string, Record<string, number>> = {}
       const resultsByHorseId: Record<string, number> = {}
       const outcomeByHorseId: Record<string, string> = {}
@@ -241,7 +161,6 @@ export function AutoBetsPage() {
         racesWithResults.add(r.race_id)
       }
 
-      // Build non-runner set from race_results.non_runners text
       const nonRunnersByRace: Record<string, Set<string>> = {}
       for (const res of allResults) {
         const nrText = res.non_runners || ''
@@ -270,7 +189,6 @@ export function AutoBetsPage() {
     staleTime: 30_000,
   })
 
-  // Smart Money Alerts
   const qc = useQueryClient()
   const [smartMoneyToast, setSmartMoneyToast] = useState<SmartMoneyAlert | null>(null)
 
@@ -980,7 +898,7 @@ export function AutoBetsPage() {
           </div>
         )}
 
-        {/* Settled Results — only bets the user actually placed */}
+        {/* Settled Results */}
         {!isLoading && mySettledPicks.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -1045,506 +963,5 @@ export function AutoBetsPage() {
         />
       )}
     </AppLayout>
-  )
-}
-
-// ─── Kelly Criterion — uses Benter ensemble_proba ────────────────────────
-
-function getTrustMultiplier(trustScore: number): number {
-  if (trustScore >= 80) return 1.5
-  if (trustScore >= 60) return 1.0
-  if (trustScore >= 30) return 0.5
-  if (trustScore > 0) return 0.25
-  return 0.25
-}
-
-function computeKelly(pick: TopPick, userBankroll: number, trustScore = 0) {
-  const { ensemble_proba } = pick
-  const odds = (pick.opening_odds > 1 ? pick.opening_odds : pick.current_odds)
-  if (odds <= 1 || userBankroll <= 0 || ensemble_proba <= 0) return null
-  const implied = 1 / odds
-  const edge = ensemble_proba - implied
-  if (edge < 0.05) return null
-  const kelly = edge / (odds - 1)
-  const baseQuarterKelly = kelly / 4
-  const multiplier = getTrustMultiplier(trustScore)
-  const fraction = Math.min(baseQuarterKelly * multiplier, 0.05)
-  const rawStake = userBankroll * fraction
-  const stake = Math.round(rawStake * 2) / 2
-  if (stake < 1) return null
-  return { stake, fraction, edge, multiplier }
-}
-
-// ─── Edge Gauge ─────────────────────────────────────────────────────────
-
-function EdgeGauge({ edge, impliedProb, benterProba }: { edge: number; impliedProb: number; benterProba: number }) {
-  const edgePct = (edge * 100).toFixed(1)
-  const radius = 40
-  const stroke = 6
-  const circumference = 2 * Math.PI * radius
-  const normScore = Math.min(edge / 0.30, 1) * 100
-  const progress = (normScore / 100) * circumference
-  const color = edge >= 0.15 ? '#22c55e' : edge >= 0.08 ? '#eab308' : '#f97316'
-
-  return (
-    <div className="relative flex items-center justify-center flex-shrink-0">
-      <svg width="96" height="96" viewBox="0 0 96 96">
-        <circle cx="48" cy="48" r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} />
-        <circle cx="48" cy="48" r={radius} fill="none" stroke={color} strokeWidth={stroke}
-          strokeDasharray={`${progress} ${circumference - progress}`}
-          strokeDashoffset={circumference * 0.25}
-          strokeLinecap="round" className="transition-all duration-1000 ease-out" />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-xl font-bold text-white">+{edgePct}%</span>
-        <span className="text-[9px] text-gray-400 uppercase tracking-wider">Edge</span>
-      </div>
-    </div>
-  )
-}
-
-// ─── Pick Card ──────────────────────────────────────────────────────────
-
-function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onToggleSlip, slipFull, mastermindMatch }: {
-  pick: TopPick
-  bet: any | null
-  userBankroll: number
-  needsSetup: boolean
-  settled?: boolean
-  inSlip?: boolean
-  onToggleSlip?: () => void
-  slipFull?: boolean
-  mastermindMatch?: import('@/hooks/useMastermind').MastermindMatch
-}) {
-  const fp = pick.finishing_position
-  const isSettled = fp != null && fp >= 0
-  const isWinner = fp === 1
-  const hasBet = !!bet
-  const [showMastermind, setShowMastermind] = useState(false)
-  const [showAiChat, setShowAiChat] = useState(false)
-
-  const trustScore = mastermindMatch?.trust_score ?? 0
-  const kellyInfo = useMemo(() => computeKelly(pick, userBankroll, trustScore), [pick, userBankroll, trustScore])
-
-  const patternCount = mastermindMatch?.pattern_count ?? 0
-
-  const borderColor = inSlip ? 'border-yellow-500/50' : isSettled && isWinner ? 'border-green-500/40' : isSettled ? 'border-gray-700/50' : patternCount > 0 ? 'border-purple-500/50' : 'border-purple-500/30'
-
-  return (
-    <div className={`bg-gray-900/80 backdrop-blur-sm border ${borderColor} rounded-2xl relative overflow-hidden ${isSettled && !isWinner ? 'opacity-75' : ''}`}>
-      {/* Edge header */}
-      <div className={`px-4 py-3 border-b ${isSettled && isWinner ? 'bg-gradient-to-r from-green-500/15 via-emerald-500/10 to-transparent border-green-500/20' : 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-transparent border-purple-500/20'}`}>
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2">
-            <Target className={`w-4 h-4 ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`} />
-            <span className={`text-xs font-semibold uppercase tracking-wider ${isSettled && isWinner ? 'text-green-400' : 'text-purple-400'}`}>
-              Benter Edge: +{(pick.edge * 100).toFixed(1)}%
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {!isSettled && (
-              <button
-                onClick={() => setShowAiChat(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors"
-              >
-                <MessageSquare className="w-3 h-3" />
-                Chat With AI
-              </button>
-            )}
-            {isSettled && (
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
-                isWinner ? 'bg-green-500/20 text-green-400'
-                : pick.outcome && ['FELL', 'PU', 'UR', 'BD'].includes(pick.outcome) ? 'bg-red-500/20 text-red-400'
-                : 'bg-gray-700 text-gray-400'
-              }`}>
-                {isWinner ? <><CheckCircle className="w-3 h-3" /> WON</> : fmtPos(fp, pick.outcome)}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-3 text-[10px] text-gray-400">
-          <span>Benter: {(pick.ensemble_proba * 100).toFixed(1)}%</span>
-          <span>Market: {(pick.implied_prob * 100).toFixed(1)}%</span>
-        </div>
-      </div>
-
-      <div className="p-4 sm:p-5">
-        {/* Race context */}
-        <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
-          <span className="font-medium text-gray-300">{pick.course}</span>
-          <span>·</span>
-          <span>{pick.off_time?.substring(0, 5)}</span>
-          <span>·</span>
-          <span className="uppercase">{pick.race_type}</span>
-        </div>
-
-        <div className="flex gap-4">
-          {/* Left: Edge Gauge */}
-          <EdgeGauge edge={pick.edge} impliedProb={pick.implied_prob} benterProba={pick.ensemble_proba} />
-
-          {/* Right: Horse info */}
-          <div className="flex-1 min-w-0">
-            <HorseNameWithSilk
-              horseName={pick.horse_name}
-              silkUrl={pick.silk_url || undefined}
-              className="text-white font-bold text-base"
-            />
-
-            <div className="text-xs text-gray-400 mt-1 space-y-0.5">
-              <div className="flex items-center gap-1 flex-wrap">
-                <span>J: {pick.jockey}</span>
-                {pick.jockey_21d_wr >= 10 && (
-                  <span className="text-[10px] text-green-400">({pick.jockey_21d_wr.toFixed(0)}% last 21d)</span>
-                )}
-              </div>
-              <div className="flex items-center gap-1 flex-wrap">
-                <span>T: {pick.trainer}</span>
-                {pick.trainer_course_wr > 0 && (
-                  <span className="text-[10px] text-purple-400">({pick.trainer_course_wr.toFixed(0)}% at course)</span>
-                )}
-                {pick.trainer_21d_wr >= 10 && (
-                  <span className="text-[10px] text-green-400">({pick.trainer_21d_wr.toFixed(0)}% last 21d)</span>
-                )}
-              </div>
-            </div>
-
-            {/* Odds + Market movement */}
-            <div className="flex items-center gap-3 mt-2 flex-wrap">
-              <span className={`text-sm font-bold bg-gray-800 px-2 py-0.5 rounded ${
-                pick.odds_movement === 'steaming' ? 'text-green-400' :
-                pick.odds_movement === 'drifting' ? 'text-red-400' : 'text-white'
-              }`}>
-                {formatOdds(String(pick.current_odds))}
-              </span>
-              <MarketMovementBadge movement={pick.odds_movement} pct={pick.odds_movement_pct} size="md" />
-              {kellyInfo && (
-                <span className="text-xs text-yellow-400 font-medium flex items-center gap-1">
-                  <Gauge className="w-3 h-3" />
-                  Kelly: £{kellyInfo.stake.toFixed(2)}
-                </span>
-              )}
-              {isSettled && kellyInfo && isWinner && (
-                <span className="text-xs font-bold text-green-400">
-                  WON: +£{(kellyInfo.stake * pick.current_odds).toFixed(2)}
-                </span>
-              )}
-              {isSettled && kellyInfo && !isWinner && fp !== null && (
-                <span className="text-xs font-bold text-red-400">
-                  LOST: -£{kellyInfo.stake.toFixed(2)}
-                </span>
-              )}
-            </div>
-
-            {/* Ratings badges */}
-            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-              {pick.rpr > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
-                  RPR {Math.round(pick.rpr)}
-                </span>
-              )}
-              {pick.ts > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
-                  TS {Math.round(pick.ts)}
-                </span>
-              )}
-              {pick.best_speed > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
-                  SPD {Math.round(pick.best_speed)}
-                </span>
-              )}
-              {pick.avg_fp > 0 && pick.avg_fp <= 4 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
-                  Avg FP {Math.round(pick.avg_fp)}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Model probabilities breakdown */}
-        <div className="mt-4 pt-3 border-t border-gray-800 space-y-1.5">
-          <ProbBar label="Benter (main)" value={pick.ensemble_proba} color="text-purple-400" icon={Brain} />
-          <ProbBar label="LightGBM" value={pick.benter_proba} color="text-orange-400" icon={Activity} />
-          <ProbBar label="Random Forest" value={pick.rf_proba} color="text-green-400" icon={TrendingUp} />
-          <ProbBar label="XGBoost" value={pick.xgboost_proba} color="text-blue-400" icon={Target} />
-        </div>
-
-        {/* Expert comment */}
-        {(pick.spotlight || pick.comment) && (
-          <div className="mt-3 pt-3 border-t border-gray-800">
-            <div className="flex items-start gap-2">
-              <MessageSquare className="w-3.5 h-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-gray-300 leading-relaxed italic">{pick.spotlight || pick.comment}</p>
-            </div>
-          </div>
-        )}
-
-        {/* AI Intelligence — informational trust layer */}
-        <div className="mt-3 pt-3 border-t border-gray-800">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 flex-wrap">
-              {mastermindMatch && (
-                <TrustBadge
-                  score={mastermindMatch.trust_score}
-                  tier={mastermindMatch.trust_tier}
-                />
-              )}
-              {patternCount > 0 && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                  <Brain className="w-3 h-3" />
-                  {mastermindMatch?.lifetime_count ?? 0}L + {mastermindMatch?.d21_count ?? 0}D
-                </span>
-              )}
-              {!mastermindMatch && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-800 text-gray-500 border border-gray-700">
-                  <Brain className="w-3 h-3" />
-                  Scanning...
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => setShowMastermind(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors"
-            >
-              <Eye className="w-3 h-3" />
-              AI Intelligence
-            </button>
-          </div>
-        </div>
-
-        {showMastermind && (
-          <MastermindModal
-            horseName={pick.horse_name}
-            lifetimePatterns={mastermindMatch?.lifetime_patterns ?? []}
-            d21Patterns={mastermindMatch?.d21_patterns ?? []}
-            patternCount={mastermindMatch?.pattern_count ?? 0}
-            lifetimeCount={mastermindMatch?.lifetime_count ?? 0}
-            d21Count={mastermindMatch?.d21_count ?? 0}
-            trustScore={mastermindMatch?.trust_score ?? 0}
-            trustTier={mastermindMatch?.trust_tier ?? 'none'}
-            kellyMultiplier={mastermindMatch?.kelly_multiplier ?? 0}
-            kellyStake={kellyInfo?.stake}
-            fairProbability={mastermindMatch?.fair_probability ?? (pick.ensemble_proba * 100)}
-            marketImplied={mastermindMatch?.market_implied ?? (pick.implied_prob * 100)}
-            edgePct={mastermindMatch?.edge_pct ?? (pick.edge / pick.implied_prob * 100)}
-            stakeFraction={mastermindMatch?.stake_fraction ?? 0}
-            worthBetting={mastermindMatch?.worth_betting ?? false}
-            onClose={() => setShowMastermind(false)}
-          />
-        )}
-
-        {showAiChat && (
-          <AiChatModal
-            context={{
-              race_id: pick.race_id,
-              horse_name: pick.horse_name,
-              course: pick.course,
-              off_time: pick.off_time,
-              race_type: pick.race_type,
-              ensemble_proba: pick.ensemble_proba,
-              implied_prob: pick.implied_prob,
-              edge: pick.edge,
-              current_odds: pick.current_odds,
-              opening_odds: pick.opening_odds,
-              jockey: pick.jockey,
-              trainer: pick.trainer,
-            }}
-            silkUrl={pick.silk_url}
-            horseNumber={pick.number}
-            onClose={() => setShowAiChat(false)}
-          />
-        )}
-
-        {/* Action row */}
-        <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-between">
-          {/* Slip toggle — left side */}
-          <div>
-            {onToggleSlip && !isSettled && !hasBet && (
-              <button
-                onClick={onToggleSlip}
-                disabled={!inSlip && slipFull}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  inSlip
-                    ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                    : slipFull
-                    ? 'bg-gray-800 text-gray-600 border border-gray-700 cursor-not-allowed'
-                    : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-yellow-500/30 hover:text-yellow-400'
-                }`}
-                title={inSlip ? 'Remove from slip' : slipFull ? 'Slip full (max 4)' : 'Add to bet slip'}
-              >
-                {inSlip ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-                {inSlip ? 'In Slip' : 'Add to Slip'}
-              </button>
-            )}
-          </div>
-
-          {/* Place bet / status — right side */}
-          <div>
-          {isSettled && bet ? (
-            <div className="text-right">
-              <div className={`font-bold text-sm ${bet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
-                {bet.status === 'won' ? '+' : '-'}£{bet.status === 'won' ? Number(bet.potential_return).toFixed(2) : Number(bet.bet_amount).toFixed(2)}
-              </div>
-            </div>
-          ) : isSettled ? (
-            <span className="text-[10px] text-gray-500">SP: {formatOdds(String(pick.current_odds))}</span>
-          ) : hasBet ? (
-            <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
-              <CheckCircle className="w-4 h-4" />
-              Bet Placed
-            </span>
-          ) : !needsSetup ? (
-            <PlaceBetButton
-              horseName={pick.horse_name}
-              horseId={pick.horse_id}
-              raceId={pick.race_id}
-              raceContext={{ race_id: pick.race_id, course_name: pick.course, off_time: pick.off_time }}
-              odds={pick.current_odds}
-              jockeyName={pick.jockey}
-              trainerName={pick.trainer}
-              size="small"
-              kellyStake={kellyInfo?.stake ?? null}
-              trustTier={mastermindMatch?.trust_tier ?? null}
-              trustScore={mastermindMatch?.trust_score ?? null}
-              edgePct={pick.edge > 0 ? pick.edge : null}
-              ensembleProba={pick.ensemble_proba}
-            />
-          ) : null}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Probability Bar ────────────────────────────────────────────────────
-
-function ProbBar({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: string }) {
-  const pct = Math.round(value * 100)
-  const barColor = value >= 0.3 ? 'bg-green-500' : value >= 0.15 ? 'bg-amber-500' : value > 0 ? 'bg-gray-500' : 'bg-gray-800'
-  return (
-    <div className="flex items-center gap-2">
-      <Icon className={`w-3.5 h-3.5 ${color} flex-shrink-0`} />
-      <span className="text-[11px] text-gray-400 w-24 flex-shrink-0">{label}</span>
-      <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${barColor} transition-all duration-700 ease-out`}
-          style={{ width: `${Math.max(2, Math.min(pct, 100))}%` }} />
-      </div>
-      <span className="text-[11px] text-gray-300 w-8 text-right font-mono">{pct > 0 ? `${pct}%` : '—'}</span>
-    </div>
-  )
-}
-
-function TrustBadge({ score, tier }: { score: number; tier: string }) {
-  const config = {
-    high:   { bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400', icon: ShieldCheck, label: 'Strong' },
-    medium: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: Shield, label: 'Moderate' },
-    low:    { bg: 'bg-orange-500/15', border: 'border-orange-500/30', text: 'text-orange-400', icon: AlertTriangle, label: 'Weak' },
-    none:   { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: Brain, label: 'No signals' },
-  }[tier] ?? { bg: 'bg-gray-700/50', border: 'border-gray-600', text: 'text-gray-500', icon: Brain, label: 'No signals' }
-
-  const Icon = config.icon
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${config.bg} ${config.text} border ${config.border}`}>
-      <Icon className="w-3 h-3" />
-      {config.label} {score > 0 ? `(${score})` : ''}
-    </span>
-  )
-}
-
-function fmtPos(p: number | null, outcome?: string | null) {
-  if (p === null || p === undefined) return ''
-  if (p === 0) return outcome || 'LOST'
-  if (p === 1) return '1st'
-  if (p === 2) return '2nd'
-  if (p === 3) return '3rd'
-  return `${p}th`
-}
-
-// ─── Smart Money Card ───────────────────────────────────────────────────
-
-function SmartMoneyCard({ alert, bet, needsSetup }: {
-  alert: SmartMoneyAlert
-  bet?: any
-  needsSetup: boolean
-}) {
-  const hasBet = !!bet
-
-  return (
-    <div className="relative bg-gray-900/90 backdrop-blur-sm border-2 border-amber-500/40 rounded-2xl overflow-hidden animate-[pulse_3s_ease-in-out_infinite]"
-      style={{ boxShadow: '0 0 20px rgba(245,158,11,0.15), inset 0 1px 0 rgba(245,158,11,0.1)' }}>
-      <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-orange-500/5 pointer-events-none" />
-
-      <div className="px-4 py-3 border-b border-amber-500/20 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
-              Smart Money Confirmed
-            </span>
-          </div>
-          <span className="text-[10px] text-amber-400/70">
-            {new Date(alert.triggered_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-          </span>
-        </div>
-      </div>
-
-      <div className="p-4 relative">
-        <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-          <span className="font-medium text-gray-300">{alert.course}</span>
-          <span>·</span>
-          <span>{alert.off_time?.substring(0, 5)}</span>
-        </div>
-
-        <h3 className="text-lg font-bold text-white mb-3">{alert.horse_name}</h3>
-
-        <div className="grid grid-cols-2 gap-2 mb-3">
-          <div className="bg-gray-800/80 rounded-lg p-2.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Live Edge</div>
-            <div className="text-sm font-bold text-green-400">+{(alert.live_edge * 100).toFixed(1)}%</div>
-          </div>
-          <div className="bg-gray-800/80 rounded-lg p-2.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Backed</div>
-            <div className="text-sm font-bold text-amber-400">{alert.pct_backed.toFixed(0)}%</div>
-          </div>
-          <div className="bg-gray-800/80 rounded-lg p-2.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Odds</div>
-            <div className="text-sm font-bold text-white">
-              <span className="text-gray-500 line-through text-[10px] mr-1">{formatOdds(String(alert.opening_odds))}</span>
-              {formatOdds(String(alert.current_odds))}
-            </div>
-          </div>
-          <div className="bg-gray-800/80 rounded-lg p-2.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Kelly Stake</div>
-            <div className="text-sm font-bold text-yellow-400">£{alert.kelly_stake.toFixed(2)}</div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-[10px] text-gray-500 mb-3">
-          <span>Morning: {(alert.morning_ensemble * 100).toFixed(1)}%</span>
-          <span>→</span>
-          <span className="text-green-400">Live: {(alert.live_ensemble * 100).toFixed(1)}%</span>
-        </div>
-
-        {hasBet ? (
-          <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-green-500/15 text-green-400 border border-green-500/30 w-full justify-center">
-            <CheckCircle className="w-4 h-4" />
-            Bet Placed
-          </span>
-        ) : !needsSetup ? (
-          <PlaceBetButton
-            horseName={alert.horse_name}
-            horseId={alert.horse_id}
-            raceId={alert.race_id}
-            raceContext={{ race_id: alert.race_id, course_name: alert.course, off_time: alert.off_time }}
-            odds={alert.current_odds}
-            size="normal"
-            kellyStake={alert.kelly_stake}
-            edgePct={alert.live_edge > 0 ? alert.live_edge : null}
-            ensembleProba={alert.live_ensemble}
-          />
-        ) : null}
-      </div>
-    </div>
   )
 }
