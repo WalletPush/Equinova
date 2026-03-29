@@ -182,7 +182,7 @@ export function PerformancePage() {
       else if (b.status === 'pending') totalPL -= Number(b.bet_amount)
     }
     const startingBankroll = bankroll - totalPL
-    const roi = totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0
+    const roi = startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0
 
     let runningPL = 0
     let runningStaked = 0
@@ -203,7 +203,7 @@ export function PerformancePage() {
       }
       runningPL += dayPL
       runningStaked += dayStaked
-      const runningROI = runningStaked > 0 ? (runningPL / runningStaked) * 100 : 0
+      const runningROI = startingBankroll > 0 ? (runningPL / startingBankroll) * 100 : 0
       summaries.push({ date, bets: dayBets, wins, losses, pending, dayPL, dayStaked, runningPL, runningStaked, runningROI })
     }
 
