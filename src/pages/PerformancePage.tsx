@@ -10,7 +10,7 @@ import { formatOdds } from '@/lib/odds'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, ReferenceDot, Line,
-  BarChart, Bar, Cell, Legend,
+  BarChart, Bar, Cell,
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Trophy, Target, Loader2,
@@ -51,10 +51,10 @@ interface DaySummary {
   losses: number
   pending: number
   dayPL: number
-  dayStaked: number
+  daySettledStaked: number
   runningPL: number
-  runningStaked: number
-  runningROI: number
+  runningSettledStaked: number
+  runningBettingROI: number
 }
 
 type PeriodFilter = '7d' | '14d' | '30d' | '90d' | 'lifetime'
@@ -112,6 +112,13 @@ function TrustTooltip({ active, payload }: any) {
   )
 }
 
+// ─── Settled-only P/L helpers ─────────────────────────────────────────
+function settledPLForBet(b: UserBet): number {
+  if (b.status === 'won') return Number(b.potential_return) - Number(b.bet_amount)
+  if (b.status === 'lost') return -Number(b.bet_amount)
+  return 0
+}
+
 export function PerformancePage() {
   const { user } = useAuth()
   const { bankroll, needsSetup, isLoading: bankrollLoading, addFunds, isAddingFunds } = useBankroll()
@@ -126,7 +133,7 @@ export function PerformancePage() {
     queryKey: ['user-bets-all'],
     queryFn: async () => {
       const res = await callSupabaseFunction('get-user-bets', {
-        limit: 500,
+        limit: 5000,
         offset: 0,
         order_by: 'created_at',
         order_dir: 'asc',
@@ -148,7 +155,7 @@ export function PerformancePage() {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${anonKey}`, 'apikey': anonKey },
-        body: JSON.stringify({ start_date: '2026-03-01', end_date: today, race_type: 'all', model: 'ensemble', signal: 'all' }),
+        body: JSON.stringify({ start_date: '2025-01-01', end_date: today, race_type: 'all', model: 'ensemble', signal: 'all' }),
       })
       if (!res.ok) return null
       const json = await res.json()
@@ -170,21 +177,29 @@ export function PerformancePage() {
     })
   }, [bets, period])
 
+  // Derive starting bankroll from ALL bets (settled + pending).
+  // bankroll = starting + settledPL - pendingExposure  ⟹  starting = bankroll - settledPL + pendingExposure
   const startingBankroll = useMemo(() => {
     if (!bets.length) return bankroll
-    let allTimePL = 0
+    let settledPL = 0
+    let pendingExposure = 0
     for (const b of bets) {
-      if (b.status === 'won') allTimePL += Number(b.potential_return) - Number(b.bet_amount)
-      else if (b.status === 'lost') allTimePL -= Number(b.bet_amount)
-      else if (b.status === 'pending') allTimePL -= Number(b.bet_amount)
+      if (b.status === 'won') settledPL += Number(b.potential_return) - Number(b.bet_amount)
+      else if (b.status === 'lost') settledPL -= Number(b.bet_amount)
+      else if (b.status === 'pending') pendingExposure += Number(b.bet_amount)
     }
-    return bankroll - allTimePL
+    return bankroll - settledPL + pendingExposure
   }, [bets, bankroll])
 
+  // All-time bankroll return based on SETTLED results only
   const bankrollGrowth = useMemo(() => {
     if (!bets.length || startingBankroll <= 0) return 0
-    return ((bankroll - startingBankroll) / startingBankroll) * 100
-  }, [bets, bankroll, startingBankroll])
+    let settledPL = 0
+    for (const b of bets) {
+      settledPL += settledPLForBet(b)
+    }
+    return (settledPL / startingBankroll) * 100
+  }, [bets, startingBankroll])
 
   const systemBenchmark = useMemo(() => {
     if (!systemData?.ml_models?.by_date) return null
@@ -208,6 +223,7 @@ export function PerformancePage() {
     }
   }, [systemData])
 
+  // ─── Core stats — ALL P/L is settled-only ──────────────────────────
   const { dailySummaries, totalStats } = useMemo(() => {
     if (!filteredBets.length) return { dailySummaries: [], totalStats: null }
 
@@ -222,17 +238,22 @@ export function PerformancePage() {
     const totalWins = filteredBets.filter(b => b.status === 'won').length
     const totalLosses = filteredBets.filter(b => b.status === 'lost').length
     const totalPending = filteredBets.filter(b => b.status === 'pending').length
-    const totalStaked = filteredBets.reduce((s, b) => s + Number(b.bet_amount), 0)
-    let totalPL = 0
-    for (const b of filteredBets) {
-      if (b.status === 'won') totalPL += Number(b.potential_return) - Number(b.bet_amount)
-      else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
-      else if (b.status === 'pending') totalPL -= Number(b.bet_amount)
-    }
-    const roi = startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0
+    const settledBets = filteredBets.filter(b => b.status !== 'pending')
+
+    let settledPL = 0
+    for (const b of settledBets) settledPL += settledPLForBet(b)
+
+    const pendingExposure = filteredBets
+      .filter(b => b.status === 'pending')
+      .reduce((s, b) => s + Number(b.bet_amount), 0)
+
+    const totalSettledStaked = settledBets.reduce((s, b) => s + Number(b.bet_amount), 0)
+
+    const bankrollReturn = startingBankroll > 0 ? (settledPL / startingBankroll) * 100 : 0
+    const bettingROI = totalSettledStaked > 0 ? (settledPL / totalSettledStaked) * 100 : 0
 
     let runningPL = 0
-    let runningStaked = 0
+    let runningSettledStaked = 0
     const summaries: DaySummary[] = []
     const sortedDays = [...byDay.keys()].sort()
 
@@ -241,20 +262,18 @@ export function PerformancePage() {
       const wins = dayBets.filter(b => b.status === 'won').length
       const losses = dayBets.filter(b => b.status === 'lost').length
       const pending = dayBets.filter(b => b.status === 'pending').length
-      const dayStaked = dayBets.reduce((s, b) => s + Number(b.bet_amount), 0)
+      const daySettled = dayBets.filter(b => b.status !== 'pending')
+      const daySettledStaked = daySettled.reduce((s, b) => s + Number(b.bet_amount), 0)
       let dayPL = 0
-      for (const b of dayBets) {
-        if (b.status === 'won') dayPL += Number(b.potential_return) - Number(b.bet_amount)
-        else if (b.status === 'lost') dayPL -= Number(b.bet_amount)
-        else if (b.status === 'pending') dayPL -= Number(b.bet_amount)
-      }
+      for (const b of daySettled) dayPL += settledPLForBet(b)
       runningPL += dayPL
-      runningStaked += dayStaked
-      const runningROI = startingBankroll > 0 ? (runningPL / startingBankroll) * 100 : 0
-      summaries.push({ date, bets: dayBets, wins, losses, pending, dayPL, dayStaked, runningPL, runningStaked, runningROI })
+      runningSettledStaked += daySettledStaked
+      const runningBettingROI = runningSettledStaked > 0 ? (runningPL / runningSettledStaked) * 100 : 0
+      summaries.push({ date, bets: dayBets, wins, losses, pending, dayPL, daySettledStaked, runningPL, runningSettledStaked, runningBettingROI })
     }
 
-    const winRate = (totalWins + totalLosses) > 0 ? (totalWins / (totalWins + totalLosses)) * 100 : 0
+    const settledCount = totalWins + totalLosses
+    const winRate = settledCount > 0 ? (totalWins / settledCount) * 100 : 0
     const winningDays = summaries.filter(d => d.dayPL > 0).length
     const losingDays = summaries.filter(d => d.dayPL < 0).length
 
@@ -275,8 +294,7 @@ export function PerformancePage() {
       .filter(b => b.status === 'lost')
       .reduce((s, b) => s + Number(b.bet_amount), 0)
     const profitFactor = losingAmount > 0 ? winningReturns / losingAmount : (winningReturns > 0 ? Infinity : 0)
-    const settledCount = totalWins + totalLosses
-    const expectancy = settledCount > 0 ? totalPL / settledCount : 0
+    const expectancy = settledCount > 0 ? settledPL / settledCount : 0
 
     let longestWinStreak = 0, longestLoseStreak = 0, curWin = 0, curLose = 0
     for (const b of filteredBets) {
@@ -292,14 +310,15 @@ export function PerformancePage() {
 
     const bestDay = summaries.length > 0 ? summaries.reduce((a, b) => b.dayPL > a.dayPL ? b : a) : null
     const worstDay = summaries.length > 0 ? summaries.reduce((a, b) => b.dayPL < a.dayPL ? b : a) : null
-    const avgStakePct = startingBankroll > 0 && filteredBets.length > 0
-      ? (totalStaked / filteredBets.length / startingBankroll) * 100 : 0
+    const avgStakePct = startingBankroll > 0 && settledBets.length > 0
+      ? (totalSettledStaked / settledBets.length / startingBankroll) * 100 : 0
 
     return {
       dailySummaries: summaries,
       totalStats: {
-        totalBets: filteredBets.length, totalWins, totalLosses, totalPending,
-        totalPL, totalStaked, roi, startingBankroll,
+        totalBets: filteredBets.length, settledCount, totalWins, totalLosses, totalPending,
+        settledPL, pendingExposure, totalSettledStaked,
+        bankrollReturn, bettingROI, startingBankroll,
         winRate, winningDays, losingDays, totalDays: summaries.length,
         maxDrawdown, maxDrawdownPct, profitFactor, expectancy,
         longestWinStreak, longestLoseStreak, bestDay, worstDay, avgStakePct,
@@ -307,22 +326,43 @@ export function PerformancePage() {
     }
   }, [filteredBets, bankroll, startingBankroll])
 
+  // System benchmark: zero-base from the first day of the user's filtered period
   const chartData = useMemo(() => {
     if (!dailySummaries.length) return []
     let running = 0
     const startBR = totalStats?.startingBankroll ?? bankroll
-    const avgStake = totalStats && totalStats.totalBets > 0 ? totalStats.totalStaked / totalStats.totalBets : 1
+    const avgStake = totalStats && totalStats.settledCount > 0
+      ? totalStats.totalSettledStaked / totalStats.settledCount : 1
+
+    let systemBaseOffset = 0
+    if (systemBenchmark) {
+      const firstDate = dailySummaries[0]?.date
+      const sysDates = Object.keys(systemBenchmark.cumulativeByDate).sort()
+      for (const d of sysDates) {
+        if (d >= firstDate) break
+        systemBaseOffset = systemBenchmark.cumulativeByDate[d]
+      }
+    }
+
     const data: { label: string; pl: number; bankroll: number; systemPL: number | null }[] = [
       { label: 'Start', pl: 0, bankroll: startBR, systemPL: systemBenchmark ? 0 : null },
     ]
     for (const d of dailySummaries) {
       running += d.dayPL
-      const sysCum = systemBenchmark?.cumulativeByDate[d.date]
+      let sysPL: number | null = null
+      if (systemBenchmark) {
+        const rawCum = systemBenchmark.cumulativeByDate[d.date]
+        if (rawCum != null) {
+          sysPL = Number(((rawCum - systemBaseOffset) * avgStake).toFixed(2))
+        } else {
+          sysPL = data[data.length - 1]?.systemPL ?? 0
+        }
+      }
       data.push({
         label: formatDateShort(d.date),
         pl: Number(running.toFixed(2)),
         bankroll: Number((startBR + running).toFixed(2)),
-        systemPL: sysCum != null ? Number((sysCum * avgStake).toFixed(2)) : data[data.length - 1]?.systemPL ?? null,
+        systemPL: sysPL,
       })
     }
     return data
@@ -349,7 +389,7 @@ export function PerformancePage() {
   }, [chartData])
 
   const insights = useMemo(() => {
-    if (!totalStats || !filteredBets.length) return []
+    if (!totalStats || totalStats.settledCount === 0) return []
     const items: { text: string; color: string }[] = []
 
     if (systemBenchmark && systemBenchmark.totalPicks > 0) {
@@ -364,12 +404,12 @@ export function PerformancePage() {
 
     if (totalStats.profitFactor > 1.5 && totalStats.profitFactor < 99) {
       items.push({ text: `For every £1 lost on losing bets, your winners bring back £${totalStats.profitFactor.toFixed(2)} — you're making more than you lose.`, color: 'text-green-400' })
-    } else if (totalStats.profitFactor < 1 && totalStats.profitFactor > 0) {
+    } else if (totalStats.profitFactor > 0 && totalStats.profitFactor < 1) {
       items.push({ text: `Your losses are currently outweighing your wins — sticking to higher-confidence picks could help.`, color: 'text-yellow-400' })
     }
 
     if (totalStats.expectancy > 0) {
-      items.push({ text: `On average you make ${fmtPL(totalStats.expectancy)} profit per bet — the more you bet, the more you earn.`, color: 'text-green-400' })
+      items.push({ text: `On average you make ${fmtPL(totalStats.expectancy)} profit per settled bet — the more you bet, the more you earn.`, color: 'text-green-400' })
     }
 
     if (totalStats.maxDrawdownPct > 15) {
@@ -383,8 +423,9 @@ export function PerformancePage() {
     }
 
     return items.slice(0, 3)
-  }, [totalStats, filteredBets, systemBenchmark])
+  }, [totalStats, systemBenchmark])
 
+  // Monthly: settled P/L only, ROI = P/L ÷ staked (true betting ROI)
   const monthSummaries = useMemo(() => {
     if (!filteredBets.length) return []
     const byMonth = new Map<string, UserBet[]>()
@@ -398,20 +439,20 @@ export function PerformancePage() {
     return [...byMonth.entries()]
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([month, monthBets]) => {
+        const settled = monthBets.filter(b => b.status !== 'pending')
         const wins = monthBets.filter(b => b.status === 'won').length
         const losses = monthBets.filter(b => b.status === 'lost').length
-        const staked = monthBets.reduce((s, b) => s + Number(b.bet_amount), 0)
+        const pending = monthBets.filter(b => b.status === 'pending').length
+        const settledStaked = settled.reduce((s, b) => s + Number(b.bet_amount), 0)
         let pl = 0
-        for (const b of monthBets) {
-          if (b.status === 'won') pl += Number(b.potential_return) - Number(b.bet_amount)
-          else if (b.status === 'lost') pl -= Number(b.bet_amount)
-        }
+        for (const b of settled) pl += settledPLForBet(b)
         const wr = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
-        const roi = startingBankroll > 0 ? (pl / startingBankroll) * 100 : 0
-        return { month, label: formatMonthLabel(month), totalBets: monthBets.length, wins, losses, staked, pl, roi, winRate: wr }
+        const roi = settledStaked > 0 ? (pl / settledStaked) * 100 : 0
+        return { month, label: formatMonthLabel(month), totalBets: monthBets.length, settled: settled.length, pending, wins, losses, settledStaked, pl, roi, winRate: wr }
       })
-  }, [filteredBets, startingBankroll])
+  }, [filteredBets])
 
+  // Trust tier: settled P/L only, ROI = P/L ÷ staked
   const trustTierSummaries = useMemo(() => {
     const hasTrustData = filteredBets.some(b => b.trust_tier)
     if (!hasTrustData) return []
@@ -423,36 +464,31 @@ export function PerformancePage() {
     return tiers.map(({ key, bgClass, textClass, barColor }) => {
       const tierBets = filteredBets.filter(b => b.trust_tier === key)
       if (!tierBets.length) return null
+      const settled = tierBets.filter(b => b.status !== 'pending')
       const wins = tierBets.filter(b => b.status === 'won').length
       const losses = tierBets.filter(b => b.status === 'lost').length
-      const staked = tierBets.reduce((s, b) => s + Number(b.bet_amount), 0)
+      const settledStaked = settled.reduce((s, b) => s + Number(b.bet_amount), 0)
       let pl = 0
-      for (const b of tierBets) {
-        if (b.status === 'won') pl += Number(b.potential_return) - Number(b.bet_amount)
-        else if (b.status === 'lost') pl -= Number(b.bet_amount)
-      }
+      for (const b of settled) pl += settledPLForBet(b)
       const wr = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
-      const roi = startingBankroll > 0 ? (pl / startingBankroll) * 100 : 0
-      const avgStake = tierBets.length > 0 ? staked / tierBets.length : 0
+      const roi = settledStaked > 0 ? (pl / settledStaked) * 100 : 0
+      const avgStake = settled.length > 0 ? settledStaked / settled.length : 0
       const edgeBets = tierBets.filter(b => b.edge_pct != null)
       const avgEdge = edgeBets.length > 0
         ? edgeBets.reduce((s, b) => s + Number(b.edge_pct ?? 0), 0) / edgeBets.length * 100 : 0
-      return { key, bgClass, textClass, barColor, totalBets: tierBets.length, wins, losses, staked, pl, roi, winRate: wr, avgStake, avgEdge }
-    }).filter(Boolean) as { key: string; bgClass: string; textClass: string; barColor: string; totalBets: number; wins: number; losses: number; staked: number; pl: number; roi: number; winRate: number; avgStake: number; avgEdge: number }[]
-  }, [filteredBets, startingBankroll])
+      return { key, bgClass, textClass, barColor, totalBets: tierBets.length, wins, losses, settledStaked, pl, roi, winRate: wr, avgStake, avgEdge }
+    }).filter(Boolean) as { key: string; bgClass: string; textClass: string; barColor: string; totalBets: number; wins: number; losses: number; settledStaked: number; pl: number; roi: number; winRate: number; avgStake: number; avgEdge: number }[]
+  }, [filteredBets])
 
   const exportCSV = useCallback(() => {
     const headers = ['Date', 'Course', 'Time', 'Horse', 'Odds', 'Stake', 'Status', 'P/L', 'Trust Tier', 'Edge %']
     const rows = filteredBets.map(b => {
-      const amt = Number(b.bet_amount)
-      const ret = Number(b.potential_return)
-      let pl = 0
-      if (b.status === 'won') pl = ret - amt
-      else if (b.status === 'lost') pl = -amt
+      const pl = settledPLForBet(b)
       return [
         b.race_date || b.created_at?.split('T')[0] || '',
         b.course || '', b.off_time?.substring(0, 5) || '', b.horse_name || '',
-        b.current_odds || '', amt.toFixed(2), b.status, pl.toFixed(2),
+        b.current_odds || '', Number(b.bet_amount).toFixed(2), b.status,
+        b.status === 'pending' ? '' : pl.toFixed(2),
         b.trust_tier || '', b.edge_pct != null ? (Number(b.edge_pct) * 100).toFixed(1) : '',
       ]
     })
@@ -575,6 +611,7 @@ export function PerformancePage() {
               <>
                 {/* 6 KPI Cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {/* 1. Bankroll */}
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-1">
                       <Wallet className="w-4 h-4 text-yellow-400" />
@@ -586,19 +623,24 @@ export function PerformancePage() {
                     </div>
                   </div>
 
+                  {/* 2. Settled P/L — realised profit only */}
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-1">
-                      {(totalStats?.roi ?? 0) >= 0
-                        ? <TrendingUp className="w-4 h-4 text-green-400" />
-                        : <TrendingDown className="w-4 h-4 text-red-400" />}
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">ROI</span>
+                      <Trophy className="w-4 h-4 text-amber-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Settled P/L</span>
                     </div>
-                    <div className={`text-xl font-bold ${(totalStats?.roi ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {(totalStats?.roi ?? 0) >= 0 ? '+' : ''}{(totalStats?.roi ?? 0).toFixed(1)}%
+                    <div className={`text-xl font-bold ${(totalStats?.settledPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {fmtPL(totalStats?.settledPL ?? 0)}
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5">from £{startingBankroll.toFixed(0)} bankroll</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {totalStats?.settledCount ?? 0} settled
+                      {(totalStats?.totalPending ?? 0) > 0 && (
+                        <span className="text-yellow-500"> · {totalStats?.totalPending}P (£{(totalStats?.pendingExposure ?? 0).toFixed(0)} at risk)</span>
+                      )}
+                    </div>
                   </div>
 
+                  {/* 3. Win Rate */}
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-1">
                       <Target className="w-4 h-4 text-blue-400" />
@@ -607,55 +649,55 @@ export function PerformancePage() {
                     <div className="text-xl font-bold text-white">{(totalStats?.winRate ?? 0).toFixed(1)}%</div>
                     <div className="text-xs text-gray-500 mt-0.5">
                       {totalStats?.totalWins ?? 0}W / {totalStats?.totalLosses ?? 0}L
-                      {(totalStats?.totalPending ?? 0) > 0 && ` / ${totalStats?.totalPending}P`}
                     </div>
                   </div>
 
+                  {/* 4. Bankroll Return — P/L ÷ starting bankroll */}
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-1">
-                      <Trophy className="w-4 h-4 text-amber-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">P/L</span>
+                      {(totalStats?.bankrollReturn ?? 0) >= 0
+                        ? <TrendingUp className="w-4 h-4 text-green-400" />
+                        : <TrendingDown className="w-4 h-4 text-red-400" />}
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Bankroll Return</span>
                     </div>
-                    <div className={`text-xl font-bold ${(totalStats?.totalPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {fmtPL(totalStats?.totalPL ?? 0)}
+                    <div className={`text-xl font-bold ${(totalStats?.bankrollReturn ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {(totalStats?.bankrollReturn ?? 0) >= 0 ? '+' : ''}{(totalStats?.bankrollReturn ?? 0).toFixed(1)}%
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {totalStats?.totalBets ?? 0} bets, {totalStats?.totalDays ?? 0} days
-                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">from £{startingBankroll.toFixed(0)} bankroll</div>
                   </div>
 
-                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <ArrowDownRight className="w-4 h-4 text-red-400" />
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Drawdown</span>
-                    </div>
-                    <div className="text-xl font-bold text-red-400">
-                      {totalStats ? `-£${totalStats.maxDrawdown.toFixed(2)}` : '£0.00'}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {totalStats ? `${totalStats.maxDrawdownPct.toFixed(1)}% of peak` : '0% of peak'}
-                    </div>
-                  </div>
-
+                  {/* 5. Betting ROI — P/L ÷ total staked */}
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-1">
                       <Activity className="w-4 h-4 text-cyan-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Betting ROI</span>
+                    </div>
+                    <div className={`text-xl font-bold ${(totalStats?.bettingROI ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {(totalStats?.bettingROI ?? 0) >= 0 ? '+' : ''}{(totalStats?.bettingROI ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">£{(totalStats?.totalSettledStaked ?? 0).toFixed(0)} staked</div>
+                  </div>
+
+                  {/* 6. Expectancy — settled P/L ÷ settled count */}
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ArrowDownRight className="w-4 h-4 text-purple-400" />
                       <span className="text-[10px] text-gray-500 uppercase tracking-wider">Expectancy</span>
                     </div>
                     <div className={`text-xl font-bold ${(totalStats?.expectancy ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {fmtPL(totalStats?.expectancy ?? 0)}
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
-                      per bet &middot; PF: {totalStats ? (totalStats.profitFactor >= 99 ? '∞' : totalStats.profitFactor.toFixed(2)) : '0.00'}
+                      per settled bet · PF: {totalStats ? (totalStats.profitFactor >= 99 ? '∞' : totalStats.profitFactor.toFixed(2)) : '0.00'}
                     </div>
                   </div>
                 </div>
 
-                {/* Equity Curve */}
+                {/* Equity Curve — settled P/L only */}
                 {chartData.length > 1 && (
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-sm font-semibold text-gray-300">P/L Curve</h2>
+                      <h2 className="text-sm font-semibold text-gray-300">Settled P/L Curve</h2>
                       {systemBenchmark && (
                         <div className="flex items-center gap-3 text-[10px]">
                           <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-400 inline-block rounded" /> You</span>
@@ -732,13 +774,13 @@ export function PerformancePage() {
                       </div>
                     </div>
                     <div className="bg-gray-800/60 rounded-lg px-3 py-2">
-                      <div className="text-[10px] text-gray-500 uppercase">Streaks</div>
-                      <div className="text-sm font-semibold">
-                        <span className="text-green-400">{totalStats.longestWinStreak}W</span>
-                        <span className="text-gray-600 mx-1">/</span>
-                        <span className="text-red-400">{totalStats.longestLoseStreak}L</span>
+                      <div className="text-[10px] text-gray-500 uppercase">Drawdown</div>
+                      <div className="text-sm font-semibold text-red-400">
+                        {totalStats.maxDrawdown > 0 ? `-£${totalStats.maxDrawdown.toFixed(0)}` : '£0'}
                       </div>
-                      <div className="text-[10px] text-gray-600">longest run</div>
+                      <div className="text-[10px] text-gray-600">
+                        {totalStats.maxDrawdownPct.toFixed(1)}% of peak
+                      </div>
                     </div>
                   </div>
                 )}
@@ -788,11 +830,11 @@ export function PerformancePage() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-gray-500 mb-1.5">ROI</div>
+                        <div className="text-gray-500 mb-1.5">Betting ROI</div>
                         <div className="flex items-center justify-center gap-2">
                           <div>
-                            <div className={`text-base font-bold ${totalStats.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(0)}%
+                            <div className={`text-base font-bold ${totalStats.bettingROI >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {totalStats.bettingROI >= 0 ? '+' : ''}{totalStats.bettingROI.toFixed(0)}%
                             </div>
                             <div className="text-[9px] text-gray-600">You</div>
                           </div>
@@ -806,10 +848,10 @@ export function PerformancePage() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-gray-500 mb-1.5">Picks</div>
+                        <div className="text-gray-500 mb-1.5">Settled</div>
                         <div className="flex items-center justify-center gap-2">
                           <div>
-                            <div className="text-base font-bold text-white">{totalStats.totalBets}</div>
+                            <div className="text-base font-bold text-white">{totalStats.settledCount}</div>
                             <div className="text-[9px] text-gray-600">You</div>
                           </div>
                           <div className="text-gray-600 text-[10px]">vs</div>
@@ -887,8 +929,8 @@ export function PerformancePage() {
                                     <span className="text-red-500">{day.losses}L</span>
                                     {day.pending > 0 && <span className="text-yellow-500">{day.pending}P</span>}
                                     <span className="text-gray-600">|</span>
-                                    <span className={day.runningROI >= 0 ? 'text-green-500' : 'text-red-500'}>
-                                      ROI: {day.runningROI >= 0 ? '+' : ''}{day.runningROI.toFixed(1)}%
+                                    <span className={day.runningBettingROI >= 0 ? 'text-green-500' : 'text-red-500'}>
+                                      ROI: {day.runningBettingROI >= 0 ? '+' : ''}{day.runningBettingROI.toFixed(1)}%
                                     </span>
                                   </div>
                                 </div>
@@ -909,9 +951,9 @@ export function PerformancePage() {
                           <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mt-3">
                             <div className="grid grid-cols-3 gap-4 text-center">
                               <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Total P/L</div>
-                                <div className={`text-lg font-bold ${totalStats.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {fmtPL(totalStats.totalPL)}
+                                <div className="text-[10px] text-gray-500 uppercase mb-1">Settled P/L</div>
+                                <div className={`text-lg font-bold ${totalStats.settledPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {fmtPL(totalStats.settledPL)}
                                 </div>
                               </div>
                               <div>
@@ -919,9 +961,9 @@ export function PerformancePage() {
                                 <div className="text-lg font-bold text-white">£{bankroll.toFixed(2)}</div>
                               </div>
                               <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">ROI</div>
-                                <div className={`text-lg font-bold ${totalStats.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%
+                                <div className="text-[10px] text-gray-500 uppercase mb-1">Betting ROI</div>
+                                <div className={`text-lg font-bold ${totalStats.bettingROI >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {totalStats.bettingROI >= 0 ? '+' : ''}{totalStats.bettingROI.toFixed(1)}%
                                 </div>
                               </div>
                             </div>
@@ -953,8 +995,8 @@ export function PerformancePage() {
                         </div>
                         <div className="grid grid-cols-4 gap-3 text-center text-[11px]">
                           <div>
-                            <div className="text-gray-500 mb-0.5">Bets</div>
-                            <div className="text-white font-medium">{m.totalBets}</div>
+                            <div className="text-gray-500 mb-0.5">Settled</div>
+                            <div className="text-white font-medium">{m.settled}{m.pending > 0 && <span className="text-yellow-500"> +{m.pending}P</span>}</div>
                           </div>
                           <div>
                             <div className="text-gray-500 mb-0.5">Win Rate</div>
@@ -962,10 +1004,10 @@ export function PerformancePage() {
                           </div>
                           <div>
                             <div className="text-gray-500 mb-0.5">Staked</div>
-                            <div className="text-white font-medium">£{m.staked.toFixed(0)}</div>
+                            <div className="text-white font-medium">£{m.settledStaked.toFixed(0)}</div>
                           </div>
                           <div>
-                            <div className="text-gray-500 mb-0.5">ROI</div>
+                            <div className="text-gray-500 mb-0.5">Betting ROI</div>
                             <div className={`font-medium ${m.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                               {m.roi >= 0 ? '+' : ''}{m.roi.toFixed(1)}%
                             </div>
@@ -998,7 +1040,7 @@ export function PerformancePage() {
                     ) : (
                       <>
                         <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                          <h3 className="text-sm font-semibold text-gray-300 mb-3">ROI by Trust Tier</h3>
+                          <h3 className="text-sm font-semibold text-gray-300 mb-3">Betting ROI by Trust Tier</h3>
                           <ResponsiveContainer width="100%" height={140}>
                             <BarChart data={trustTierSummaries.map(t => ({
                               name: t.key, roi: Number(t.roi.toFixed(1)), winRate: Number(t.winRate.toFixed(1)),
@@ -1042,7 +1084,7 @@ export function PerformancePage() {
                                 <div className="text-white font-medium">£{t.avgStake.toFixed(2)}</div>
                               </div>
                               <div>
-                                <div className="text-gray-500 mb-0.5">ROI</div>
+                                <div className="text-gray-500 mb-0.5">Betting ROI</div>
                                 <div className={`font-medium ${t.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                   {t.roi >= 0 ? '+' : ''}{t.roi.toFixed(1)}%
                                 </div>
@@ -1082,7 +1124,7 @@ function BetRow({ bet, showDate = false }: { bet: UserBet; showDate?: boolean })
   const potentialReturn = Number(bet.potential_return)
 
   let pl = 0
-  if (bet.status === 'won') pl = potentialReturn
+  if (bet.status === 'won') pl = potentialReturn - amount
   else if (bet.status === 'lost') pl = -amount
 
   return (
