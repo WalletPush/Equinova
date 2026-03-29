@@ -9,14 +9,14 @@ import { callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, ReferenceLine,
-  BarChart, Bar, Cell,
+  Tooltip, ResponsiveContainer, ReferenceLine, ReferenceDot, Line,
+  BarChart, Bar, Cell, Legend,
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Trophy, Target, Loader2,
   ChevronDown, ChevronUp, BarChart3, Wallet, CheckCircle,
   XCircle, Clock, Zap, Plus, Download, ShieldCheck,
-  Activity, ArrowDownRight,
+  Activity, ArrowDownRight, Brain, Users,
 } from 'lucide-react'
 
 interface UserBet {
@@ -89,7 +89,10 @@ function PLTooltip({ active, payload }: any) {
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-xl text-xs">
       <div className="text-gray-400 mb-1">{d.label}</div>
-      <div className={`font-bold ${d.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtPL(d.pl)}</div>
+      <div className={`font-bold ${d.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>You: {fmtPL(d.pl)}</div>
+      {d.systemPL != null && (
+        <div className="text-cyan-400 mt-0.5">System: {fmtPL(d.systemPL)}</div>
+      )}
       <div className="text-gray-500 mt-0.5">Bankroll: £{d.bankroll.toFixed(2)}</div>
     </div>
   )
@@ -136,6 +139,25 @@ export function PerformancePage() {
 
   const bets = betsData?.bets ?? []
 
+  const { data: systemData } = useQuery({
+    queryKey: ['system-benchmark'],
+    queryFn: async () => {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/performance-summary`
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${anonKey}`, 'apikey': anonKey },
+        body: JSON.stringify({ start_date: '2026-03-01', end_date: today, race_type: 'all', model: 'ensemble', signal: 'all' }),
+      })
+      if (!res.ok) return null
+      const json = await res.json()
+      return json?.data ?? null
+    },
+    staleTime: 1000 * 60 * 60,
+    enabled: !!user,
+  })
+
   const filteredBets = useMemo(() => {
     if (period === 'lifetime') return bets
     const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[period]
@@ -163,6 +185,28 @@ export function PerformancePage() {
     if (!bets.length || startingBankroll <= 0) return 0
     return ((bankroll - startingBankroll) / startingBankroll) * 100
   }, [bets, bankroll, startingBankroll])
+
+  const systemBenchmark = useMemo(() => {
+    if (!systemData?.ml_models?.by_date) return null
+    const byDate = systemData.ml_models.by_date as Record<string, Record<string, { total_picks: number; wins: number; win_rate: number; top3_rate: number; profit: number; roi_pct: number }>>
+    const agg = (systemData.ml_models.aggregated as any)?.ensemble
+    const dates = Object.keys(byDate).sort()
+    let cumulative = 0
+    const cumulativeByDate: Record<string, number> = {}
+    for (const date of dates) {
+      const stats = byDate[date]?.ensemble
+      if (stats) cumulative += stats.profit
+      cumulativeByDate[date] = cumulative
+    }
+    return {
+      cumulativeByDate,
+      totalPicks: agg?.total_picks ?? 0,
+      wins: agg?.wins ?? 0,
+      winRate: agg?.win_rate ?? 0,
+      roi: agg?.roi_pct ?? 0,
+      profit: agg?.profit ?? 0,
+    }
+  }, [systemData])
 
   const { dailySummaries, totalStats } = useMemo(() => {
     if (!filteredBets.length) return { dailySummaries: [], totalStats: null }
@@ -267,17 +311,22 @@ export function PerformancePage() {
     if (!dailySummaries.length) return []
     let running = 0
     const startBR = totalStats?.startingBankroll ?? bankroll
-    const data = [{ label: 'Start', pl: 0, bankroll: startBR }]
+    const avgStake = totalStats && totalStats.totalBets > 0 ? totalStats.totalStaked / totalStats.totalBets : 1
+    const data: { label: string; pl: number; bankroll: number; systemPL: number | null }[] = [
+      { label: 'Start', pl: 0, bankroll: startBR, systemPL: systemBenchmark ? 0 : null },
+    ]
     for (const d of dailySummaries) {
       running += d.dayPL
+      const sysCum = systemBenchmark?.cumulativeByDate[d.date]
       data.push({
         label: formatDateShort(d.date),
         pl: Number(running.toFixed(2)),
         bankroll: Number((startBR + running).toFixed(2)),
+        systemPL: sysCum != null ? Number((sysCum * avgStake).toFixed(2)) : data[data.length - 1]?.systemPL ?? null,
       })
     }
     return data
-  }, [dailySummaries, totalStats, bankroll])
+  }, [dailySummaries, totalStats, bankroll, systemBenchmark])
 
   const gradientOffset = useMemo(() => {
     if (!chartData.length) return 1
@@ -287,6 +336,54 @@ export function PerformancePage() {
     if (min >= 0) return 1
     return max / (max - min)
   }, [chartData])
+
+  const maxDrawdownPoint = useMemo(() => {
+    if (chartData.length < 2) return null
+    let peak = 0, maxDD = 0, maxIdx = -1
+    for (let i = 0; i < chartData.length; i++) {
+      if (chartData[i].pl > peak) peak = chartData[i].pl
+      const dd = peak - chartData[i].pl
+      if (dd > maxDD) { maxDD = dd; maxIdx = i }
+    }
+    return maxIdx > 0 && maxDD > 0 ? { idx: maxIdx, label: chartData[maxIdx].label, pl: chartData[maxIdx].pl, dd: maxDD } : null
+  }, [chartData])
+
+  const insights = useMemo(() => {
+    if (!totalStats || !filteredBets.length) return []
+    const items: { text: string; color: string }[] = []
+
+    if (systemBenchmark && systemBenchmark.totalPicks > 0) {
+      const sysWR = systemBenchmark.winRate
+      const diff = totalStats.winRate - sysWR
+      if (diff > 0) {
+        items.push({ text: `Your ${totalStats.winRate.toFixed(0)}% win rate beats the system's ${sysWR.toFixed(0)}% — your bet selection is adding alpha.`, color: 'text-green-400' })
+      } else if (diff < -5) {
+        items.push({ text: `The system picks winners at ${sysWR.toFixed(0)}% vs your ${totalStats.winRate.toFixed(0)}% — following more Top Picks could help.`, color: 'text-yellow-400' })
+      }
+    }
+
+    if (totalStats.profitFactor > 1.5 && totalStats.profitFactor < 99) {
+      items.push({ text: `Profit factor of ${totalStats.profitFactor.toFixed(2)} — your winners are paying ${totalStats.profitFactor.toFixed(1)}x more than your losers cost.`, color: 'text-green-400' })
+    } else if (totalStats.profitFactor < 1 && totalStats.profitFactor > 0) {
+      items.push({ text: `Profit factor below 1.0 — consider tightening to higher-edge picks only.`, color: 'text-yellow-400' })
+    }
+
+    if (totalStats.expectancy > 0) {
+      items.push({ text: `Expected value of ${fmtPL(totalStats.expectancy)} per bet — you have a quantifiable edge.`, color: 'text-green-400' })
+    }
+
+    if (totalStats.maxDrawdownPct > 15) {
+      items.push({ text: `Max drawdown hit ${totalStats.maxDrawdownPct.toFixed(1)}% — consider smaller stakes to smooth volatility.`, color: 'text-orange-400' })
+    } else if (totalStats.maxDrawdownPct > 0 && totalStats.maxDrawdownPct <= 10) {
+      items.push({ text: `Drawdown contained at ${totalStats.maxDrawdownPct.toFixed(1)}% — disciplined risk management.`, color: 'text-green-400' })
+    }
+
+    if (totalStats.longestWinStreak >= 4) {
+      items.push({ text: `${totalStats.longestWinStreak}-bet winning streak shows the model finds consistent value runs.`, color: 'text-green-400' })
+    }
+
+    return items.slice(0, 3)
+  }, [totalStats, filteredBets, systemBenchmark])
 
   const monthSummaries = useMemo(() => {
     if (!filteredBets.length) return []
@@ -557,8 +654,16 @@ export function PerformancePage() {
                 {/* Equity Curve */}
                 {chartData.length > 1 && (
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-                    <h2 className="text-sm font-semibold text-gray-300 mb-3">P/L Curve</h2>
-                    <ResponsiveContainer width="100%" height={180}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-sm font-semibold text-gray-300">P/L Curve</h2>
+                      {systemBenchmark && (
+                        <div className="flex items-center gap-3 text-[10px]">
+                          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-400 inline-block rounded" /> You</span>
+                          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-cyan-400 inline-block rounded border-dashed" style={{ borderTop: '1px dashed #06b6d4', height: 0, background: 'none' }} /> System</span>
+                        </div>
+                      )}
+                    </div>
+                    <ResponsiveContainer width="100%" height={200}>
                       <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
                         <defs>
                           <linearGradient id="plFill" x1="0" y1="0" x2="0" y2="1">
@@ -577,10 +682,26 @@ export function PerformancePage() {
                         <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `£${v}`} width={45} />
                         <Tooltip content={<PLTooltip />} cursor={{ stroke: '#4b5563', strokeDasharray: '4 4' }} />
                         <ReferenceLine y={0} stroke="#4b5563" strokeDasharray="4 4" />
-                        <Area type="monotone" dataKey="pl" stroke="url(#plStroke)" fill="url(#plFill)" strokeWidth={2}
+                        <Area type="monotone" dataKey="pl" stroke="url(#plStroke)" fill="url(#plFill)" strokeWidth={2} name="Your P/L"
                           dot={false} activeDot={{ r: 4, fill: '#fbbf24', stroke: '#1f2937', strokeWidth: 2 }} />
+                        {systemBenchmark && (
+                          <Line type="monotone" dataKey="systemPL" stroke="#06b6d4" strokeWidth={1.5} strokeDasharray="5 3"
+                            dot={false} activeDot={{ r: 3, fill: '#06b6d4' }} name="System" connectNulls />
+                        )}
+                        {maxDrawdownPoint && (
+                          <ReferenceDot x={maxDrawdownPoint.label} y={maxDrawdownPoint.pl} r={5}
+                            fill="#ef4444" stroke="#7f1d1d" strokeWidth={2}>
+                          </ReferenceDot>
+                        )}
                       </AreaChart>
                     </ResponsiveContainer>
+                    {maxDrawdownPoint && totalStats && totalStats.maxDrawdown > 0 && (
+                      <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-500">
+                        <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                        Max drawdown: <span className="text-red-400 font-medium">-£{totalStats.maxDrawdown.toFixed(2)}</span>
+                        <span className="text-gray-600">({totalStats.maxDrawdownPct.toFixed(1)}% of peak)</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -618,6 +739,86 @@ export function PerformancePage() {
                         <span className="text-red-400">{totalStats.longestLoseStreak}L</span>
                       </div>
                       <div className="text-[10px] text-gray-600">longest run</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Insights Box */}
+                {insights.length > 0 && (
+                  <div className="bg-gradient-to-r from-cyan-950/40 to-blue-950/40 border border-cyan-500/20 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Brain className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-semibold text-cyan-300 uppercase tracking-wider">AI Insights</span>
+                    </div>
+                    <div className="space-y-2">
+                      {insights.map((insight, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <span className={`mt-0.5 ${insight.color}`}>&#x2022;</span>
+                          <span className="text-gray-300 leading-relaxed">{insight.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* System vs You Comparison */}
+                {systemBenchmark && systemBenchmark.totalPicks > 0 && totalStats && (
+                  <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Users className="w-4 h-4 text-gray-400" />
+                      <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">You vs System</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-center text-[11px]">
+                      <div>
+                        <div className="text-gray-500 mb-1.5">Win Rate</div>
+                        <div className="flex items-center justify-center gap-2">
+                          <div>
+                            <div className={`text-base font-bold ${totalStats.winRate > systemBenchmark.winRate ? 'text-green-400' : 'text-white'}`}>
+                              {totalStats.winRate.toFixed(0)}%
+                            </div>
+                            <div className="text-[9px] text-gray-600">You</div>
+                          </div>
+                          <div className="text-gray-600 text-[10px]">vs</div>
+                          <div>
+                            <div className={`text-base font-bold ${systemBenchmark.winRate > totalStats.winRate ? 'text-cyan-400' : 'text-white'}`}>
+                              {systemBenchmark.winRate.toFixed(0)}%
+                            </div>
+                            <div className="text-[9px] text-gray-600">System</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500 mb-1.5">ROI</div>
+                        <div className="flex items-center justify-center gap-2">
+                          <div>
+                            <div className={`text-base font-bold ${totalStats.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(0)}%
+                            </div>
+                            <div className="text-[9px] text-gray-600">You</div>
+                          </div>
+                          <div className="text-gray-600 text-[10px]">vs</div>
+                          <div>
+                            <div className={`text-base font-bold ${systemBenchmark.roi >= 0 ? 'text-cyan-400' : 'text-red-400'}`}>
+                              {systemBenchmark.roi >= 0 ? '+' : ''}{systemBenchmark.roi.toFixed(0)}%
+                            </div>
+                            <div className="text-[9px] text-gray-600">System</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500 mb-1.5">Picks</div>
+                        <div className="flex items-center justify-center gap-2">
+                          <div>
+                            <div className="text-base font-bold text-white">{totalStats.totalBets}</div>
+                            <div className="text-[9px] text-gray-600">You</div>
+                          </div>
+                          <div className="text-gray-600 text-[10px]">vs</div>
+                          <div>
+                            <div className="text-base font-bold text-white">{systemBenchmark.totalPicks}</div>
+                            <div className="text-[9px] text-gray-600">System</div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
