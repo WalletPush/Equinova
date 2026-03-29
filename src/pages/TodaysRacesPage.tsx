@@ -10,7 +10,7 @@ import { useBankroll } from '@/hooks/useBankroll'
 import { useAuth } from '@/contexts/AuthContext'
 import { detectProfitableSignals } from '@/lib/confluenceScore'
 import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
-import { useDynamicSignals } from '@/hooks/useDynamicSignals'
+import { useMastermind } from '@/hooks/useMastermind'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { formatOdds } from '@/lib/odds'
 import { fetchFromSupabaseFunction } from '@/lib/api'
@@ -78,7 +78,7 @@ export function TodaysRacesPage() {
   const [expandedRace, setExpandedRace] = useState<string | null>(null)
   const { openHorseDetail } = useHorseDetail()
   const lifetimeSignalStats = useLifetimeSignalStats()
-  const { matchesByHorse } = useDynamicSignals()
+  const { matchesByHorse: mastermindByHorse } = useMastermind(selectedDate)
 
   const { data: racesData, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['races', selectedDate, 'today-races'],
@@ -251,8 +251,8 @@ export function TodaysRacesPage() {
     if (!races.length) return []
 
     const MIN_EDGE = 0.05
-    const MAX_ODDS = 12.0
-    const MIN_ENSEMBLE_PROBA = 0.15
+    const MAX_ODDS = 13.0
+    const MIN_ENSEMBLE_PROBA = 0.40
     const MIN_MODEL_AGREEMENT = 2
 
     const results: ValueBetResult[] = []
@@ -283,7 +283,15 @@ export function TodaysRacesPage() {
         if (modelAgreement < MIN_MODEL_AGREEMENT) continue
 
         const kelly = edge / (odds - 1)
-        const fraction = Math.min(kelly / 4, 0.03)
+        const baseQuarterKelly = kelly / 4
+        const mmKey = `${race.race_id}:${entry.horse_id}`
+        const trustScore = mastermindByHorse.get(mmKey)?.trust_score ?? 0
+        let trustMult = 0.25
+        if (trustScore >= 80) trustMult = 1.5
+        else if (trustScore >= 60) trustMult = 1.0
+        else if (trustScore >= 30) trustMult = 0.5
+        else if (trustScore > 0) trustMult = 0.25
+        const fraction = Math.min(baseQuarterKelly * trustMult, 0.05)
         const rawStake = bankroll * fraction
         const stake = Math.round(rawStake * 2) / 2
         if (stake < 1 || bankroll <= 0) continue
@@ -944,9 +952,9 @@ export function TodaysRacesPage() {
                             const profSignals = lifetimeSignalStats
                               ? detectProfitableSignals(entry, race.topEntries!, entryModelPicks, undefined, lifetimeSignalStats, 'lifetime')
                               : []
-                            const dynMatch = matchesByHorse.get(`${race.race_id}:${entry.horse_id}`)
-                            const dynCombos = dynMatch?.matching_combos ?? []
-                            const hasProfSignal = profSignals.length > 0 || dynCombos.length > 0
+                            const mmMatch = mastermindByHorse.get(`${race.race_id}:${entry.horse_id}`)
+                            const mmPatterns = [...(mmMatch?.lifetime_patterns ?? []), ...(mmMatch?.d21_patterns ?? [])]
+                            const hasProfSignal = profSignals.length > 0 || mmPatterns.length > 0
 
                             return (
                             <div key={entry.id} className={`py-2.5 px-3 rounded-lg ${
@@ -1053,7 +1061,7 @@ export function TodaysRacesPage() {
                               </div>
                               {hasProfSignal && (
                                 <div className="mt-1.5 ml-9">
-                                  <ProfitableSignalBadges signals={profSignals} dynamicCombos={dynCombos} compact />
+                                  <ProfitableSignalBadges signals={profSignals} mastermindPatterns={mmPatterns} compact />
                                 </div>
                               )}
                             </div>

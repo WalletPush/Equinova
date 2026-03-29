@@ -94,7 +94,28 @@ Deno.serve(async (req) => {
       existingBetsRes.ok ? await existingBetsRes.json() : [];
     const alreadyBet = new Set(existingBets.map(b => `${b.race_id}:${b.horse_id}`));
 
-    console.log(`Auto-bet: ${matches.length} candidates, bankroll=GBP${bankroll.toFixed(2)}, existing=${alreadyBet.size}`);
+    // -- Exposure tracking --
+    const MAX_DAILY_EXPOSURE = 0.15;
+    const MAX_ODDS_BAND_EXPOSURE = 0.25;
+    const getOddsBand = (o: number) => o < 3 ? "short" : o < 5 ? "mid" : o < 9 ? "midlong" : "long";
+
+    // Sum existing bets for today's exposure
+    const existingAmtsRes = await fetch(
+      `${supabaseUrl}/rest/v1/bets?user_id=eq.${userId}&race_date=eq.${today}&select=bet_amount,current_odds`,
+      { headers: svcHdrs }
+    );
+    const existingAmts: { bet_amount: string; current_odds: string }[] =
+      existingAmtsRes.ok ? await existingAmtsRes.json() : [];
+    let dailyExposure = 0;
+    const bandExposure: Record<string, number> = { short: 0, mid: 0, midlong: 0, long: 0 };
+    for (const eb of existingAmts) {
+      const amt = parseFloat(eb.bet_amount) || 0;
+      const o = parseFloat(eb.current_odds) || 3;
+      dailyExposure += amt / bankroll;
+      bandExposure[getOddsBand(o)] += amt / bankroll;
+    }
+
+    console.log(`Auto-bet: ${matches.length} candidates, bankroll=GBP${bankroll.toFixed(2)}, existing=${alreadyBet.size}, dailyExposure=${(dailyExposure * 100).toFixed(1)}%`);
 
     // -- Place bets --
     const betsPlaced: PlacedBet[] = [];
@@ -115,12 +136,12 @@ Deno.serve(async (req) => {
       const ensProba = parseFloat(String(match.ensemble_proba)) || 0;
       const odds = parseFloat(String(match.opening_odds || match.current_odds)) || 0;
 
-      if (ensProba < 0.15 || odds <= 1) continue;
+      if (ensProba < 0.40 || odds <= 1) continue;
 
       // Edge calculation
       const impliedProb = 1 / odds;
       const edge = ensProba - impliedProb;
-      if (edge < 0.01) continue;
+      if (edge < 0.05) continue;
 
       // Kelly criterion with trust multiplier
       const kellyFull = edge / (odds - 1);
@@ -137,7 +158,18 @@ Deno.serve(async (req) => {
       if (stake < 1) continue;
       if (stake > remainingBankroll) continue;
 
-      // Place bet via place-bet edge function (uses user's JWT for auth)
+      // Exposure limits
+      const proposedFrac = stake / bankroll;
+      const band = getOddsBand(odds);
+      if (dailyExposure + proposedFrac > MAX_DAILY_EXPOSURE) {
+        console.log(`Skip ${match.horse_name}: daily exposure would exceed ${MAX_DAILY_EXPOSURE * 100}%`);
+        continue;
+      }
+      if (bandExposure[band] + proposedFrac > MAX_ODDS_BAND_EXPOSURE) {
+        console.log(`Skip ${match.horse_name}: ${band} band exposure would exceed ${MAX_ODDS_BAND_EXPOSURE * 100}%`);
+        continue;
+      }
+
       const betData = {
         horse_name: match.horse_name,
         horse_id: match.horse_id,
@@ -149,6 +181,10 @@ Deno.serve(async (req) => {
         current_odds: odds,
         bet_amount: stake,
         odds: odds,
+        trust_tier: match.trust_tier || (trustScore >= 80 ? "Strong" : trustScore >= 60 ? "Medium" : "Low"),
+        trust_score: trustScore,
+        edge_pct: edge,
+        ensemble_proba: ensProba,
       };
 
       const betRes = await fetch(`${supabaseUrl}/functions/v1/place-bet`, {
@@ -163,6 +199,8 @@ Deno.serve(async (req) => {
 
       if (betRes.ok) {
         remainingBankroll -= stake;
+        dailyExposure += proposedFrac;
+        bandExposure[band] += proposedFrac;
         alreadyBet.add(betKey);
 
         betsPlaced.push({

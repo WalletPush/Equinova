@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
@@ -8,21 +8,15 @@ import { useAuth } from '@/contexts/AuthContext'
 import { callSupabaseFunction } from '@/lib/supabase'
 import { formatOdds } from '@/lib/odds'
 import {
-  TrendingUp,
-  TrendingDown,
-  Trophy,
-  Target,
-  Loader2,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  BarChart3,
-  Wallet,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Zap,
-  Plus,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceLine,
+  BarChart, Bar, Cell,
+} from 'recharts'
+import {
+  TrendingUp, TrendingDown, Trophy, Target, Loader2,
+  ChevronDown, ChevronUp, BarChart3, Wallet, CheckCircle,
+  XCircle, Clock, Zap, Plus, Download, ShieldCheck,
+  Activity, ArrowDownRight,
 } from 'lucide-react'
 
 interface UserBet {
@@ -43,6 +37,11 @@ interface UserBet {
   potential_return: number
   created_at: string
   updated_at: string
+  trust_tier?: string | null
+  trust_score?: number | null
+  edge_pct?: number | null
+  ensemble_proba?: number | null
+  signal_combo_key?: string | null
 }
 
 interface DaySummary {
@@ -58,6 +57,9 @@ interface DaySummary {
   runningROI: number
 }
 
+type PeriodFilter = '7d' | '14d' | '30d' | '90d' | 'lifetime'
+type ActiveTab = 'overview' | 'monthly' | 'trust'
+
 function fmtPL(v: number) {
   return `${v >= 0 ? '+' : '-'}£${Math.abs(v).toFixed(2)}`
 }
@@ -67,11 +69,53 @@ function formatDateShort(dateStr: string) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
+function formatMonthLabel(monthStr: string) {
+  const [year, month] = monthStr.split('-')
+  const d = new Date(Number(year), Number(month) - 1)
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+}
+
+const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
+  { value: '7d', label: '7D' },
+  { value: '14d', label: '14D' },
+  { value: '30d', label: '30D' },
+  { value: '90d', label: '90D' },
+  { value: 'lifetime', label: 'All' },
+]
+
+function PLTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-xl text-xs">
+      <div className="text-gray-400 mb-1">{d.label}</div>
+      <div className={`font-bold ${d.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtPL(d.pl)}</div>
+      <div className="text-gray-500 mt-0.5">Bankroll: £{d.bankroll.toFixed(2)}</div>
+    </div>
+  )
+}
+
+function TrustTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 shadow-xl text-xs">
+      <div className="text-gray-400 mb-1">{d.name} Trust</div>
+      <div className={`font-bold ${d.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+        ROI: {d.roi >= 0 ? '+' : ''}{d.roi}%
+      </div>
+      <div className="text-gray-500 mt-0.5">Win Rate: {d.winRate}%</div>
+    </div>
+  )
+}
+
 export function PerformancePage() {
   const { user } = useAuth()
   const { bankroll, needsSetup, isLoading: bankrollLoading, addFunds, isAddingFunds } = useBankroll()
   const [expandedDay, setExpandedDay] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<'daily' | 'all'>('daily')
+  const [activeTab, setActiveTab] = useState<ActiveTab>('overview')
+  const [period, setPeriod] = useState<PeriodFilter>('lifetime')
   const [showAddFunds, setShowAddFunds] = useState(false)
   const [addAmount, setAddAmount] = useState('')
 
@@ -92,87 +136,237 @@ export function PerformancePage() {
 
   const bets = betsData?.bets ?? []
 
+  const filteredBets = useMemo(() => {
+    if (period === 'lifetime') return bets
+    const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[period]
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - days)
+    const cutoffStr = cutoff.toISOString().split('T')[0]
+    return bets.filter(b => {
+      const date = b.race_date || b.created_at?.split('T')[0] || ''
+      return date >= cutoffStr
+    })
+  }, [bets, period])
+
+  const bankrollGrowth = useMemo(() => {
+    if (!bets.length) return 0
+    let allTimePL = 0
+    for (const b of bets) {
+      if (b.status === 'won') allTimePL += Number(b.potential_return) - Number(b.bet_amount)
+      else if (b.status === 'lost') allTimePL -= Number(b.bet_amount)
+      else if (b.status === 'pending') allTimePL -= Number(b.bet_amount)
+    }
+    const starting = bankroll - allTimePL
+    return starting > 0 ? (allTimePL / starting) * 100 : 0
+  }, [bets, bankroll])
+
   const { dailySummaries, totalStats } = useMemo(() => {
-    if (!bets.length) return { dailySummaries: [], totalStats: null }
+    if (!filteredBets.length) return { dailySummaries: [], totalStats: null }
 
     const byDay = new Map<string, UserBet[]>()
-    for (const b of bets) {
+    for (const b of filteredBets) {
       const date = b.race_date || b.created_at?.split('T')[0] || 'unknown'
       const arr = byDay.get(date) || []
       arr.push(b)
       byDay.set(date, arr)
     }
 
-    const totalWins = bets.filter(b => b.status === 'won').length
-    const totalLosses = bets.filter(b => b.status === 'lost').length
-    const totalPending = bets.filter(b => b.status === 'pending').length
-    const totalStaked = bets.reduce((s, b) => s + Number(b.bet_amount), 0)
+    const totalWins = filteredBets.filter(b => b.status === 'won').length
+    const totalLosses = filteredBets.filter(b => b.status === 'lost').length
+    const totalPending = filteredBets.filter(b => b.status === 'pending').length
+    const totalStaked = filteredBets.reduce((s, b) => s + Number(b.bet_amount), 0)
     let totalPL = 0
-    for (const b of bets) {
+    for (const b of filteredBets) {
       if (b.status === 'won') totalPL += Number(b.potential_return) - Number(b.bet_amount)
       else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
       else if (b.status === 'pending') totalPL -= Number(b.bet_amount)
     }
     const startingBankroll = bankroll - totalPL
-    const roi = startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0
+    const roi = totalStaked > 0 ? (totalPL / totalStaked) * 100 : 0
 
     let runningPL = 0
     let runningStaked = 0
     const summaries: DaySummary[] = []
-
     const sortedDays = [...byDay.keys()].sort()
+
     for (const date of sortedDays) {
       const dayBets = byDay.get(date)!
       const wins = dayBets.filter(b => b.status === 'won').length
       const losses = dayBets.filter(b => b.status === 'lost').length
       const pending = dayBets.filter(b => b.status === 'pending').length
       const dayStaked = dayBets.reduce((s, b) => s + Number(b.bet_amount), 0)
-
       let dayPL = 0
       for (const b of dayBets) {
         if (b.status === 'won') dayPL += Number(b.potential_return) - Number(b.bet_amount)
         else if (b.status === 'lost') dayPL -= Number(b.bet_amount)
         else if (b.status === 'pending') dayPL -= Number(b.bet_amount)
       }
-
       runningPL += dayPL
       runningStaked += dayStaked
-      const runningROI = startingBankroll > 0 ? (runningPL / startingBankroll) * 100 : 0
-
+      const runningROI = runningStaked > 0 ? (runningPL / runningStaked) * 100 : 0
       summaries.push({ date, bets: dayBets, wins, losses, pending, dayPL, dayStaked, runningPL, runningStaked, runningROI })
     }
+
     const winRate = (totalWins + totalLosses) > 0 ? (totalWins / (totalWins + totalLosses)) * 100 : 0
     const winningDays = summaries.filter(d => d.dayPL > 0).length
     const losingDays = summaries.filter(d => d.dayPL < 0).length
 
+    let peak = 0, maxDrawdown = 0, runPL = 0
+    for (const d of summaries) {
+      runPL += d.dayPL
+      if (runPL > peak) peak = runPL
+      const dd = peak - runPL
+      if (dd > maxDrawdown) maxDrawdown = dd
+    }
+    const peakBankroll = startingBankroll + peak
+    const maxDrawdownPct = peakBankroll > 0 ? (maxDrawdown / peakBankroll) * 100 : 0
+
+    const winningReturns = filteredBets
+      .filter(b => b.status === 'won')
+      .reduce((s, b) => s + (Number(b.potential_return) - Number(b.bet_amount)), 0)
+    const losingAmount = filteredBets
+      .filter(b => b.status === 'lost')
+      .reduce((s, b) => s + Number(b.bet_amount), 0)
+    const profitFactor = losingAmount > 0 ? winningReturns / losingAmount : (winningReturns > 0 ? Infinity : 0)
+    const settledCount = totalWins + totalLosses
+    const expectancy = settledCount > 0 ? totalPL / settledCount : 0
+
+    let longestWinStreak = 0, longestLoseStreak = 0, curWin = 0, curLose = 0
+    for (const b of filteredBets) {
+      if (b.status === 'pending') continue
+      if (b.status === 'won') {
+        curWin++; curLose = 0
+        if (curWin > longestWinStreak) longestWinStreak = curWin
+      } else {
+        curLose++; curWin = 0
+        if (curLose > longestLoseStreak) longestLoseStreak = curLose
+      }
+    }
+
+    const bestDay = summaries.length > 0 ? summaries.reduce((a, b) => b.dayPL > a.dayPL ? b : a) : null
+    const worstDay = summaries.length > 0 ? summaries.reduce((a, b) => b.dayPL < a.dayPL ? b : a) : null
+    const avgStakePct = startingBankroll > 0 && filteredBets.length > 0
+      ? (totalStaked / filteredBets.length / startingBankroll) * 100 : 0
+
     return {
       dailySummaries: summaries,
       totalStats: {
-        totalBets: bets.length,
-        totalWins,
-        totalLosses,
-        totalPending,
-        totalPL,
-        totalStaked,
-        roi,
-        winRate,
-        winningDays,
-        losingDays,
-        totalDays: summaries.length,
+        totalBets: filteredBets.length, totalWins, totalLosses, totalPending,
+        totalPL, totalStaked, roi, startingBankroll,
+        winRate, winningDays, losingDays, totalDays: summaries.length,
+        maxDrawdown, maxDrawdownPct, profitFactor, expectancy,
+        longestWinStreak, longestLoseStreak, bestDay, worstDay, avgStakePct,
       },
     }
-  }, [bets])
+  }, [filteredBets, bankroll])
 
-  const equityCurvePoints = useMemo(() => {
+  const chartData = useMemo(() => {
     if (!dailySummaries.length) return []
     let running = 0
-    const points = [{ label: 'Start', value: 0 }]
+    const startBR = totalStats?.startingBankroll ?? bankroll
+    const data = [{ label: 'Start', pl: 0, bankroll: startBR }]
     for (const d of dailySummaries) {
       running += d.dayPL
-      points.push({ label: formatDateShort(d.date), value: running })
+      data.push({
+        label: formatDateShort(d.date),
+        pl: Number(running.toFixed(2)),
+        bankroll: Number((startBR + running).toFixed(2)),
+      })
     }
-    return points
-  }, [dailySummaries])
+    return data
+  }, [dailySummaries, totalStats, bankroll])
+
+  const gradientOffset = useMemo(() => {
+    if (!chartData.length) return 1
+    const max = Math.max(...chartData.map(d => d.pl))
+    const min = Math.min(...chartData.map(d => d.pl))
+    if (max <= 0) return 0
+    if (min >= 0) return 1
+    return max / (max - min)
+  }, [chartData])
+
+  const monthSummaries = useMemo(() => {
+    if (!filteredBets.length) return []
+    const byMonth = new Map<string, UserBet[]>()
+    for (const b of filteredBets) {
+      const date = b.race_date || b.created_at?.split('T')[0] || 'unknown'
+      const month = date.substring(0, 7)
+      const arr = byMonth.get(month) || []
+      arr.push(b)
+      byMonth.set(month, arr)
+    }
+    return [...byMonth.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([month, monthBets]) => {
+        const wins = monthBets.filter(b => b.status === 'won').length
+        const losses = monthBets.filter(b => b.status === 'lost').length
+        const staked = monthBets.reduce((s, b) => s + Number(b.bet_amount), 0)
+        let pl = 0
+        for (const b of monthBets) {
+          if (b.status === 'won') pl += Number(b.potential_return) - Number(b.bet_amount)
+          else if (b.status === 'lost') pl -= Number(b.bet_amount)
+        }
+        const wr = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
+        const roi = staked > 0 ? (pl / staked) * 100 : 0
+        return { month, label: formatMonthLabel(month), totalBets: monthBets.length, wins, losses, staked, pl, roi, winRate: wr }
+      })
+  }, [filteredBets])
+
+  const trustTierSummaries = useMemo(() => {
+    const hasTrustData = filteredBets.some(b => b.trust_tier)
+    if (!hasTrustData) return []
+    const tiers = [
+      { key: 'Strong', bgClass: 'bg-green-500/10 border-green-500/20', textClass: 'text-green-400', barColor: '#22c55e' },
+      { key: 'Medium', bgClass: 'bg-yellow-500/10 border-yellow-500/20', textClass: 'text-yellow-400', barColor: '#eab308' },
+      { key: 'Low', bgClass: 'bg-orange-500/10 border-orange-500/20', textClass: 'text-orange-400', barColor: '#f97316' },
+    ]
+    return tiers.map(({ key, bgClass, textClass, barColor }) => {
+      const tierBets = filteredBets.filter(b => b.trust_tier === key)
+      if (!tierBets.length) return null
+      const wins = tierBets.filter(b => b.status === 'won').length
+      const losses = tierBets.filter(b => b.status === 'lost').length
+      const staked = tierBets.reduce((s, b) => s + Number(b.bet_amount), 0)
+      let pl = 0
+      for (const b of tierBets) {
+        if (b.status === 'won') pl += Number(b.potential_return) - Number(b.bet_amount)
+        else if (b.status === 'lost') pl -= Number(b.bet_amount)
+      }
+      const wr = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
+      const roi = staked > 0 ? (pl / staked) * 100 : 0
+      const avgStake = tierBets.length > 0 ? staked / tierBets.length : 0
+      const edgeBets = tierBets.filter(b => b.edge_pct != null)
+      const avgEdge = edgeBets.length > 0
+        ? edgeBets.reduce((s, b) => s + Number(b.edge_pct ?? 0), 0) / edgeBets.length * 100 : 0
+      return { key, bgClass, textClass, barColor, totalBets: tierBets.length, wins, losses, staked, pl, roi, winRate: wr, avgStake, avgEdge }
+    }).filter(Boolean) as { key: string; bgClass: string; textClass: string; barColor: string; totalBets: number; wins: number; losses: number; staked: number; pl: number; roi: number; winRate: number; avgStake: number; avgEdge: number }[]
+  }, [filteredBets])
+
+  const exportCSV = useCallback(() => {
+    const headers = ['Date', 'Course', 'Time', 'Horse', 'Odds', 'Stake', 'Status', 'P/L', 'Trust Tier', 'Edge %']
+    const rows = filteredBets.map(b => {
+      const amt = Number(b.bet_amount)
+      const ret = Number(b.potential_return)
+      let pl = 0
+      if (b.status === 'won') pl = ret - amt
+      else if (b.status === 'lost') pl = -amt
+      return [
+        b.race_date || b.created_at?.split('T')[0] || '',
+        b.course || '', b.off_time?.substring(0, 5) || '', b.horse_name || '',
+        b.current_odds || '', amt.toFixed(2), b.status, pl.toFixed(2),
+        b.trust_tier || '', b.edge_pct != null ? (Number(b.edge_pct) * 100).toFixed(1) : '',
+      ]
+    })
+    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `equinova-performance-${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [filteredBets])
 
   const isLoading = bankrollLoading || betsLoading
 
@@ -195,11 +389,16 @@ export function PerformancePage() {
     setShowAddFunds(false)
   }
 
+  const riskLevel = (totalStats?.avgStakePct ?? 0) < 2 ? 'Conservative'
+    : (totalStats?.avgStakePct ?? 0) < 4 ? 'Balanced' : 'Aggressive'
+  const riskColor = (totalStats?.avgStakePct ?? 0) < 2 ? 'text-green-400'
+    : (totalStats?.avgStakePct ?? 0) < 4 ? 'text-yellow-400' : 'text-red-400'
+
   return (
     <AppLayout>
       {needsSetup && <BankrollSetupModal onSetup={addFunds} isSubmitting={isAddingFunds} />}
 
-      <div className="p-4 space-y-5">
+      <div className="p-4 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -209,92 +408,36 @@ export function PerformancePage() {
               <p className="text-xs text-gray-500">Track your betting results</p>
             </div>
           </div>
-          <button
-            onClick={() => setShowAddFunds(!showAddFunds)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 hover:border-yellow-500/30 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Funds
-          </button>
+          <div className="flex items-center gap-2">
+            {bets.length > 0 && (
+              <button onClick={exportCSV} title="Export CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 hover:border-yellow-500/30 transition-colors">
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Export</span>
+              </button>
+            )}
+            <button onClick={() => setShowAddFunds(!showAddFunds)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 hover:border-yellow-500/30 transition-colors">
+              <Plus className="w-3.5 h-3.5" />
+              Add Funds
+            </button>
+          </div>
         </div>
 
         {/* Add funds inline */}
         {showAddFunds && (
           <div className="bg-gray-800/80 border border-yellow-500/20 rounded-xl p-4 flex items-center gap-3">
-            <input
-              type="number"
-              step="1"
-              min="1"
-              value={addAmount}
-              onChange={e => setAddAmount(e.target.value)}
+            <input type="number" step="1" min="1" value={addAmount} onChange={e => setAddAmount(e.target.value)}
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-yellow-400"
-              placeholder="Amount (£)"
-              autoFocus
-            />
-            <button
-              onClick={handleAddFunds}
-              disabled={isAddingFunds || !addAmount}
-              className="px-4 py-2 bg-yellow-500 text-gray-900 rounded-lg text-sm font-bold hover:bg-yellow-400 disabled:opacity-50"
-            >
+              placeholder="Amount (£)" autoFocus />
+            <button onClick={handleAddFunds} disabled={isAddingFunds || !addAmount}
+              className="px-4 py-2 bg-yellow-500 text-gray-900 rounded-lg text-sm font-bold hover:bg-yellow-400 disabled:opacity-50">
               {isAddingFunds ? 'Adding...' : 'Add'}
             </button>
-            <button
-              onClick={() => { setShowAddFunds(false); setAddAmount('') }}
-              className="px-3 py-2 text-gray-400 hover:text-white text-sm"
-            >
-              Cancel
-            </button>
+            <button onClick={() => { setShowAddFunds(false); setAddAmount('') }}
+              className="px-3 py-2 text-gray-400 hover:text-white text-sm">Cancel</button>
           </div>
         )}
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Wallet className="w-4 h-4 text-yellow-400" />
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Bankroll</span>
-            </div>
-            <div className="text-xl font-bold text-white">£{bankroll.toFixed(2)}</div>
-          </div>
-
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              {(totalStats?.roi ?? 0) >= 0 ? <TrendingUp className="w-4 h-4 text-green-400" /> : <TrendingDown className="w-4 h-4 text-red-400" />}
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">ROI</span>
-            </div>
-            <div className={`text-xl font-bold ${(totalStats?.roi ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {(totalStats?.roi ?? 0) >= 0 ? '+' : ''}{(totalStats?.roi ?? 0).toFixed(1)}%
-            </div>
-            <div className="text-xs text-gray-500 mt-0.5">
-              £{(totalStats?.totalStaked ?? 0).toFixed(0)} staked
-            </div>
-          </div>
-
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Target className="w-4 h-4 text-blue-400" />
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
-            </div>
-            <div className="text-xl font-bold text-white">{(totalStats?.winRate ?? 0).toFixed(1)}%</div>
-            <div className="text-xs text-gray-500 mt-0.5">
-              {totalStats?.totalWins ?? 0}W / {totalStats?.totalLosses ?? 0}L
-              {(totalStats?.totalPending ?? 0) > 0 && ` / ${totalStats?.totalPending}P`}
-            </div>
-          </div>
-
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Trophy className="w-4 h-4 text-amber-400" />
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">P/L</span>
-            </div>
-            <div className={`text-xl font-bold ${(totalStats?.totalPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {fmtPL(totalStats?.totalPL ?? 0)}
-            </div>
-            <div className="text-xs text-gray-500 mt-0.5">
-              {totalStats?.totalBets ?? 0} bets over {totalStats?.totalDays ?? 0} days
-            </div>
-          </div>
-        </div>
 
         {/* Empty state */}
         {bets.length === 0 && !isLoading && (
@@ -306,157 +449,420 @@ export function PerformancePage() {
             <p className="text-gray-500 text-sm max-w-xs mx-auto mb-4">
               Head to Top Picks to find pattern-matched selections and place your first bet
             </p>
-            <Link
-              to="/auto-bets"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-yellow-500 text-gray-900 rounded-xl font-bold text-sm hover:bg-yellow-400 transition-colors"
-            >
-              <Zap className="w-4 h-4" />
-              View Top Picks
+            <Link to="/auto-bets"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-yellow-500 text-gray-900 rounded-xl font-bold text-sm hover:bg-yellow-400 transition-colors">
+              <Zap className="w-4 h-4" />View Top Picks
             </Link>
           </div>
         )}
 
-        {/* Equity Curve */}
-        {equityCurvePoints.length > 1 && (
-          <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-gray-300 mb-3">P/L Curve</h2>
-            <div className="relative h-32">
-              {(() => {
-                const vals = equityCurvePoints.map(p => p.value)
-                const eqMin = Math.min(...vals) - 5
-                const eqMax = Math.max(...vals) + 5
-                const eqRange = eqMax - eqMin || 1
-                return (
-                  <>
-                    <div className="absolute left-0 top-0 text-[9px] text-gray-600 font-mono">{fmtPL(eqMax)}</div>
-                    <div className="absolute left-0 bottom-0 text-[9px] text-gray-600 font-mono">{fmtPL(eqMin)}</div>
-                    <div
-                      className="absolute left-10 right-0 border-t border-dashed border-gray-700"
-                      style={{ bottom: `${((0 - eqMin) / eqRange) * 100}%` }}
-                    >
-                      <span className="absolute -top-3 right-0 text-[8px] text-gray-600">£0</span>
-                    </div>
-                    <div className="absolute left-10 right-0 bottom-0 top-0 flex items-end gap-[2px]">
-                      {equityCurvePoints.map((p, i) => {
-                        const height = ((p.value - eqMin) / eqRange) * 100
-                        return (
-                          <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
-                            <div
-                              className={`w-full rounded-t-sm transition-all ${p.value >= 0 ? 'bg-green-500/60' : 'bg-red-500/60'} group-hover:opacity-80`}
-                              style={{ height: `${Math.max(height, 1)}%` }}
-                            />
-                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 text-[8px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                              {p.label}: {fmtPL(p.value)}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </>
-                )
-              })()}
-            </div>
-          </div>
-        )}
-
-        {/* View Toggle */}
+        {/* Main dashboard */}
         {bets.length > 0 && (
           <>
-            <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5">
-              <button
-                onClick={() => setActiveView('daily')}
-                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded transition-all ${
-                  activeView === 'daily' ? 'bg-yellow-500/20 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                Daily Breakdown
-              </button>
-              <button
-                onClick={() => setActiveView('all')}
-                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded transition-all ${
-                  activeView === 'all' ? 'bg-yellow-500/20 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                All Bets ({totalStats?.totalBets ?? 0})
-              </button>
+            {/* Period filter */}
+            <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5 w-fit">
+              {PERIOD_OPTIONS.map(opt => (
+                <button key={opt.value} onClick={() => setPeriod(opt.value)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                    period === opt.value ? 'bg-yellow-500/20 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
+                  }`}>
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
-            {activeView === 'daily' && (
-              <div className="space-y-2">
-                {dailySummaries.map(day => {
-                  const isExpanded = expandedDay === day.date
-                  return (
-                    <div key={day.date} className={`rounded-xl overflow-hidden border transition-colors ${
-                      isExpanded ? 'bg-gray-800/60 border-yellow-500/30' : 'bg-gray-800/40 border-gray-700/50'
-                    }`}>
-                      <button
-                        onClick={() => setExpandedDay(isExpanded ? null : day.date)}
-                        className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-800/60 transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-sm font-semibold text-white">{formatDateShort(day.date)}</span>
-                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
-                              day.dayPL > 0 ? 'bg-green-500/15 text-green-400' : day.dayPL < 0 ? 'bg-red-500/15 text-red-400' : 'bg-gray-700 text-gray-400'
-                            }`}>
-                              {fmtPL(day.dayPL)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                            <span>{day.bets.length} bets</span>
-                            <span className="text-green-500">{day.wins}W</span>
-                            <span className="text-red-500">{day.losses}L</span>
-                            {day.pending > 0 && <span className="text-yellow-500">{day.pending}P</span>}
-                            <span className="text-gray-600">|</span>
-                            <span className={day.runningROI >= 0 ? 'text-green-500' : 'text-red-500'}>
-                              ROI: {day.runningROI >= 0 ? '+' : ''}{day.runningROI.toFixed(1)}%
-                            </span>
-                          </div>
-                        </div>
-                        {isExpanded ? <ChevronUp className="w-4 h-4 text-yellow-400" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
-                      </button>
-
-                      {isExpanded && (
-                        <div className="border-t border-gray-700/50 px-3 py-2 space-y-1">
-                          {day.bets.map(bet => (
-                            <BetRow key={bet.id} bet={bet} />
-                          ))}
-                        </div>
-                      )}
+            {filteredBets.length > 0 ? (
+              <>
+                {/* 6 KPI Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Wallet className="w-4 h-4 text-yellow-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Bankroll</span>
                     </div>
-                  )
-                })}
+                    <div className="text-xl font-bold text-white">£{bankroll.toFixed(2)}</div>
+                    <div className={`text-xs mt-0.5 ${bankrollGrowth >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {bankrollGrowth >= 0 ? '+' : ''}{bankrollGrowth.toFixed(1)}% all-time
+                    </div>
+                  </div>
 
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      {(totalStats?.roi ?? 0) >= 0
+                        ? <TrendingUp className="w-4 h-4 text-green-400" />
+                        : <TrendingDown className="w-4 h-4 text-red-400" />}
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">ROI</span>
+                    </div>
+                    <div className={`text-xl font-bold ${(totalStats?.roi ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {(totalStats?.roi ?? 0) >= 0 ? '+' : ''}{(totalStats?.roi ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">£{(totalStats?.totalStaked ?? 0).toFixed(0)} staked</div>
+                  </div>
+
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Target className="w-4 h-4 text-blue-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
+                    </div>
+                    <div className="text-xl font-bold text-white">{(totalStats?.winRate ?? 0).toFixed(1)}%</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {totalStats?.totalWins ?? 0}W / {totalStats?.totalLosses ?? 0}L
+                      {(totalStats?.totalPending ?? 0) > 0 && ` / ${totalStats?.totalPending}P`}
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Trophy className="w-4 h-4 text-amber-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">P/L</span>
+                    </div>
+                    <div className={`text-xl font-bold ${(totalStats?.totalPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {fmtPL(totalStats?.totalPL ?? 0)}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {totalStats?.totalBets ?? 0} bets, {totalStats?.totalDays ?? 0} days
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ArrowDownRight className="w-4 h-4 text-red-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Drawdown</span>
+                    </div>
+                    <div className="text-xl font-bold text-red-400">
+                      {totalStats ? `-£${totalStats.maxDrawdown.toFixed(2)}` : '£0.00'}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {totalStats ? `${totalStats.maxDrawdownPct.toFixed(1)}% of peak` : '0% of peak'}
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Activity className="w-4 h-4 text-cyan-400" />
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Expectancy</span>
+                    </div>
+                    <div className={`text-xl font-bold ${(totalStats?.expectancy ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {fmtPL(totalStats?.expectancy ?? 0)}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      per bet &middot; PF: {totalStats ? (totalStats.profitFactor >= 99 ? '∞' : totalStats.profitFactor.toFixed(2)) : '0.00'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Equity Curve */}
+                {chartData.length > 1 && (
+                  <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                    <h2 className="text-sm font-semibold text-gray-300 mb-3">P/L Curve</h2>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="plFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.35} />
+                            <stop offset={`${gradientOffset * 100}%`} stopColor="#22c55e" stopOpacity={0.05} />
+                            <stop offset={`${gradientOffset * 100}%`} stopColor="#ef4444" stopOpacity={0.05} />
+                            <stop offset="100%" stopColor="#ef4444" stopOpacity={0.35} />
+                          </linearGradient>
+                          <linearGradient id="plStroke" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset={`${gradientOffset * 100}%`} stopColor="#22c55e" stopOpacity={1} />
+                            <stop offset={`${gradientOffset * 100}%`} stopColor="#ef4444" stopOpacity={1} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                        <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `£${v}`} width={45} />
+                        <Tooltip content={<PLTooltip />} cursor={{ stroke: '#4b5563', strokeDasharray: '4 4' }} />
+                        <ReferenceLine y={0} stroke="#4b5563" strokeDasharray="4 4" />
+                        <Area type="monotone" dataKey="pl" stroke="url(#plStroke)" fill="url(#plFill)" strokeWidth={2}
+                          dot={false} activeDot={{ r: 4, fill: '#fbbf24', stroke: '#1f2937', strokeWidth: 2 }} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Insights Strip */}
                 {totalStats && (
-                  <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mt-3">
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                      <div>
-                        <div className="text-[10px] text-gray-500 uppercase mb-1">Total P/L</div>
-                        <div className={`text-lg font-bold ${totalStats.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {fmtPL(totalStats.totalPL)}
-                        </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
+                      <div className="text-[10px] text-gray-500 uppercase">Avg Stake</div>
+                      <div className="text-sm font-semibold text-white">{totalStats.avgStakePct.toFixed(1)}%</div>
+                      <div className={`text-[10px] ${riskColor}`}>{riskLevel}</div>
+                    </div>
+                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
+                      <div className="text-[10px] text-gray-500 uppercase">Best Day</div>
+                      <div className="text-sm font-semibold text-green-400">
+                        {totalStats.bestDay ? fmtPL(totalStats.bestDay.dayPL) : '-'}
                       </div>
-                      <div>
-                        <div className="text-[10px] text-gray-500 uppercase mb-1">Bankroll</div>
-                        <div className="text-lg font-bold text-white">£{bankroll.toFixed(2)}</div>
+                      <div className="text-[10px] text-gray-600">
+                        {totalStats.bestDay ? formatDateShort(totalStats.bestDay.date) : ''}
                       </div>
-                      <div>
-                        <div className="text-[10px] text-gray-500 uppercase mb-1">ROI</div>
-                        <div className={`text-lg font-bold ${totalStats.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%
-                        </div>
+                    </div>
+                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
+                      <div className="text-[10px] text-gray-500 uppercase">Worst Day</div>
+                      <div className="text-sm font-semibold text-red-400">
+                        {totalStats.worstDay ? fmtPL(totalStats.worstDay.dayPL) : '-'}
                       </div>
+                      <div className="text-[10px] text-gray-600">
+                        {totalStats.worstDay ? formatDateShort(totalStats.worstDay.date) : ''}
+                      </div>
+                    </div>
+                    <div className="bg-gray-800/60 rounded-lg px-3 py-2">
+                      <div className="text-[10px] text-gray-500 uppercase">Streaks</div>
+                      <div className="text-sm font-semibold">
+                        <span className="text-green-400">{totalStats.longestWinStreak}W</span>
+                        <span className="text-gray-600 mx-1">/</span>
+                        <span className="text-red-400">{totalStats.longestLoseStreak}L</span>
+                      </div>
+                      <div className="text-[10px] text-gray-600">longest run</div>
                     </div>
                   </div>
                 )}
-              </div>
-            )}
 
-            {activeView === 'all' && (
-              <div className="space-y-1.5">
-                {[...bets].reverse().map(bet => (
-                  <BetRow key={bet.id} bet={bet} showDate />
-                ))}
+                {/* Tab bar */}
+                <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-0.5">
+                  {([
+                    { key: 'overview' as const, label: 'Overview' },
+                    { key: 'monthly' as const, label: 'Monthly' },
+                    { key: 'trust' as const, label: 'Trust Tier' },
+                  ]).map(tab => (
+                    <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                      className={`flex-1 px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                        activeTab === tab.key ? 'bg-yellow-500/20 text-yellow-400' : 'text-gray-500 hover:text-gray-300'
+                      }`}>
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ====== OVERVIEW TAB ====== */}
+                {activeTab === 'overview' && (
+                  <>
+                    <div className="flex items-center gap-1 bg-gray-800/60 rounded-lg p-0.5">
+                      <button onClick={() => setActiveView('daily')}
+                        className={`flex-1 px-3 py-1 text-[11px] font-medium rounded transition-all ${
+                          activeView === 'daily' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
+                        }`}>
+                        Daily Breakdown
+                      </button>
+                      <button onClick={() => setActiveView('all')}
+                        className={`flex-1 px-3 py-1 text-[11px] font-medium rounded transition-all ${
+                          activeView === 'all' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
+                        }`}>
+                        All Bets ({totalStats?.totalBets ?? 0})
+                      </button>
+                    </div>
+
+                    {activeView === 'daily' && (
+                      <div className="space-y-2">
+                        {[...dailySummaries].reverse().map(day => {
+                          const isExpanded = expandedDay === day.date
+                          const dayColor = day.dayPL >= 20 ? 'bg-green-500/10 border-green-500/25'
+                            : day.dayPL > 0 ? 'bg-green-500/5 border-green-500/15'
+                            : day.dayPL <= -20 ? 'bg-red-500/10 border-red-500/25'
+                            : day.dayPL < 0 ? 'bg-red-500/5 border-red-500/15'
+                            : 'bg-gray-800/40 border-gray-700/50'
+                          return (
+                            <div key={day.date} className={`rounded-xl overflow-hidden border transition-colors ${
+                              isExpanded ? 'bg-gray-800/60 border-yellow-500/30' : dayColor
+                            }`}>
+                              <button onClick={() => setExpandedDay(isExpanded ? null : day.date)}
+                                className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-800/60 transition-colors">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="text-sm font-semibold text-white">{formatDateShort(day.date)}</span>
+                                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                                      day.dayPL > 0 ? 'bg-green-500/15 text-green-400'
+                                        : day.dayPL < 0 ? 'bg-red-500/15 text-red-400'
+                                        : 'bg-gray-700 text-gray-400'
+                                    }`}>{fmtPL(day.dayPL)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                                    <span>{day.bets.length} bets</span>
+                                    <span className="text-green-500">{day.wins}W</span>
+                                    <span className="text-red-500">{day.losses}L</span>
+                                    {day.pending > 0 && <span className="text-yellow-500">{day.pending}P</span>}
+                                    <span className="text-gray-600">|</span>
+                                    <span className={day.runningROI >= 0 ? 'text-green-500' : 'text-red-500'}>
+                                      ROI: {day.runningROI >= 0 ? '+' : ''}{day.runningROI.toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </div>
+                                {isExpanded
+                                  ? <ChevronUp className="w-4 h-4 text-yellow-400" />
+                                  : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                              </button>
+                              {isExpanded && (
+                                <div className="border-t border-gray-700/50 px-3 py-2 space-y-1">
+                                  {day.bets.map(bet => <BetRow key={bet.id} bet={bet} />)}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+
+                        {totalStats && (
+                          <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mt-3">
+                            <div className="grid grid-cols-3 gap-4 text-center">
+                              <div>
+                                <div className="text-[10px] text-gray-500 uppercase mb-1">Total P/L</div>
+                                <div className={`text-lg font-bold ${totalStats.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {fmtPL(totalStats.totalPL)}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-gray-500 uppercase mb-1">Bankroll</div>
+                                <div className="text-lg font-bold text-white">£{bankroll.toFixed(2)}</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-gray-500 uppercase mb-1">ROI</div>
+                                <div className={`text-lg font-bold ${totalStats.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeView === 'all' && (
+                      <div className="space-y-1.5">
+                        {[...filteredBets].reverse().map(bet => <BetRow key={bet.id} bet={bet} showDate />)}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* ====== MONTHLY TAB ====== */}
+                {activeTab === 'monthly' && (
+                  <div className="space-y-3">
+                    {monthSummaries.length === 0 ? (
+                      <div className="text-center py-12 text-gray-500 text-sm">No data for this period</div>
+                    ) : monthSummaries.map(m => (
+                      <div key={m.month} className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-semibold text-white">{m.label}</span>
+                          <span className={`text-sm font-bold ${m.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {fmtPL(m.pl)}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-3 text-center text-[11px]">
+                          <div>
+                            <div className="text-gray-500 mb-0.5">Bets</div>
+                            <div className="text-white font-medium">{m.totalBets}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-0.5">Win Rate</div>
+                            <div className="text-white font-medium">{m.winRate.toFixed(0)}%</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-0.5">Staked</div>
+                            <div className="text-white font-medium">£{m.staked.toFixed(0)}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-0.5">ROI</div>
+                            <div className={`font-medium ${m.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {m.roi >= 0 ? '+' : ''}{m.roi.toFixed(1)}%
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                          <div className="h-full bg-green-500/60 rounded-full transition-all" style={{ width: `${Math.min(m.winRate, 100)}%` }} />
+                        </div>
+                        <div className="mt-2 flex items-center gap-3 text-[10px] text-gray-500">
+                          <span className="text-green-500">{m.wins} won</span>
+                          <span className="text-red-500">{m.losses} lost</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ====== TRUST TIER TAB ====== */}
+                {activeTab === 'trust' && (
+                  <div className="space-y-4">
+                    {trustTierSummaries.length === 0 ? (
+                      <div className="text-center py-12">
+                        <ShieldCheck className="w-12 h-12 text-gray-700 mx-auto mb-3" />
+                        <h3 className="text-gray-400 font-medium mb-1">Trust Tier Analytics Coming Soon</h3>
+                        <p className="text-gray-600 text-sm max-w-sm mx-auto">
+                          Future bets placed through AI Top Picks will be tagged with confidence tiers,
+                          enabling detailed performance analysis by trust level.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
+                          <h3 className="text-sm font-semibold text-gray-300 mb-3">ROI by Trust Tier</h3>
+                          <ResponsiveContainer width="100%" height={140}>
+                            <BarChart data={trustTierSummaries.map(t => ({
+                              name: t.key, roi: Number(t.roi.toFixed(1)), winRate: Number(t.winRate.toFixed(1)),
+                            }))}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                              <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false}
+                                tickFormatter={(v: number) => `${v}%`} width={40} />
+                              <Tooltip content={<TrustTooltip />} />
+                              <Bar dataKey="roi" radius={[4, 4, 0, 0]}>
+                                {trustTierSummaries.map((t, i) => (
+                                  <Cell key={i} fill={t.barColor} fillOpacity={0.7} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {trustTierSummaries.map(t => (
+                          <div key={t.key} className={`border rounded-xl p-4 ${t.bgClass}`}>
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <ShieldCheck className={`w-4 h-4 ${t.textClass}`} />
+                                <span className={`text-sm font-semibold ${t.textClass}`}>{t.key} Trust</span>
+                              </div>
+                              <span className={`text-sm font-bold ${t.pl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {fmtPL(t.pl)}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-3 text-center text-[11px]">
+                              <div>
+                                <div className="text-gray-500 mb-0.5">Bets</div>
+                                <div className="text-white font-medium">{t.totalBets}</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500 mb-0.5">Win Rate</div>
+                                <div className="text-white font-medium">{t.winRate.toFixed(0)}%</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500 mb-0.5">Avg Stake</div>
+                                <div className="text-white font-medium">£{t.avgStake.toFixed(2)}</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500 mb-0.5">ROI</div>
+                                <div className={`font-medium ${t.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {t.roi >= 0 ? '+' : ''}{t.roi.toFixed(1)}%
+                                </div>
+                              </div>
+                            </div>
+                            {t.avgEdge > 0 && (
+                              <div className="mt-2 pt-2 border-t border-gray-700/30 text-[10px] text-gray-500">
+                                Avg edge: <span className="text-cyan-400">{t.avgEdge.toFixed(1)}%</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-12">
+                <div className="text-gray-500 text-sm mb-2">No bets in the selected period</div>
+                <button onClick={() => setPeriod('lifetime')}
+                  className="text-yellow-400 text-sm hover:text-yellow-300 transition-colors">
+                  View all time
+                </button>
               </div>
             )}
           </>
@@ -488,17 +894,34 @@ function BetRow({ bet, showDate = false }: { bet: UserBet; showDate?: boolean })
       </div>
 
       <div className="flex-1 min-w-0">
-        <span className={`font-semibold truncate block ${
-          bet.status === 'won' ? 'text-green-300' : bet.status === 'pending' ? 'text-white' : 'text-gray-300'
-        }`}>
-          {bet.horse_name}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`font-semibold truncate ${
+            bet.status === 'won' ? 'text-green-300' : bet.status === 'pending' ? 'text-white' : 'text-gray-300'
+          }`}>
+            {bet.horse_name}
+          </span>
+          {bet.trust_tier && (
+            <span className={`text-[8px] px-1 py-0.5 rounded font-bold uppercase leading-none flex-shrink-0 ${
+              bet.trust_tier === 'Strong' ? 'bg-green-500/20 text-green-400' :
+              bet.trust_tier === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+              'bg-orange-500/20 text-orange-400'
+            }`}>
+              {bet.trust_tier}
+            </span>
+          )}
+        </div>
         <div className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1.5">
           {showDate && <span>{formatDateShort(bet.race_date || bet.created_at?.split('T')[0])}</span>}
           {showDate && <span className="text-gray-700">&middot;</span>}
           <span>{bet.off_time?.substring(0, 5)}</span>
           <span className="text-gray-700">&middot;</span>
           <span>{bet.course}</span>
+          {bet.edge_pct != null && (
+            <>
+              <span className="text-gray-700">&middot;</span>
+              <span className="text-cyan-400">{(Number(bet.edge_pct) * 100).toFixed(0)}% edge</span>
+            </>
+          )}
         </div>
       </div>
 

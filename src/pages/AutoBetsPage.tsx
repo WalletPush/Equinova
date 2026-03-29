@@ -115,7 +115,7 @@ function parseOutcome(comment: string): string {
 
 const MIN_EDGE = 0.05
 const MAX_ODDS = 13.0  // 12/1 in decimal
-const MIN_ENSEMBLE_PROBA = 0.15
+const MIN_ENSEMBLE_PROBA = 0.40
 const LONGSHOT_MIN_ACTIVE_PATTERNS = 2
 
 export function AutoBetsPage() {
@@ -354,12 +354,27 @@ export function AutoBetsPage() {
     const settled: TopPick[] = []
     const addedRaceIds = new Set<string>()
 
+    const MAX_DAILY_EXPOSURE = 0.15
+    const MAX_ODDS_BAND_EXPOSURE = 0.25
+    const getOddsBand = (o: number) => o < 3 ? 'short' : o < 5 ? 'mid' : o < 9 ? 'midlong' : 'long'
+    let dailyExposure = 0
+    const bandExposure: Record<string, number> = { short: 0, mid: 0, midlong: 0, long: 0 }
+    if (bankroll > 0) {
+      for (const b of (userBetsData ?? [])) {
+        if (b.race_date === selectedDate && (b.status === 'pending' || b.status === 'won' || b.status === 'lost')) {
+          const amt = Number(b.bet_amount) || 0
+          const bOdds = Number(b.current_odds) || 3
+          dailyExposure += amt / bankroll
+          bandExposure[getOddsBand(bOdds)] += amt / bankroll
+        }
+      }
+    }
+
     for (const [raceId, raceEntries] of byRace) {
       const race = raceMap[raceId]
       if (!race) continue
 
       let bestPick: TopPick | null = null
-      let betBackedPick: TopPick | null = null
 
       for (const e of raceEntries) {
         const liveOdds = Number(e.current_odds) || 0
@@ -376,13 +391,10 @@ export function AutoBetsPage() {
         const mmKey = `${raceId}:${e.horse_id}`
         const mm = matchesByHorse.get(mmKey)
         const pCount = mm?.pattern_count ?? 0
-        const hasBet = userBetLookup.has(mmKey)
 
-        // Signal gate: must have patterns OR an existing bet to qualify
-        if (pCount === 0 && !hasBet) continue
+        if (pCount === 0) continue
 
-        // Odds gate: <= 12/1 passes automatically; > 12/1 needs 2+ patterns (unless already bet)
-        if (odds > MAX_ODDS && !hasBet) {
+        if (odds > MAX_ODDS) {
           if (pCount < LONGSHOT_MIN_ACTIVE_PATTERNS) continue
         }
 
@@ -438,26 +450,19 @@ export function AutoBetsPage() {
           odds_movement_pct: oddsMovementPct,
         }
 
-        // Horses with existing bets always get priority for their race
-        if (hasBet) {
-          betBackedPick = pick
-        }
-
         if (!bestPick || edge > bestPick.edge) {
           bestPick = pick
         }
       }
 
-      // Prefer the horse the user already bet on; fall back to highest edge
-      const finalPick = betBackedPick ?? bestPick
+      const finalPick = bestPick
 
       if (finalPick) {
         const mmKey = `${finalPick.race_id}:${finalPick.horse_id}`
         const hasBet = userBetLookup.has(mmKey)
         const mmMatch = matchesByHorse.get(mmKey)
         const kelly = computeKelly(finalPick, bankroll, mmMatch?.trust_score ?? 0)
-        // Skip Kelly gate only for horses without existing bets
-        if (!kelly && !hasBet) continue
+        if (!kelly) continue
 
         const raceMinutes = raceTimeToMinutes(finalPick.off_time || '')
         const hasResults = racesWithResults?.has(finalPick.race_id)
@@ -497,6 +502,14 @@ export function AutoBetsPage() {
         } else if (raceFinished && !hasResults) {
           settled.push(finalPick)
         } else if (!raceFinished) {
+          if (kelly && bankroll > 0 && !hasBet) {
+            const proposedFrac = kelly.stake / bankroll
+            const band = getOddsBand(finalPick.opening_odds > 1 ? finalPick.opening_odds : finalPick.current_odds)
+            if (dailyExposure + proposedFrac > MAX_DAILY_EXPOSURE) continue
+            if (bandExposure[band] + proposedFrac > MAX_ODDS_BAND_EXPOSURE) continue
+            dailyExposure += proposedFrac
+            bandExposure[band] += proposedFrac
+          }
           upcoming.push(finalPick)
         }
       }
@@ -505,7 +518,7 @@ export function AutoBetsPage() {
     upcoming.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     settled.sort((a, b) => (a.off_time || '').localeCompare(b.off_time || ''))
     return { picks: upcoming, settledPicks: settled }
-  }, [entriesData, bankroll, selectedDate, ukToday, matchesByHorse, userBetLookup])
+  }, [entriesData, bankroll, selectedDate, ukToday, matchesByHorse, userBetLookup, userBetsData])
 
   const handleAutoBetToggle = useCallback(async (turnOn: boolean) => {
     toggleAutoBet(turnOn)
@@ -1051,7 +1064,7 @@ function computeKelly(pick: TopPick, userBankroll: number, trustScore = 0) {
   if (odds <= 1 || userBankroll <= 0 || ensemble_proba <= 0) return null
   const implied = 1 / odds
   const edge = ensemble_proba - implied
-  if (edge <= 0.01) return null
+  if (edge < 0.05) return null
   const kelly = edge / (odds - 1)
   const baseQuarterKelly = kelly / 4
   const multiplier = getTrustMultiplier(trustScore)
@@ -1391,6 +1404,10 @@ function PickCard({ pick, bet, userBankroll, needsSetup, settled, inSlip, onTogg
               trainerName={pick.trainer}
               size="small"
               kellyStake={kellyInfo?.stake ?? null}
+              trustTier={mastermindMatch?.trust_tier ?? null}
+              trustScore={mastermindMatch?.trust_score ?? null}
+              edgePct={pick.edge > 0 ? pick.edge : null}
+              ensembleProba={pick.ensemble_proba}
             />
           ) : null}
           </div>
@@ -1523,6 +1540,8 @@ function SmartMoneyCard({ alert, bet, needsSetup }: {
             odds={alert.current_odds}
             size="normal"
             kellyStake={alert.kelly_stake}
+            edgePct={alert.live_edge > 0 ? alert.live_edge : null}
+            ensembleProba={alert.live_ensemble}
           />
         ) : null}
       </div>

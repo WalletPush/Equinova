@@ -23,6 +23,11 @@ interface PlaceBetButtonProps {
   raceId?: string
   horseId?: string
   kellyStake?: number | null
+  trustTier?: string | null
+  trustScore?: number | null
+  edgePct?: number | null
+  ensembleProba?: number | null
+  signalComboKey?: string | null
 }
 
 export function PlaceBetButton({ 
@@ -37,6 +42,11 @@ export function PlaceBetButton({
   raceId,
   horseId,
   kellyStake,
+  trustTier,
+  trustScore,
+  edgePct,
+  ensembleProba,
+  signalComboKey,
 }: PlaceBetButtonProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isBetPlaced, setIsBetPlaced] = useState(false)
@@ -65,7 +75,7 @@ export function PlaceBetButton({
         }
       }
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         horse_name: horseName,
         horse_id: horseId || null,
         race_id: raceId || null,
@@ -75,8 +85,13 @@ export function PlaceBetButton({
         jockey_name: jockeyName || null,
         current_odds: odds ? String(odds) : null,
         bet_amount: amount,
-        odds: oddsValue
+        odds: oddsValue,
       }
+      if (trustTier) payload.trust_tier = trustTier
+      if (trustScore != null) payload.trust_score = trustScore
+      if (edgePct != null) payload.edge_pct = edgePct
+      if (ensembleProba != null) payload.ensemble_proba = ensembleProba
+      if (signalComboKey) payload.signal_combo_key = signalComboKey
       
       console.log('Bet payload:', payload)
       return await callSupabaseFunction('place-bet', payload)

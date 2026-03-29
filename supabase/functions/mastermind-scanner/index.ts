@@ -254,7 +254,7 @@ Deno.serve(async (req) => {
 
         const stakeFraction = Math.min(baseQuarterKelly * kellyMultiplier, 0.05);
 
-        const worthBetting = edgePct >= 5 && totalPatterns > 0 && ensProba >= 0.10;
+        const worthBetting = edgeRaw >= 0.05 && totalPatterns > 0 && ensProba >= 0.40;
 
         allMatches.push({
           horse_name: entry.horse_name || "",

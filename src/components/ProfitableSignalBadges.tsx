@@ -1,21 +1,20 @@
 import React from 'react'
 import type { ProfitableSignal } from '@/lib/confluenceScore'
-import type { DynamicCombo } from '@/hooks/useDynamicSignals'
+import type { PatternMatch } from '@/hooks/useMastermind'
 
 interface Props {
   signals?: ProfitableSignal[]
-  dynamicCombos?: DynamicCombo[]
+  mastermindPatterns?: PatternMatch[]
   compact?: boolean
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  proven:   'text-green-400 bg-green-500/20 border-green-500/50',
-  strong:   'text-emerald-400 bg-emerald-500/15 border-emerald-500/40',
-  emerging: 'text-amber-400 bg-amber-500/15 border-amber-500/40',
+const PATTERN_STYLES = {
+  lifetime: 'text-green-400 bg-green-500/20 border-green-500/50',
+  d21:      'text-cyan-400 bg-cyan-500/15 border-cyan-500/40',
 }
 
-export function ProfitableSignalBadges({ signals = [], dynamicCombos = [], compact = false }: Props) {
-  const hasAnything = signals.length > 0 || dynamicCombos.length > 0
+export function ProfitableSignalBadges({ signals = [], mastermindPatterns = [], compact = false }: Props) {
+  const hasAnything = signals.length > 0 || mastermindPatterns.length > 0
   if (!hasAnything) return null
 
   if (compact) {
@@ -30,12 +29,14 @@ export function ProfitableSignalBadges({ signals = [], dynamicCombos = [], compa
       })
     }
 
-    for (const dc of dynamicCombos) {
+    for (const p of mastermindPatterns) {
+      const isD21 = p.pattern_type === '21DAY_PROFITABLE'
+      const roiLabel = isD21 ? `${p.d21_roi_pct?.toFixed(0) ?? '?'}% 21d` : `${p.roi_pct?.toFixed(0) ?? '?'}%`
       allBadges.push({
-        key: `dyn-${dc.combo_key}`,
-        label: dc.combo_label,
-        color: STATUS_STYLES[dc.status] || STATUS_STYLES.emerging,
-        title: `${dc.combo_label}: ${dc.win_rate}% WR, ${dc.total_bets} bets, ${dc.roi_pct}% ROI, £${dc.profit.toFixed(2)} profit [${dc.status}]`,
+        key: `mm-${p.pattern_id}`,
+        label: p.pattern_label,
+        color: isD21 ? PATTERN_STYLES.d21 : PATTERN_STYLES.lifetime,
+        title: `${p.pattern_label}: ${(p.win_rate * 100).toFixed(0)}% WR, ${p.total_bets} bets, ${roiLabel} ROI [${isD21 ? '21-day' : 'lifetime'}]`,
       })
     }
 
@@ -77,21 +78,25 @@ export function ProfitableSignalBadges({ signals = [], dynamicCombos = [], compa
           )}
         </div>
       ))}
-      {dynamicCombos.map(dc => (
-        <div
-          key={`dyn-${dc.combo_key}`}
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-medium ${STATUS_STYLES[dc.status] || STATUS_STYLES.emerging}`}
-          title={`${dc.total_bets} bets, p=${dc.p_value?.toFixed(4) ?? '—'} [${dc.status}]`}
-        >
-          <span>{dc.combo_label}</span>
-          <span className="opacity-60">·</span>
-          <span>{dc.win_rate}%</span>
-          <span className="opacity-60">·</span>
-          <span className={dc.roi_pct > 0 ? 'text-green-400' : 'text-red-400'}>
-            {dc.roi_pct > 0 ? '+' : ''}{dc.roi_pct}% ROI
-          </span>
-        </div>
-      ))}
+      {mastermindPatterns.map(p => {
+        const isD21 = p.pattern_type === '21DAY_PROFITABLE'
+        const roi = isD21 ? (p.d21_roi_pct ?? p.roi_pct) : p.roi_pct
+        return (
+          <div
+            key={`mm-${p.pattern_id}`}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-medium ${isD21 ? PATTERN_STYLES.d21 : PATTERN_STYLES.lifetime}`}
+            title={`${p.total_bets} bets, stab=${p.stability_windows}/5 [${isD21 ? '21-day' : 'lifetime'}]`}
+          >
+            <span>{p.pattern_label}</span>
+            <span className="opacity-60">·</span>
+            <span>{(p.win_rate * 100).toFixed(0)}%</span>
+            <span className="opacity-60">·</span>
+            <span className={roi > 0 ? 'text-green-400' : 'text-red-400'}>
+              {roi > 0 ? '+' : ''}{roi.toFixed(0)}% ROI
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }

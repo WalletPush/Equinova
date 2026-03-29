@@ -14,18 +14,15 @@ Deno.serve(async (req)=>{
   }
   try {
     // Get request data
-    const { horse_name, horse_id, race_id, course, off_time, trainer_name, jockey_name, current_odds, bet_amount, odds } = await req.json();
+    const {
+      horse_name, horse_id, race_id, course, off_time,
+      trainer_name, jockey_name, current_odds, bet_amount, odds,
+      trust_tier, trust_score, edge_pct, ensemble_proba, signal_combo_key,
+    } = await req.json();
     console.log('Place bet request:', {
-      horse_name,
-      horse_id,
-      race_id,
-      course,
-      off_time,
-      trainer_name,
-      jockey_name,
-      current_odds,
-      bet_amount,
-      odds
+      horse_name, horse_id, race_id, course, off_time,
+      trainer_name, jockey_name, current_odds, bet_amount, odds,
+      trust_tier, trust_score, edge_pct, ensemble_proba, signal_combo_key,
     });
     // Validate required parameters
     if (!horse_name || !race_id || !course || !off_time || !bet_amount || bet_amount <= 0) {
@@ -63,7 +60,7 @@ Deno.serve(async (req)=>{
     }
 
     // Create the bet record with all the data from selections
-    const betData = {
+    const betData: Record<string, unknown> = {
       user_id: userId,
       race_id: race_id,
       race_date: new Date().toISOString().split('T')[0],
@@ -77,8 +74,13 @@ Deno.serve(async (req)=>{
       bet_amount: bet_amount,
       bet_type: 'win',
       status: 'pending',
-      potential_return: bet_amount * odds
+      potential_return: bet_amount * odds,
     };
+    if (trust_tier) betData.trust_tier = trust_tier;
+    if (trust_score != null) betData.trust_score = trust_score;
+    if (edge_pct != null) betData.edge_pct = edge_pct;
+    if (ensemble_proba != null) betData.ensemble_proba = ensemble_proba;
+    if (signal_combo_key) betData.signal_combo_key = signal_combo_key;
     console.log('Creating bet with data:', betData);
     // Insert the bet
     const insertBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets`, {

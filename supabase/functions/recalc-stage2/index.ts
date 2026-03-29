@@ -300,8 +300,8 @@ Deno.serve(async (req) => {
       // Max odds 12/1 = decimal 13
       if (curOdds > 13) continue;
 
-      // Minimum ensemble probability 15%
-      if (liveEnsemble < 0.15) continue;
+      // Minimum ensemble probability 40%
+      if (liveEnsemble < 0.40) continue;
 
       // Edge checks (model agreement removed — base models now feed into Stage 2)
       const impliedProb = 1 / curOdds;
@@ -314,7 +314,7 @@ Deno.serve(async (req) => {
 
       // Kelly sizing
       const kellyFraction = liveEdge / (curOdds - 1);
-      const quarterKelly = Math.min(kellyFraction / 4, 0.03);
+      const quarterKelly = Math.min(kellyFraction / 4, 0.05);
       const rawStake = KELLY_BANKROLL * quarterKelly;
       const stake = Math.round(rawStake * 2) / 2; // nearest 50p
       if (stake < 1) continue;
