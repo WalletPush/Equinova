@@ -148,17 +148,21 @@ export function PerformancePage() {
     })
   }, [bets, period])
 
-  const bankrollGrowth = useMemo(() => {
-    if (!bets.length) return 0
+  const startingBankroll = useMemo(() => {
+    if (!bets.length) return bankroll
     let allTimePL = 0
     for (const b of bets) {
       if (b.status === 'won') allTimePL += Number(b.potential_return) - Number(b.bet_amount)
       else if (b.status === 'lost') allTimePL -= Number(b.bet_amount)
       else if (b.status === 'pending') allTimePL -= Number(b.bet_amount)
     }
-    const starting = bankroll - allTimePL
-    return starting > 0 ? (allTimePL / starting) * 100 : 0
+    return bankroll - allTimePL
   }, [bets, bankroll])
+
+  const bankrollGrowth = useMemo(() => {
+    if (!bets.length || startingBankroll <= 0) return 0
+    return ((bankroll - startingBankroll) / startingBankroll) * 100
+  }, [bets, bankroll, startingBankroll])
 
   const { dailySummaries, totalStats } = useMemo(() => {
     if (!filteredBets.length) return { dailySummaries: [], totalStats: null }
@@ -181,7 +185,6 @@ export function PerformancePage() {
       else if (b.status === 'lost') totalPL -= Number(b.bet_amount)
       else if (b.status === 'pending') totalPL -= Number(b.bet_amount)
     }
-    const startingBankroll = bankroll - totalPL
     const roi = startingBankroll > 0 ? (totalPL / startingBankroll) * 100 : 0
 
     let runningPL = 0
@@ -258,7 +261,7 @@ export function PerformancePage() {
         longestWinStreak, longestLoseStreak, bestDay, worstDay, avgStakePct,
       },
     }
-  }, [filteredBets, bankroll])
+  }, [filteredBets, bankroll, startingBankroll])
 
   const chartData = useMemo(() => {
     if (!dailySummaries.length) return []
@@ -307,10 +310,10 @@ export function PerformancePage() {
           else if (b.status === 'lost') pl -= Number(b.bet_amount)
         }
         const wr = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
-        const roi = staked > 0 ? (pl / staked) * 100 : 0
+        const roi = startingBankroll > 0 ? (pl / startingBankroll) * 100 : 0
         return { month, label: formatMonthLabel(month), totalBets: monthBets.length, wins, losses, staked, pl, roi, winRate: wr }
       })
-  }, [filteredBets])
+  }, [filteredBets, startingBankroll])
 
   const trustTierSummaries = useMemo(() => {
     const hasTrustData = filteredBets.some(b => b.trust_tier)
@@ -332,14 +335,14 @@ export function PerformancePage() {
         else if (b.status === 'lost') pl -= Number(b.bet_amount)
       }
       const wr = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
-      const roi = staked > 0 ? (pl / staked) * 100 : 0
+      const roi = startingBankroll > 0 ? (pl / startingBankroll) * 100 : 0
       const avgStake = tierBets.length > 0 ? staked / tierBets.length : 0
       const edgeBets = tierBets.filter(b => b.edge_pct != null)
       const avgEdge = edgeBets.length > 0
         ? edgeBets.reduce((s, b) => s + Number(b.edge_pct ?? 0), 0) / edgeBets.length * 100 : 0
       return { key, bgClass, textClass, barColor, totalBets: tierBets.length, wins, losses, staked, pl, roi, winRate: wr, avgStake, avgEdge }
     }).filter(Boolean) as { key: string; bgClass: string; textClass: string; barColor: string; totalBets: number; wins: number; losses: number; staked: number; pl: number; roi: number; winRate: number; avgStake: number; avgEdge: number }[]
-  }, [filteredBets])
+  }, [filteredBets, startingBankroll])
 
   const exportCSV = useCallback(() => {
     const headers = ['Date', 'Course', 'Time', 'Horse', 'Odds', 'Stake', 'Status', 'P/L', 'Trust Tier', 'Edge %']
