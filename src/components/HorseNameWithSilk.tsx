@@ -8,7 +8,7 @@ interface HorseNameWithSilkProps {
   showNumber?: boolean
   number?: number
   clickable?: boolean
-  onHorseClick?: (entry?: RaceEntry) => void
+  onHorseClick?: (entry: RaceEntry) => void
   horseEntry?: RaceEntry
 }
 

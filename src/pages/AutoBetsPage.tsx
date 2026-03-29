@@ -100,7 +100,7 @@ export function AutoBetsPage() {
         .select('race_id, off_time, course_name, type, surface')
         .eq('date', selectedDate)
       if (racesErr) throw racesErr
-      if (!races?.length) return { entries: [], raceMap: {} as Record<string, any> }
+      if (!races?.length) return { entries: [] as any[], raceMap: {} as Record<string, any>, resultsByRace: {} as Record<string, Record<string, number>>, resultsByHorseId: {} as Record<string, number>, outcomeByHorseId: {} as Record<string, string>, racesWithResults: new Set<string>(), nonRunnersByRace: {} as Record<string, Set<string>> }
 
       const raceMap: Record<string, any> = {}
       for (const r of races) raceMap[r.race_id] = r

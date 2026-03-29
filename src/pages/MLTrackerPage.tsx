@@ -503,7 +503,7 @@ export function MLTrackerPage() {
         }
       }
 
-      const parts = []
+      const parts: string[] = []
       if (fetched > 0) parts.push(`${fetched} results loaded`)
       if (notReady > 0) parts.push(`${notReady} not yet available`)
       if (errors > 0) parts.push(`${errors} failed`)
