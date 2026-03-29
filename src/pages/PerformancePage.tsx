@@ -363,13 +363,13 @@ export function PerformancePage() {
     }
 
     if (totalStats.profitFactor > 1.5 && totalStats.profitFactor < 99) {
-      items.push({ text: `Profit factor of ${totalStats.profitFactor.toFixed(2)} — your winners are paying ${totalStats.profitFactor.toFixed(1)}x more than your losers cost.`, color: 'text-green-400' })
+      items.push({ text: `For every £1 lost on losing bets, your winners bring back £${totalStats.profitFactor.toFixed(2)} — you're making more than you lose.`, color: 'text-green-400' })
     } else if (totalStats.profitFactor < 1 && totalStats.profitFactor > 0) {
-      items.push({ text: `Profit factor below 1.0 — consider tightening to higher-edge picks only.`, color: 'text-yellow-400' })
+      items.push({ text: `Your losses are currently outweighing your wins — sticking to higher-confidence picks could help.`, color: 'text-yellow-400' })
     }
 
     if (totalStats.expectancy > 0) {
-      items.push({ text: `Expected value of ${fmtPL(totalStats.expectancy)} per bet — you have a quantifiable edge.`, color: 'text-green-400' })
+      items.push({ text: `On average you make ${fmtPL(totalStats.expectancy)} profit per bet — the more you bet, the more you earn.`, color: 'text-green-400' })
     }
 
     if (totalStats.maxDrawdownPct > 15) {
@@ -596,7 +596,7 @@ export function PerformancePage() {
                     <div className={`text-xl font-bold ${(totalStats?.roi ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {(totalStats?.roi ?? 0) >= 0 ? '+' : ''}{(totalStats?.roi ?? 0).toFixed(1)}%
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5">£{(totalStats?.totalStaked ?? 0).toFixed(0)} staked</div>
+                    <div className="text-xs text-gray-500 mt-0.5">from £{startingBankroll.toFixed(0)} bankroll</div>
                   </div>
 
                   <div className="bg-gray-800/80 border border-gray-700 rounded-xl p-4">
