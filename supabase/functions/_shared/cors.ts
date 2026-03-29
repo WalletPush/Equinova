@@ -1,4 +1,6 @@
 const ALLOWED_ORIGINS = [
+  'https://equinova.uk',
+  'https://www.equinova.uk',
   'https://equinova.vercel.app',
   'https://equinova-git-main-walletpush.vercel.app',
   'http://localhost:5173',
