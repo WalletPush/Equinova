@@ -48,8 +48,6 @@ Deno.serve(async (req) => {
     }
     const today = targetDate;
 
-    console.log(`mastermind-scanner: date=${today}`);
-
     // -- Load ALL active patterns (lifetime + 21-day) --
     const patternCols = "id,pattern_label,signal_keys,segment,pattern_type,total_bets,wins,win_rate,roi_pct,stability_windows,outlier_trimmed_roi,max_drawdown,drawdown_health,d21_bets,d21_wins,d21_roi_pct,d21_profit,status";
     const patternBase = `${supabaseUrl}/rest/v1/mastermind_patterns?select=${patternCols}&status=eq.ACTIVE&order=roi_pct.desc`;
@@ -68,7 +66,6 @@ Deno.serve(async (req) => {
 
     const lifetimePatterns = allPatterns.filter(p => p.pattern_type === "PROFITABLE");
     const d21Patterns = allPatterns.filter(p => p.pattern_type === "21DAY_PROFITABLE");
-    console.log(`Loaded ${lifetimePatterns.length} lifetime + ${d21Patterns.length} 21-day patterns`);
 
     // -- Load today's races + entries --
     const racesRes = await fetch(
@@ -116,7 +113,6 @@ Deno.serve(async (req) => {
     const entries = await fetchBatch(
       supabaseUrl, "race_entries", ENTRY_COLS, raceIds, hdrs
     );
-    console.log(`Fetched ${todayRaces.length} races, ${entries.length} entries`);
 
     const entriesByRace = groupBy(entries, "race_id");
 
@@ -305,7 +301,7 @@ Deno.serve(async (req) => {
       },
     });
   } catch (err) {
-    console.error("mastermind-scanner error:", err);
+    console.error("mastermind-scanner failed");
     return json({ error: String(err) }, 500);
   }
 });

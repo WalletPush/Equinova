@@ -15,12 +15,6 @@ Deno.serve(async (req)=>{
   try {
     // Get request data
     const { limit = 20, offset = 0, order_by = 'created_at', order_dir = 'desc' } = await req.json();
-    console.log('Get user bets request:', {
-      limit,
-      offset,
-      order_by,
-      order_dir
-    });
     // Get Supabase credentials
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -45,7 +39,6 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // Get user's bets
     const betsResponse = await fetch(`${supabaseUrl}/rest/v1/bets?user_id=eq.${userId}&order=${order_by}.${order_dir}&limit=${limit}&offset=${offset}`, {
       method: 'GET',
@@ -57,11 +50,9 @@ Deno.serve(async (req)=>{
     });
     if (!betsResponse.ok) {
       const errorText = await betsResponse.text();
-      console.error('Failed to fetch bets:', errorText);
       throw new Error(`Failed to fetch bets: ${errorText}`);
     }
     const bets = await betsResponse.json();
-    console.log(`Found ${bets.length} bets for user ${userId}`);
     // Get total count for pagination
     const countResponse = await fetch(`${supabaseUrl}/rest/v1/bets?user_id=eq.${userId}&select=id`, {
       method: 'GET',
@@ -122,7 +113,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Get user bets error:', error);
+    console.error('get-user-bets failed');
     const errorResponse = {
       success: false,
       error: {

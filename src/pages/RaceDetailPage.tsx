@@ -54,8 +54,7 @@ export function RaceDetailPage() {
       const response = await fetchFromSupabaseFunction('ai-race-analysis', {
         method: 'POST',
         body: JSON.stringify({
-          raceId: race.race_id,
-          openaiApiKey: profile.openai_api_key
+          raceId: race.race_id
         })
       })
       

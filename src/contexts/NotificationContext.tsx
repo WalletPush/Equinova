@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { useAuth } from './AuthContext'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
@@ -65,7 +66,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         setIsSubscribed(false)
       }
     } catch (error) {
-      console.error('Error checking subscription status:', error)
+      logger.error('Error checking subscription status:', error)
     }
   }, [isSupported, user])
 
@@ -82,7 +83,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       setPermission(result)
       return result === 'granted'
     } catch (error) {
-      console.error('Error requesting notification permission:', error)
+      logger.error('Error requesting notification permission:', error)
       return false
     }
   }
@@ -105,7 +106,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       const keys = subscription.toJSON().keys
       if (!keys?.p256dh || !keys?.auth) {
-        console.error('Subscription missing keys')
+        logger.error('Subscription missing keys')
         return false
       }
 
@@ -122,14 +123,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       )
 
       if (error) {
-        console.error('Error storing subscription:', error)
+        logger.error('Error storing subscription:', error)
         return false
       }
 
       setIsSubscribed(true)
       return true
     } catch (error) {
-      console.error('Error subscribing to push notifications:', error)
+      logger.error('Error subscribing to push notifications:', error)
       return false
     }
   }
@@ -153,7 +154,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       setIsSubscribed(false)
       return true
     } catch (error) {
-      console.error('Error unsubscribing from push notifications:', error)
+      logger.error('Error unsubscribing from push notifications:', error)
       return false
     }
   }
@@ -172,7 +173,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           .eq('endpoint', subscription.endpoint)
       }
     } catch (error) {
-      console.error('Error updating enabled types:', error)
+      logger.error('Error updating enabled types:', error)
     }
   }
 

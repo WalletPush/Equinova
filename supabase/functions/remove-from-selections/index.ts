@@ -15,9 +15,6 @@ Deno.serve(async (req)=>{
   try {
     // Get request data
     const { id } = await req.json();
-    console.log('Remove from selections request:', {
-      id
-    });
     // Validate required parameters
     if (!id) {
       throw new Error('Missing required parameter: id is required');
@@ -46,7 +43,6 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // Remove selection
     const deleteResponse = await fetch(`${supabaseUrl}/rest/v1/selections?id=eq.${id}&user_id=eq.${userId}`, {
       method: 'DELETE',
@@ -59,11 +55,9 @@ Deno.serve(async (req)=>{
     });
     if (!deleteResponse.ok) {
       const errorText = await deleteResponse.text();
-      console.error('Failed to remove selection:', errorText);
       throw new Error(`Failed to remove selection: ${errorText}`);
     }
     const deletedEntries = await deleteResponse.json();
-    console.log(`Successfully removed selection with ID: ${id}`);
     return new Response(JSON.stringify({
       success: true,
       message: 'Selection removed successfully',
@@ -75,7 +69,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Remove from selections error:', error);
+    console.error('Remove from selections failed');
     const errorResponse = {
       success: false,
       error: {

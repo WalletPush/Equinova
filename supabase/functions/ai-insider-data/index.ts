@@ -12,8 +12,6 @@ Deno.serve(async (req) => {
     }
 
     try {
-        console.log('AI Insider data request at:', new Date().toISOString());
-
         // Get Supabase credentials
         const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
         const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -23,7 +21,6 @@ Deno.serve(async (req) => {
         }
 
         // Call the AI Insider analysis function to get fresh data
-        console.log('Calling AI analysis function...');
         const analysisResponse = await fetch(
             `${supabaseUrl}/functions/v1/ai-insider-analysis`,
             {
@@ -40,7 +37,6 @@ Deno.serve(async (req) => {
         }
 
         const analysisData = await analysisResponse.json();
-        console.log('AI analysis completed successfully:', JSON.stringify(analysisData));
 
         // Safely extract data with null checks
         const responseData = analysisData?.data || analysisData || {};
@@ -60,18 +56,12 @@ Deno.serve(async (req) => {
             }
         };
 
-        console.log('AI Insider data compiled successfully:', {
-            specialists: result.data.courseSpecialists.length,
-            intents: result.data.trainerIntents.length,
-            alerts: result.data.marketAlerts.length
-        });
-
         return new Response(JSON.stringify(result), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
     } catch (error) {
-        console.error('AI Insider data error:', error);
+        console.error('AI Insider data failed');
 
         return new Response(JSON.stringify({
             error: {

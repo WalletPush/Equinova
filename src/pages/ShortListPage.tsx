@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/AppLayout'
 import { HorseNameWithSilk } from '@/components/HorseNameWithSilk'
 import { PlaceBetButton } from '@/components/PlaceBetButton'
 import { callSupabaseFunction } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { formatTime } from '@/lib/dateUtils'
 import { formatOdds } from '@/lib/odds'
 import { 
@@ -78,12 +79,10 @@ export function ShortListPage() {
       
       const adjustedRaceTime = `${adjustedHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
       
-      console.log(`Race time: ${raceTime} -> ${adjustedRaceTime}, Current time: ${currentTime}`)
-      
       // If adjusted race time has passed, it's finished
       return adjustedRaceTime < currentTime
     } catch (error) {
-      console.error('Error checking race finish time:', error)
+      logger.error('Error checking race finish time:', error)
       return false
     }
   }
@@ -93,12 +92,11 @@ export function ShortListPage() {
     mutationFn: async () => {
       return await callSupabaseFunction('cleanup-finished-races', {})
     },
-    onSuccess: (data) => {
-      console.log('Cleanup completed:', data)
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
     },
     onError: (error) => {
-      console.error('Cleanup failed:', error)
+      logger.error('Cleanup failed:', error)
     }
   })
 
@@ -129,21 +127,17 @@ export function ShortListPage() {
         course: course
       })
     },
-    onSuccess: (data, variables) => {
-      console.log(`Removed ${variables.horseName} from shortlist, ID: ${variables.id}`)
-      console.log('Removed data:', data)
-      
+    onSuccess: (_data, variables) => {
       // Update the cache directly instead of invalidating
       queryClient.setQueryData(['userShortlist'], (oldData: ShortlistItem[] | undefined) => {
         if (!oldData) return oldData
-        console.log('Updating cache, removing item with ID:', variables.id)
         return oldData.filter(item => item.id !== variables.id)
       })
       
       setRemovingItems(prev => ({ ...prev, [variables.id]: false }))
     },
     onError: (error, variables) => {
-      console.error('Error removing from shortlist:', error)
+      logger.error('Error removing from shortlist:', error)
       setRemovingItems(prev => ({ ...prev, [variables.id]: false }))
     }
   })
@@ -151,7 +145,6 @@ export function ShortListPage() {
 
 
   const handleRemove = async (item: ShortlistItem) => {
-    console.log('Removing item with ID:', item.id, 'Horse:', item.horse_name, 'Course:', item.course)
     setRemovingItems(prev => ({ ...prev, [item.id]: true }))
     try {
       await removeFromShortlistMutation.mutateAsync({
@@ -160,7 +153,7 @@ export function ShortListPage() {
         course: item.course
       })
     } catch (error) {
-      console.error('Remove operation failed:', error)
+      logger.error('Remove operation failed:', error)
     }
   }
 
@@ -462,9 +455,6 @@ export function ShortListPage() {
                                     customRaceEntryId={`shortlist_${item.id}_${item.horse_name.replace(/\s+/g, '_')}_${item.course.replace(/\s+/g, '_')}`}
                                     raceId={item.race_id}
                                     horseId={item.horse_id}
-                                    onSuccess={() => {
-                                      console.log(`Successfully placed bet on ${item.horse_name} from shortlist`)
-                                    }}
                                   />
                                 </div>
                               )}

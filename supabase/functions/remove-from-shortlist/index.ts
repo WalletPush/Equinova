@@ -15,10 +15,6 @@ Deno.serve(async (req)=>{
   try {
     // Get request data
     const { horse_name, course } = await req.json();
-    console.log('Remove from shortlist request:', {
-      horse_name,
-      course
-    });
     // Validate required parameters
     if (!horse_name || !course) {
       throw new Error('Missing required parameters: horse_name and course are required');
@@ -47,7 +43,6 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // Remove from shortlist
     const deleteResponse = await fetch(`${supabaseUrl}/rest/v1/shortlist?user_id=eq.${userId}&horse_name=eq.${encodeURIComponent(horse_name)}&course=eq.${encodeURIComponent(course)}`, {
       method: 'DELETE',
@@ -60,11 +55,9 @@ Deno.serve(async (req)=>{
     });
     if (!deleteResponse.ok) {
       const errorText = await deleteResponse.text();
-      console.error('Failed to remove from shortlist:', errorText);
       throw new Error(`Failed to remove horse from shortlist: ${errorText}`);
     }
     const deletedEntries = await deleteResponse.json();
-    console.log(`Removed ${deletedEntries.length} entries from shortlist for ${horse_name}`);
     return new Response(JSON.stringify({
       success: true,
       message: 'Horse removed from shortlist successfully',
@@ -76,7 +69,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Remove from shortlist error:', error);
+    console.error('Remove from shortlist failed');
     const errorResponse = {
       success: false,
       error: {

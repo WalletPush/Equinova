@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase, Profile } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 
 interface AuthContextType {
   user: User | null
@@ -39,8 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!error) {
         setProfile(profileData)
       }
-    } catch (error) {
-      console.warn('Profile loading failed:', error)
+    } catch {
       // Don't block authentication if profile loading fails
     }
   }
@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           loadProfile(user.id)
         }
       } catch (error) {
-        console.error('Error loading user:', error)
+        logger.error('Error loading user:', error)
       } finally {
         // Set loading to false regardless of profile loading status
         setLoading(false)
@@ -88,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       return { error }
     } catch (error) {
-      console.error('Sign in error:', error)
+      logger.error('Sign in error:', error)
       return { error }
     }
   }
@@ -106,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       return { error }
     } catch (error) {
-      console.error('Sign up error:', error)
+      logger.error('Sign up error:', error)
       return { error }
     }
   }
@@ -117,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       return { error }
     } catch (error) {
-      console.error('Sign out error:', error)
+      logger.error('Sign out error:', error)
       return { error }
     }
   }
@@ -150,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .single()
         
         if (error) {
-          console.error('Profile creation error:', error)
+          logger.error('Profile creation error:', error)
           return { error }
         }
         
@@ -168,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .select()
         
         if (error) {
-          console.error('Profile update error:', error)
+          logger.error('Profile update error:', error)
           return { error }
         }
         
@@ -179,7 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: null }
       }
     } catch (error) {
-      console.error('Profile update error:', error)
+      logger.error('Profile update error:', error)
       return { error }
     }
   }

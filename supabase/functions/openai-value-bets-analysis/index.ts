@@ -12,7 +12,7 @@ async function callOpenAI(apiKey: string, messages: any[], maxTokens: number) {
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 })
     });
-    if (res.ok) { console.log(`Model ${model} succeeded`); return await res.json(); }
+    if (res.ok) return await res.json();
     const errText = await res.text();
     if (res.status === 403 || res.status === 404 || errText.includes('model_not_found')) { continue; }
     throw new Error(`OpenAI ${res.status}: ${errText}`);
@@ -59,11 +59,7 @@ Deno.serve(async (req) => {
           }
         } catch (_e) {}
       }
-      // Last resort: fetch any available key from profiles
-      if (!openaiApiKey) {
-        const r = await fetch(`${supabaseUrl}/rest/v1/profiles?openai_api_key=not.is.null&select=openai_api_key&limit=1`, { headers: restHeaders });
-        if (r.ok) { const a = await r.json(); if (a[0]?.openai_api_key) openaiApiKey = a[0].openai_api_key; }
-      }
+      // No cross-tenant fallback — key must come from env or the authenticated user's profile
     }
     if (!openaiApiKey) throw new Error('No OpenAI API key found. Please add it in Settings.');
 
@@ -210,7 +206,7 @@ Paragraph 3 — RISKS AND STAKES: What needs to go right. Recommend stake sizing
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    console.error('Value Bet Analysis Error:', error);
+    console.error('Value bet analysis failed');
     return new Response(JSON.stringify({
       error: {
         success: false,

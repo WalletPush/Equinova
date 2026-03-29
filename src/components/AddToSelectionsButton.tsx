@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { callSupabaseFunction } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { Plus, Check, Loader2, AlertCircle } from 'lucide-react'
 
 interface RaceContext {
@@ -41,8 +42,6 @@ export function AddToSelectionsButton({
   // Add to selections mutation
   const addToSelectionsMutation = useMutation({
     mutationFn: async () => {
-      console.log('Adding to selections:', { horseName, raceContext })
-      
       const raceTime = raceContext.race_time || raceContext.off_time
       
       const payload = {
@@ -55,12 +54,10 @@ export function AddToSelectionsButton({
         current_odds: odds ? String(odds) : null,
         notes: 'Added from shortlist'
       }
-      
-      console.log('Selections payload:', payload)
+
       return await callSupabaseFunction('add-to-selections', payload)
     },
     onSuccess: () => {
-      console.log(`Added ${horseName} to selections successfully`)
       queryClient.invalidateQueries({ queryKey: ['user-selections'] })
       setIsAdded(true)
       setIsLoading(false)
@@ -68,7 +65,7 @@ export function AddToSelectionsButton({
       onSuccess?.()
     },
     onError: (error: Error) => {
-      console.error('Error adding to selections:', error)
+      logger.error('Error adding to selections:', error)
       setError(error.message)
       setIsLoading(false)
       setIsAdded(false)
@@ -83,7 +80,7 @@ export function AddToSelectionsButton({
     try {
       await addToSelectionsMutation.mutateAsync()
     } catch (error: any) {
-      console.error('Add to selections operation failed:', error)
+      logger.error('Add to selections operation failed:', error)
       setError(error?.message || 'Operation failed')
       setIsLoading(false)
     }

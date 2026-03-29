@@ -14,6 +14,7 @@ import { useMastermind } from '@/hooks/useMastermind'
 import { normalizeField, getNormalizedColor, getNormalizedStars, formatNormalized } from '@/lib/normalize'
 import { formatOdds } from '@/lib/odds'
 import { fetchFromSupabaseFunction } from '@/lib/api'
+import { logger } from '@/lib/logger'
 import { compareRaceTimes, raceTimeToMinutes, formatTime, isRaceCompleted } from '@/lib/dateUtils'
 import { 
   Clock, 
@@ -83,22 +84,20 @@ export function TodaysRacesPage() {
   const { data: racesData, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['races', selectedDate, 'today-races'],
     queryFn: async () => {
-      console.log(`Fetching races for ${selectedDate}...`)
       const { data, error } = await supabase.functions.invoke('race-data', {
         body: { date: selectedDate }
       })
       
       if (error) {
-        console.error('Error invoking race-data API:', error)
+        logger.error('Error invoking race-data API:', error)
         throw error
       }
       
       if (!data.data) {
-        console.error('Race data API returned no data:', data)
+        logger.error('Race data API returned no data:', data)
         throw new Error(data.error?.message || 'Race data API failed')
       }
       
-      console.log(`Races for ${selectedDate} fetched successfully: ${data.data.races?.length || 0} races`)
       return data.data
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
@@ -111,22 +110,20 @@ export function TodaysRacesPage() {
   const { data: raceStatsData } = useQuery({
     queryKey: ['today-race-stats', selectedDate],
     queryFn: async () => {
-      console.log('Fetching today race statistics...')
       const { data, error } = await supabase.functions.invoke('today-race-stats', {
         body: {}
       })
       
       if (error) {
-        console.error('Error fetching race statistics:', error)
+        logger.error('Error fetching race statistics:', error)
         throw error
       }
       
       if (!data.success) {
-        console.error('Race statistics API returned error:', data.error)
+        logger.error('Race statistics API returned error:', data.error)
         throw new Error(data.error?.message || 'Race statistics API failed')
       }
       
-      console.log('Race statistics fetched successfully:', data.data.summary_message)
       return data.data
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
@@ -143,7 +140,7 @@ export function TodaysRacesPage() {
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke('smart-signals')
       if (error) {
-        console.error('Smart signals error:', error)
+        logger.error('Smart signals error:', error)
         return { signals: [] }
       }
       return data
@@ -160,7 +157,7 @@ export function TodaysRacesPage() {
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke('pattern-alerts')
       if (error) {
-        console.error('Pattern alerts error:', error)
+        logger.error('Pattern alerts error:', error)
         return { alerts: [] }
       }
       return data
@@ -391,7 +388,7 @@ export function TodaysRacesPage() {
       fetchFromSupabaseFunction('enrich-horse-odds', {
         method: 'POST',
         body: JSON.stringify({ horses: horsesToEnrich.slice(0, 20) })
-      }).catch(err => console.warn('[enrichment] background call failed:', err))
+      }).catch(() => {})
     }
   }, [valueBets])
 

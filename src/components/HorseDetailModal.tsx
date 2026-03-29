@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { X, TrendingUp, TrendingDown, Minus, Star, Bot, Trophy, Clock, Target, Info, Heart, Check, Loader2 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RaceEntry, supabase, callSupabaseFunction } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { formatOdds } from '@/lib/odds'
 import { useAuth } from '@/contexts/AuthContext'
 import { OverviewTab, FormTab } from './HorseDetailTabs'
@@ -53,7 +54,7 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
         .single()
       
       if (error) {
-        console.error('Error fetching race data:', error)
+        logger.error('Error fetching race data:', error)
         return null
       }
       
@@ -98,16 +99,6 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
         throw new Error('Please log in to add horses to your shortlist')
       }
 
-      console.log('Adding horse to shortlist:', {
-        horse_name: horseName,
-        race_time: raceTime,
-        course: course,
-        current_odds: odds || 'N/A',
-        source: source,
-        jockey_name: jockeyName,
-        trainer_name: trainerName
-      })
-
       const data = await callSupabaseFunction('add-to-shortlist', { 
         horse_name: horseName, 
         race_time: raceTime, 
@@ -118,12 +109,10 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
         trainer_name: trainerName || null, 
         ml_info: "Selected from Today's Races" 
       })
-      
-      console.log('Successfully added to shortlist:', data)
+
       return data
     },
     onSuccess: (data, variables) => {
-      console.log(`Added ${variables.horseName} to shortlist successfully`)
       queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
       // Add a small delay to show feedback
       setTimeout(() => {
@@ -131,7 +120,7 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
       }, 1500)
     },
     onError: (error, variables) => {
-      console.error('Error adding to shortlist:', error)
+      logger.error('Error adding to shortlist:', error)
       setShortlistOperations(prev => ({ ...prev, [variables.horseName]: false }))
     }
   })
@@ -154,12 +143,11 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
       return data
     },
     onSuccess: (data, variables) => {
-      console.log(`Removed ${variables.horseName} from shortlist`)
       queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
       setShortlistOperations(prev => ({ ...prev, [variables.horseName]: false }))
     },
     onError: (error, variables) => {
-      console.error('Error removing from shortlist:', error)
+      logger.error('Error removing from shortlist:', error)
       setShortlistOperations(prev => ({ ...prev, [variables.horseName]: false }))
     }
   })
@@ -174,37 +162,27 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
 
   // Handle shortlist operations
   const handleShortlistToggle = async () => {
-    console.log('Shortlist toggle clicked for:', entry.horse_name)
-    
     if (!effectiveRaceData?.course_name) {
-      console.error('Course information not available:', effectiveRaceData)
       return
     }
 
     if (!user) {
-      console.error('User not authenticated')
       return
     }
 
     const operationKey = entry.horse_name
-    console.log('Setting loading state for:', operationKey)
     setShortlistOperations(prev => ({ ...prev, [operationKey]: true }))
     
     try {
       const isInShortlist = isHorseInShortlist(entry.horse_name, effectiveRaceData.course_name)
-      console.log('Horse is currently in shortlist:', isInShortlist)
       
       if (isInShortlist) {
-        console.log('Removing horse from shortlist...')
         await removeFromShortlistMutation.mutateAsync({ 
           horseName: entry.horse_name, 
           course: effectiveRaceData.course_name 
         })
       } else {
-        console.log('Adding horse to shortlist...')
-        // Get race time from the race data
         const raceTime = effectiveRaceData.off_time || '15:30'
-        console.log('Race time:', raceTime)
         
         await addToShortlistMutation.mutateAsync({ 
           horseName: entry.horse_name, 
@@ -217,7 +195,7 @@ export function HorseDetailModal({ entry, raceContext, patternAlerts, smartSigna
         })
       }
     } catch (error) {
-      console.error('Shortlist operation failed:', error)
+      logger.error('Shortlist operation failed:', error)
       setShortlistOperations(prev => ({ ...prev, [operationKey]: false }))
     }
   }

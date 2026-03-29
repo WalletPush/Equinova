@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ShortlistButton } from '@/components/ShortlistButton'
 import { getUKDate, getUKTime, raceTimeToMinutes, formatTime, compareRaceTimes } from '@/lib/dateUtils'
 import { formatOdds } from '@/lib/odds'
+import { logger } from '@/lib/logger'
 import {
   Brain,
   TrendingUp,
@@ -155,12 +156,9 @@ async function fetchRacePositions(
         if (!positions[r.race_id]) positions[r.race_id] = {}
         positions[r.race_id][bareHorseName(r.horse)] = Number(r.position)
       }
-      console.log(`ML Tracker: Got ${allRunners.length} results from race_runners for ${Object.keys(positions).length} races`)
       return { positions, source: 'race_runners' }
     }
-    console.log('ML Tracker: race_runners returned no data')
-  } catch (e) {
-    console.warn('ML Tracker: race_runners query failed:', e)
+  } catch {
   }
 
   return { positions, source: 'none' }
@@ -177,7 +175,6 @@ export function MLTrackerPage() {
     queryKey: ['ml-tracker-client', getUKDate()],
     queryFn: async (): Promise<MLTrackerData> => {
       const today = getUKDate()
-      console.log('ML Tracker: Fetching races for', today)
 
       // Step 1: Get all today's races (including going and is_abandoned to detect abandoned)
       const { data: allRaces, error: racesError } = await supabase
@@ -186,7 +183,7 @@ export function MLTrackerPage() {
         .eq('date', today)
 
       if (racesError) {
-        console.error('ML Tracker: Failed to fetch races:', racesError)
+        logger.error('ML Tracker: Failed to fetch races:', racesError)
         throw new Error('Failed to fetch races: ' + racesError.message)
       }
 
@@ -226,11 +223,8 @@ export function MLTrackerPage() {
         allRaces.filter(isAbandoned).map(r => r.course_name)
       )]
       const races = allRaces.filter(r => !isAbandoned(r))
-      
-      console.log(`ML Tracker: ${allRaces.length} total races, ${abandonedRaceIds.size} abandoned (${abandonedCourses.join(', ')}), ${races.length} active`)
 
       const raceIds = races.map(r => r.race_id)
-      console.log(`ML Tracker: Found ${races.length} races, fetching entries and results...`)
 
       // Step 2: Get all race entries with ML predictions
       const batchSize = 50
@@ -244,12 +238,9 @@ export function MLTrackerPage() {
         if (!entriesError && entries) allEntries = allEntries.concat(entries)
       }
 
-      console.log(`ML Tracker: Got ${allEntries.length} entries`)
-
       // Step 3: Get actual race results from any available source
       const { positions, source } = await fetchRacePositions(raceIds)
       const completedRaceIds = new Set(Object.keys(positions))
-      console.log(`ML Tracker: ${completedRaceIds.size} completed races (source: ${source})`)
 
       // Step 4: Build maps
       const raceEntriesMap: Record<string, any[]> = {}
@@ -421,7 +412,7 @@ export function MLTrackerPage() {
     try {
       await refetch()
     } catch (error) {
-      console.error('Error refreshing ML tracker:', error)
+      logger.error('Error refreshing ML tracker:', error)
     } finally {
       setIsRefreshing(false)
     }
@@ -448,8 +439,7 @@ export function MLTrackerPage() {
             return
           }
         }
-      } catch (schedulerErr) {
-        console.warn('Batch scheduler unavailable, trying individual fetch:', schedulerErr)
+      } catch {
       }
 
       // Fallback: fetch results one by one for completed races
@@ -504,9 +494,8 @@ export function MLTrackerPage() {
           } else if (data?.code === 'RESULT_NOT_AVAILABLE') {
             notReady++
           }
-        } catch (e) {
+        } catch {
           errors++
-          console.warn(`Failed to fetch results for ${race.course_name}:`, e)
         }
         // Small delay between requests
         if (i < completedRaces.length - 1) {
@@ -523,8 +512,8 @@ export function MLTrackerPage() {
       await new Promise(r => setTimeout(r, 1000))
       await refetch()
       setFetchStatus(`Complete: ${parts.join(', ')}.`)
-    } catch (err: any) {
-      console.error('Error fetching results:', err)
+    } catch (err: unknown) {
+      logger.error('Error fetching results:', err)
       setFetchStatus('Something went wrong while fetching results. Please try again.')
     } finally {
       setIsFetchingResults(false)

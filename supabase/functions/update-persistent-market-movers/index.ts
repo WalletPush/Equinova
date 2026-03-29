@@ -15,7 +15,6 @@ Deno.serve(async (req)=>{
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    console.log('Updating persistent market movers...');
     // Get all current market movement data from horse_market_movement
     const marketMovementResponse = await fetch(`${supabaseUrl}/rest/v1/horse_market_movement?select=*&order=last_updated.desc`, {
       method: 'GET',
@@ -28,7 +27,6 @@ Deno.serve(async (req)=>{
       throw new Error(`Failed to fetch market movement data: ${marketMovementResponse.status}`);
     }
     const marketMovements = await marketMovementResponse.json();
-    console.log(`Found ${marketMovements.length} market movement records`);
     // Get race details for each market movement
     const raceIds = [
       ...new Set(marketMovements.map((m)=>m.race_id))
@@ -73,7 +71,6 @@ Deno.serve(async (req)=>{
         }
       });
       if (!existingResponse.ok) {
-        console.warn(`Failed to check existing market mover for ${movement.horse_id}`);
         continue;
       }
       const existing = await existingResponse.json();
@@ -108,7 +105,6 @@ Deno.serve(async (req)=>{
           });
           if (addResponse.ok) {
             addedCount++;
-            console.log(`Added new market mover: ${movement.horse_name} (${movement.odds_movement_pct}%)`);
           }
         }
       } else {
@@ -150,7 +146,6 @@ Deno.serve(async (req)=>{
           });
           if (deactivateResponse.ok) {
             deactivatedCount++;
-            console.log(`Deactivated market mover: ${movement.horse_name} (dropped to ${movement.odds_movement_pct}%)`);
           }
         }
       }
@@ -183,7 +178,6 @@ Deno.serve(async (req)=>{
       const cleanupResult = await cleanupResponse.json();
       cleanupCount = cleanupResult.rowCount || 0;
     }
-    console.log(`Market movers update complete: ${addedCount} added, ${updatedCount} updated, ${deactivatedCount} deactivated, ${cleanupCount} cleaned up`);
     return new Response(JSON.stringify({
       success: true,
       summary: {
@@ -201,7 +195,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Error updating persistent market movers:', error);
+    console.error('update-persistent-market-movers: request failed');
     return new Response(JSON.stringify({
       success: false,
       error: error.message,

@@ -23,8 +23,6 @@ Deno.serve(async (req) => {
     const statusFilter = body.status ?? 'all';
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
-    console.log(`combo-scanner v2: date=${today}, min_bets=${minBets}, min_roi=${minRoi}`);
-
     // ═══════════════════════════════════════════════════════════════════
     //  PHASE A — Load pre-computed profitable combos from database
     // ═══════════════════════════════════════════════════════════════════
@@ -35,8 +33,6 @@ Deno.serve(async (req) => {
 
     const combosRes = await fetch(comboQuery, { headers: hdrs });
     const allCombos: DynCombo[] = combosRes.ok ? await combosRes.json() : [];
-
-    console.log(`Phase A: ${allCombos.length} profitable combos loaded from DB`);
 
     if (allCombos.length === 0) {
       return json({ data: { top_combinations: [], today_matches: [], meta: { combos_available: 0 } } });
@@ -78,7 +74,6 @@ Deno.serve(async (req) => {
     ].join(',');
 
     const entries = await fetchBatch(supabaseUrl, 'race_entries', ENTRY_COLS, raceIds, hdrs);
-    console.log(`Fetched ${todayRaces.length} races, ${entries.length} entries`);
 
     const entriesByRace = groupBy(entries, 'race_id');
     const raceTypeMap: Record<string, string> = {};
@@ -194,8 +189,6 @@ Deno.serve(async (req) => {
       return bTop - aTop;
     });
 
-    console.log(`Phase B: ${todayMatches.length} matches for today`);
-
     return json({
       data: {
         top_combinations: allCombos.slice(0, 50),
@@ -209,7 +202,7 @@ Deno.serve(async (req) => {
       },
     });
   } catch (err) {
-    console.error('combo-scanner error:', err);
+    console.error('combo-scanner failed');
     return json({ error: { message: (err as Error).message } }, 500);
   }
 });
@@ -361,10 +354,10 @@ async function fetchBatch(url: string, table: string, select: string, ids: strin
     promises.push(
       fetch(reqUrl, { headers })
         .then(async r => {
-          if (!r.ok) { console.error(`fetchBatch ${table}: ${r.status}`); return []; }
+          if (!r.ok) { console.error('fetchBatch request failed'); return []; }
           return r.json();
         })
-        .catch(err => { console.error(`fetchBatch ${table}:`, err); return []; }),
+        .catch(() => { console.error('fetchBatch failed'); return []; }),
     );
   }
   return (await Promise.all(promises)).flat();

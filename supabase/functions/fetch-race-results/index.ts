@@ -21,9 +21,9 @@ Deno.serve(async (req)=>{
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     if (!serviceRoleKey || !supabaseUrl) throw new Error("Supabase configuration missing");
-    // Upstream API creds (Basic)
-    const API_USERNAME = "B06mvaMg9rdqfPBMJLe6wU0m";
-    const API_PASSWORD = "WC4kl7E2GvweCA9uxFAywbOY";
+    const API_USERNAME = Deno.env.get("RACING_API_USERNAME");
+    const API_PASSWORD = Deno.env.get("RACING_API_PASSWORD");
+    if (!API_USERNAME || !API_PASSWORD) throw new Error("Racing API credentials missing");
     // --- Input ----------------------------------------------------------------
     const isJson = req.headers.get("content-type")?.includes("application/json");
     const body = isJson ? await req.json() : {};

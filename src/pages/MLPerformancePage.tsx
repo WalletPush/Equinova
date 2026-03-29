@@ -66,22 +66,8 @@ export function MLPerformancePage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedView, setSelectedView] = useState<'overview' | 'detailed' | 'comparison' | 'ai-insights'>('overview')
 
-  // Check admin access
-  if (!profile || profile.role !== 'admin') {
-    return (
-      <AppLayout>
-        <div className="p-4 min-h-screen">
-          <div className="max-w-md mx-auto mt-20 text-center">
-            <Brain className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-300 mb-2">Admin Access Required</h2>
-            <p className="text-red-400">Admin access required to view ML performance analysis.</p>
-          </div>
-        </div>
-      </AppLayout>
-    )
-  }
+  const isAdmin = profile?.role === 'admin'
 
-  // Fetch performance data
   const fetchPerformanceData = async () => {
     try {
       setIsLoading(true)
@@ -100,27 +86,20 @@ export function MLPerformancePage() {
 
       setPerformanceData(result.data)
     } catch (err) {
-      console.error('Error fetching performance data:', err)
       setError(err instanceof Error ? err.message : 'Failed to load performance data')
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Generate AI analysis
   const generateAIAnalysis = async (analysisType = 'comprehensive') => {
     try {
       setIsAnalyzing(true)
       setError(null)
 
-      if (!profile.openai_api_key) {
-        throw new Error('OpenAI API key not configured. Please add it in Settings.')
-      }
-
       const response = await fetchFromSupabaseFunction('ai-model-analysis', {
         method: 'POST',
         body: JSON.stringify({
-          openaiApiKey: profile.openai_api_key,
           analysisType
         })
       })
@@ -137,7 +116,6 @@ export function MLPerformancePage() {
       setAiAnalysis(result.data)
       setSelectedView('ai-insights')
     } catch (err) {
-      console.error('Error generating AI analysis:', err)
       setError(err instanceof Error ? err.message : 'Failed to generate AI analysis')
     } finally {
       setIsAnalyzing(false)
@@ -145,8 +123,24 @@ export function MLPerformancePage() {
   }
 
   useEffect(() => {
-    fetchPerformanceData()
-  }, [])
+    if (isAdmin) {
+      fetchPerformanceData()
+    }
+  }, [isAdmin])
+
+  if (!isAdmin) {
+    return (
+      <AppLayout>
+        <div className="p-4 min-h-screen">
+          <div className="max-w-md mx-auto mt-20 text-center">
+            <Brain className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-300 mb-2">Admin Access Required</h2>
+            <p className="text-red-400">Admin access required to view ML performance analysis.</p>
+          </div>
+        </div>
+      </AppLayout>
+    )
+  }
 
   const formatPercentage = (value: number) => `${(value * 100).toFixed(1)}%`
   
@@ -244,7 +238,7 @@ export function MLPerformancePage() {
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
-              onClick={() => setSelectedView(key as any)}
+              onClick={() => setSelectedView(key as typeof selectedView)}
               className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
                 selectedView === key
                   ? 'bg-yellow-500 text-gray-900 font-semibold'

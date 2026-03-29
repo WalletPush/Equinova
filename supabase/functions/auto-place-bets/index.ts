@@ -11,6 +11,17 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+  const cronSecret = Deno.env.get('CRON_SECRET');
+  if (cronSecret) {
+    const provided = req.headers.get('x-cron-secret') || '';
+    if (provided !== cronSecret) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   const KELLY_DIV = 4;
   const MAX_KELLY_FRAC = 0.05;
   const MIN_STAKE = 1.0;
@@ -33,7 +44,6 @@ Deno.serve(async (req) => {
 
   try {
     const todayUK = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-    console.log(`[signal-driven] Auto-place-bets running for ${todayUK}`);
 
     // ── 1. Load proven profitable combos ──────────────────────────────
     const combosRes = await apiFetch(
@@ -43,10 +53,8 @@ Deno.serve(async (req) => {
     const combos: DynCombo[] = await combosRes.json();
 
     if (combos.length === 0) {
-      console.log('No proven profitable combos found');
       return jsonResponse(corsHeaders, { message: 'No proven patterns available', bets_placed: 0 });
     }
-    console.log(`Loaded ${combos.length} proven patterns (ROI >= ${MIN_PATTERN_ROI}%)`);
 
     // ── 2. Fetch today's races and entries ────────────────────────────
     const racesRes = await apiFetch(
@@ -83,7 +91,6 @@ Deno.serve(async (req) => {
     const entries = await fetchBatch(supabaseUrl, 'race_entries', ENTRY_COLS, raceIds, {
       'Authorization': `Bearer ${supabaseKey}`, 'apikey': supabaseKey,
     });
-    console.log(`Fetched ${races.length} races, ${entries.length} entries`);
 
     if (entries.length === 0) {
       return jsonResponse(corsHeaders, { message: 'No entries found', bets_placed: 0 });
@@ -257,11 +264,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`[signal-driven] Placed ${newBets.length} auto-bets, bankroll now £${bankroll.toFixed(2)}`);
-    for (const b of newBets) {
-      console.log(`  ${b.horse_name} @ ${b.current_odds} | ${b.signal_combo_label} (${b.signal_roi_pct}% ROI)`);
-    }
-
     return jsonResponse(corsHeaders, {
       success: true,
       date: todayUK,
@@ -278,7 +280,7 @@ Deno.serve(async (req) => {
       })),
     });
   } catch (error) {
-    console.error('Auto-place-bets error:', error.message);
+    console.error('Auto-place-bets failed');
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -422,10 +424,10 @@ async function fetchBatch(url: string, table: string, select: string, ids: strin
     promises.push(
       fetch(reqUrl, { headers: { ...headers, 'Content-Type': 'application/json' } })
         .then(async r => {
-          if (!r.ok) { console.error(`fetchBatch ${table}: ${r.status}`); return []; }
+          if (!r.ok) return [];
           return r.json();
         })
-        .catch(err => { console.error(`fetchBatch ${table}:`, err); return []; }),
+        .catch(() => { console.error('fetchBatch failed'); return []; }),
     );
   }
   return (await Promise.all(promises)).flat();

@@ -15,7 +15,6 @@ Deno.serve(async (req)=>{
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    console.log('Fetching persistent market movers...');
     // Get today's date in UK timezone
     const today = new Date().toLocaleDateString('en-CA', {
       timeZone: 'Europe/London'
@@ -33,7 +32,6 @@ Deno.serve(async (req)=>{
       throw new Error(`Failed to fetch market movement changes: ${marketMoversResponse.status}`);
     }
     const allChanges = await marketMoversResponse.json();
-    console.log(`Found ${allChanges.length} market movement changes`);
 
     // Collect unique race_ids from the changes to fetch only relevant entries
     const changeRaceIds = [...new Set(allChanges.map((c) => c.race_id).filter(Boolean))];
@@ -121,7 +119,6 @@ Deno.serve(async (req)=>{
       }
     }
     const marketMovers = Array.from(significantMovers.values());
-    console.log(`Found ${marketMovers.length} horses with significant movement (10%+)`);
     // Group by race (course + time) to match the frontend structure
     const raceGroups = marketMovers.reduce((acc, mover)=>{
       const raceKey = `${mover.course}_${mover.off_time}`;
@@ -165,7 +162,6 @@ Deno.serve(async (req)=>{
       return (h >= 1 && h <= 9 ? h + 12 : h) * 60 + (m || 0);
     };
     const sortedRaces = Object.values(raceGroups).sort((a, b) => raceTimeMin(a.off_time) - raceTimeMin(b.off_time));
-    console.log(`Grouped into ${sortedRaces.length} races`);
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -182,7 +178,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Error fetching persistent market movers:', error);
+    console.error('get-persistent-market-movers: request failed');
     return new Response(JSON.stringify({
       success: false,
       error: error.message,

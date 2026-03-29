@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
       generated_at: new Date().toISOString(),
     });
   } catch (err: any) {
-    console.error("smart-signals error:", err?.message ?? String(err));
+    console.error("smart-signals failed");
     return json(
       { success: false, error: err?.message ?? String(err) },
       500

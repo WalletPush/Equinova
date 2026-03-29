@@ -59,11 +59,7 @@ Deno.serve(async (req) => {
           }
         } catch (_e) {}
       }
-      // Last resort: fetch any available key from profiles
-      if (!openaiApiKey) {
-        const r = await fetch(`${supabaseUrl}/rest/v1/profiles?openai_api_key=not.is.null&select=openai_api_key&limit=1`, { headers: restHeaders });
-        if (r.ok) { const a = await r.json(); if (a[0]?.openai_api_key) openaiApiKey = a[0].openai_api_key; }
-      }
+      // No cross-tenant fallback — key must come from env or the authenticated user's profile
     }
     if (!openaiApiKey) throw new Error('No OpenAI API key found. Please add it in Settings.');
 

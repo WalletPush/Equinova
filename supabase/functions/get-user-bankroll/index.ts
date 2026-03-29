@@ -37,7 +37,6 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // Get user's bankroll
     const bankrollResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}`, {
       method: 'GET',
@@ -49,7 +48,6 @@ Deno.serve(async (req)=>{
     });
     if (!bankrollResponse.ok) {
       const errorText = await bankrollResponse.text();
-      console.error('Failed to fetch bankroll:', errorText);
       throw new Error(`Failed to fetch bankroll: ${errorText}`);
     }
     const bankrollData = await bankrollResponse.json();
@@ -69,7 +67,6 @@ Deno.serve(async (req)=>{
       });
     }
     const bankroll = bankrollData[0];
-    console.log('Found bankroll:', bankroll);
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -86,7 +83,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Get user bankroll error:', error);
+    console.error('get-user-bankroll failed');
     const errorResponse = {
       success: false,
       error: {

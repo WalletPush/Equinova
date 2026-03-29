@@ -8,8 +8,8 @@
  * current_odds is updated throughout the day by update_live_odds.py.
  */
 
-const API_USER = 'B06mvaMg9rdqfPBMJLe6wU0m';
-const API_PASS = 'WC4kl7E2GvweCA9uxFAywbOY';
+const API_USER = Deno.env.get('RACING_API_USERNAME')!;
+const API_PASS = Deno.env.get('RACING_API_PASSWORD')!;
 
 function computeOddsMovement(openingOdds: number, currentOdds: number) {
   if (!openingOdds || openingOdds <= 0 || !currentOdds || currentOdds <= 0) {
@@ -64,10 +64,9 @@ async function getApiAbandonedRaceIds(
           }
         ).catch(() => {});
       }
-      console.log(`[race-data] API reports ${abandonedIds.length} abandoned — syncing to DB`);
     }
-  } catch (err) {
-    console.warn('[race-data] Racing API abandonment check failed:', err);
+  } catch {
+    console.error('race-data: abandonment API check failed');
   }
   return result;
 }
@@ -97,8 +96,6 @@ Deno.serve(async (req) => {
 
     // ─── SINGLE RACE MODE ───
     if (raceId) {
-      console.log('Fetching single race:', raceId);
-
       const raceRes = await fetch(
         `${u}/rest/v1/races?race_id=eq.${raceId}&select=*`,
         { headers: restHeaders }
@@ -159,8 +156,6 @@ Deno.serve(async (req) => {
       date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
     }
 
-    console.log('Fetching races for date:', date);
-
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
     const isToday = date === todayStr;
 
@@ -176,8 +171,6 @@ Deno.serve(async (req) => {
 
     if (!racesRes.ok) throw new Error(`Failed to fetch races: ${racesRes.status}`);
     const allRaces = await racesRes.json();
-
-    console.log(`Found ${allRaces.length} races for ${date}`);
 
     if (allRaces.length === 0) {
       return new Response(JSON.stringify({
@@ -197,8 +190,6 @@ Deno.serve(async (req) => {
       allRaces.filter((r: any) => abandonedRaceIds.has(r.race_id)).map((r: any) => r.course_name)
     )];
     const races = allRaces.filter((r: any) => !abandonedRaceIds.has(r.race_id));
-
-    console.log(`Active: ${races.length}, Abandoned: ${abandonedRaceIds.size} (courses: ${abandonedCourses.join(', ')})`);
 
     const raceIds = races.map((r: any) => r.race_id);
     const batchSize = 30;
@@ -240,8 +231,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`Races with results: ${racesWithResults.size} of ${raceIds.length}`);
-
     const completedRaceIds = raceIds.filter((id: string) => racesWithResults.has(id));
     let allRunners: any[] = [];
     for (let i = 0; i < completedRaceIds.length; i += batchSize) {
@@ -255,8 +244,6 @@ Deno.serve(async (req) => {
         allRunners = allRunners.concat(await runnersRes.json());
       }
     }
-
-    console.log(`Fetched ${allRunners.length} runners for ${completedRaceIds.length} completed races`);
 
     const runnersByRace = new Map<string, any[]>();
     for (const runner of allRunners) {
@@ -296,7 +283,7 @@ Deno.serve(async (req) => {
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
-    console.error('race-data error:', error);
+    console.error('race-data failed');
     return new Response(JSON.stringify({
       error: { code: 'RACE_DATA_ERROR', message: error.message }
     }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

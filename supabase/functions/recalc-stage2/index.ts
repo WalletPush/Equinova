@@ -69,6 +69,14 @@ Deno.serve(async (req) => {
       throw new Error("Missing Supabase config");
     }
 
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    if (cronSecret) {
+      const provided = req.headers.get("x-cron-secret") || "";
+      if (provided !== cronSecret) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+    }
+
     const body = req.method === "POST"
       ? await req.json().catch(() => ({}))
       : {};
@@ -381,7 +389,7 @@ Deno.serve(async (req) => {
       smart_money_candidates: smartAlerts.length,
     });
   } catch (error) {
-    console.error("recalc-stage2 error:", error);
+    console.error("recalc-stage2: request failed");
     return json(
       { success: false, message: (error as Error).message },
       500

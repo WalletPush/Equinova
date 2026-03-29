@@ -30,7 +30,6 @@ Deno.serve(async (req)=>{
         }
       });
     }
-    console.log(`Processing race results for race_id: ${race_id}`);
     // Step 1: Get race results and runners
     const raceResultsResponse = await fetch(`${supabaseUrl}/rest/v1/race_results?race_id=eq.${race_id}&select=*`, {
       method: 'GET',
@@ -68,7 +67,6 @@ Deno.serve(async (req)=>{
       throw new Error(`Failed to fetch race runners: ${runnersResponse.status}`);
     }
     const runners = await runnersResponse.json();
-    console.log(`Found ${runners.length} runners for race ${race_id}`);
     // Step 3: Update race_entries with results from race_runners
     let updatedEntries = 0;
     let mlModelUpdates = 0;
@@ -90,12 +88,9 @@ Deno.serve(async (req)=>{
         });
         if (updateEntryResponse.ok) {
           updatedEntries++;
-          console.log(`Updated race entry for horse ${runner.horse_id} with position ${runner.position}`);
-        } else {
-          console.warn(`Failed to update race entry for horse ${runner.horse_id}: ${updateEntryResponse.status}`);
         }
-      } catch (entryError) {
-        console.warn(`Error updating race entry for horse ${runner.horse_id}:`, entryError.message);
+      } catch {
+        console.error('update-race-results-and-bets: race entry update failed');
       }
       // Step 4: Track ML model performance using data from race_entries
       try {
@@ -161,17 +156,13 @@ Deno.serve(async (req)=>{
                 });
                 if (mlPerformanceResponse.ok) {
                   mlModelUpdates++;
-                } else {
-                  console.warn(`Failed to insert ML performance for ${model.name}: ${mlPerformanceResponse.status}`);
                 }
               }
             }
           }
-        } else {
-          console.warn(`Failed to fetch race entry data for horse ${runner.horse_id}: ${entryResponse.status}`);
         }
-      } catch (mlError) {
-        console.warn(`Error tracking ML performance for horse ${runner.horse_id}:`, mlError.message);
+      } catch {
+        console.error('update-race-results-and-bets: ML performance tracking failed');
       }
     }
     // Step 5: Update bets status
@@ -189,7 +180,6 @@ Deno.serve(async (req)=>{
       });
       if (betsResponse.ok) {
         const bets = await betsResponse.json();
-        console.log(`Found ${bets.length} pending bets for race ${race_id}`);
         for (const bet of bets){
           // Prefer matching by horse_id when available, fall back to normalized horse_name
           const betHorseId = bet.horse_id ? String(bet.horse_id).trim() : null;
@@ -204,7 +194,6 @@ Deno.serve(async (req)=>{
           }
           const newStatus = isWinner ? 'won' : 'lost';
 
-          console.log(`🔍 Bet check: id:${bet.horse_id || 'n/a'} name:"${bet.horse_name}" vs Winner id:${winnerHorse.horse_id || 'n/a'} name:"${winnerHorse.horse}" - Match: ${isWinner}`);
           // Update bet status
           const updateBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet.id}`, {
             method: 'PATCH',
@@ -220,7 +209,6 @@ Deno.serve(async (req)=>{
           });
           if (updateBetResponse.ok) {
             updatedBets++;
-            console.log(`Updated bet ${bet.id} to ${newStatus}`);
             if (isWinner) {
               try {
                 const getCurrentBankroll = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${bet.user_id}&select=current_amount`, {
@@ -249,13 +237,10 @@ Deno.serve(async (req)=>{
                   });
                   if (bankrollUpdateResponse.ok) {
                     bankrollUpdates++;
-                    console.log(`Updated bankroll for user ${bet.user_id}: £${existingAmount} + £${bet.potential_return} = £${newAmount}`);
-                  } else {
-                    console.warn(`Failed to update bankroll for user ${bet.user_id}: ${bankrollUpdateResponse.status}`);
                   }
                 }
-              } catch (bankrollError) {
-                console.warn(`Error updating bankroll for user ${bet.user_id}:`, bankrollError.message);
+              } catch {
+                console.error('update-race-results-and-bets: bankroll update failed');
               }
             }
           }
@@ -281,11 +266,9 @@ Deno.serve(async (req)=>{
         });
         if (updateSelectionResponse.ok) {
           updatedSelections++;
-        } else {
-          console.warn(`Failed to update selection for horse ${runner.horse_id}: ${updateSelectionResponse.status}`);
         }
-      } catch (selectionError) {
-        console.warn(`Error updating selection for horse ${runner.horse_id}:`, selectionError.message);
+      } catch {
+        console.error('update-race-results-and-bets: selection update failed');
       }
     }
     // Step 7: Update shortlist with results
@@ -307,18 +290,15 @@ Deno.serve(async (req)=>{
         });
         if (updateShortlistResponse.ok) {
           updatedShortlist++;
-        } else {
-          console.warn(`Failed to update shortlist for horse ${runner.horse_id}: ${updateShortlistResponse.status}`);
         }
-      } catch (shortlistError) {
-        console.warn(`Error updating shortlist for horse ${runner.horse_id}:`, shortlistError.message);
+      } catch {
+        console.error('update-race-results-and-bets: shortlist update failed');
       }
     }
     
     // Step 8: Trigger ML performance data population
     let mlPerformancePopulated = false;
     try {
-      console.log(`🔄 Triggering ML performance data population for race ${race_id}`);
       const mlPerformanceResponse = await fetch(`${supabaseUrl}/functions/v1/populate-ml-performance-data`, {
         method: 'POST',
         headers: {
@@ -333,15 +313,10 @@ Deno.serve(async (req)=>{
       });
       
       if (mlPerformanceResponse.ok) {
-        const mlPerformanceData = await mlPerformanceResponse.json();
         mlPerformancePopulated = true;
-        console.log(`✅ ML performance data populated for race ${race_id}:`, mlPerformanceData.records_inserted || 0, 'records');
-      } else {
-        const errorText = await mlPerformanceResponse.text();
-        console.warn(`⚠️ Failed to populate ML performance data for race ${race_id}:`, errorText);
       }
-    } catch (mlPerformanceError) {
-      console.error(`❌ Error triggering ML performance population for race ${race_id}:`, mlPerformanceError);
+    } catch {
+      console.error('update-race-results-and-bets: ML performance population failed');
     }
 
     return new Response(JSON.stringify({
@@ -367,12 +342,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    // Log with context for easier debugging (include race_id when available)
-    try {
-      console.error(`update-race-results-and-bets: Error processing race ${race_id}:`, error?.stack || error);
-    } catch (logErr) {
-      console.error('update-race-results-and-bets: Error processing race (unable to read race_id):', error?.stack || error);
-    }
+    console.error('update-race-results-and-bets: request failed');
     return new Response(JSON.stringify({
       success: false,
       error: error?.message || String(error),

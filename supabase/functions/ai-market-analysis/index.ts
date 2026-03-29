@@ -12,8 +12,6 @@ Deno.serve(async (req) => {
     }
 
     try {
-        console.log('AI market analysis started at:', new Date().toISOString());
-
         const { movements } = await req.json();
         
         // Get Supabase credentials
@@ -32,8 +30,6 @@ Deno.serve(async (req) => {
         };
 
         // 1. COURSE & DISTANCE SPECIALIST ANALYSIS
-        console.log('Analyzing course & distance specialists...');
-        
         // Get unique horse IDs from movements
         const horseIds = [...new Set(movements.map(m => m.horse_id))];
         
@@ -87,8 +83,8 @@ Deno.serve(async (req) => {
                                 }
                             }
                         }
-                    }).catch(error => {
-                        console.log('Error fetching race details:', error.message);
+                    }).catch(() => {
+                        console.error('Race detail fetch failed');
                     });
                 });
 
@@ -147,8 +143,6 @@ Deno.serve(async (req) => {
         }
 
         // 2. TRAINER INTENT ANALYSIS
-        console.log('Analyzing trainer intent patterns...');
-        
         // Get today's races and analyze single-runner patterns
         const todayDate = new Date().toISOString().split('T')[0];
         const todayRacesResponse = await fetch(
@@ -256,8 +250,6 @@ Deno.serve(async (req) => {
         }
 
         // 3. MARKET MOVEMENT ALERTS
-        console.log('Processing market movement alerts...');
-        
         for (const movement of movements) {
             if (Math.abs(movement.odds_movement_pct) >= 20) { // 20%+ movement threshold
                 const horseName = await getHorseName(movement.horse_id, supabaseUrl, serviceRoleKey);
@@ -279,8 +271,6 @@ Deno.serve(async (req) => {
 
         // Insert all alerts
         if (alertsToCreate.length > 0) {
-            console.log(`Creating ${alertsToCreate.length} alerts...`);
-            
             const alertsResponse = await fetch(`${supabaseUrl}/rest/v1/ai_insider_alerts`, {
                 method: 'POST',
                 headers: {
@@ -292,10 +282,7 @@ Deno.serve(async (req) => {
             });
 
             if (!alertsResponse.ok) {
-                const errorText = await alertsResponse.text();
-                console.error('Failed to create alerts:', errorText);
-            } else {
-                console.log('Alerts created successfully');
+                console.error('AI insider alerts insert failed');
             }
         }
 
@@ -308,14 +295,12 @@ Deno.serve(async (req) => {
             }
         };
 
-        console.log('AI analysis completed:', result.data);
-
         return new Response(JSON.stringify(result), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
     } catch (error) {
-        console.error('AI market analysis error:', error);
+        console.error('AI market analysis failed');
 
         const errorResponse = {
             error: {
@@ -349,8 +334,8 @@ async function getHorseName(horseId: string, supabaseUrl: string, serviceRoleKey
             const entries = await response.json();
             return entries.length > 0 ? entries[0].horse_name : 'Unknown Horse';
         }
-    } catch (error) {
-        console.log('Error fetching horse name:', error.message);
+    } catch {
+        console.error('Horse name lookup failed');
     }
     return 'Unknown Horse';
 }

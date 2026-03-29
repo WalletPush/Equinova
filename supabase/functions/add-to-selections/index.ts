@@ -15,12 +15,6 @@ Deno.serve(async (req)=>{
   try {
     // Get request data
     const { horse_name, race_time, course_name, jockey_name, trainer_name, current_odds, notes, race_id } = await req.json();
-    console.log('Add to selections request:', {
-      horse_name,
-      course_name,
-      race_time,
-      race_id
-    });
     // Validate required parameters
     if (!horse_name || !course_name || !race_time) {
       throw new Error('Missing required parameters: horse_name, course_name, and race_time are required');
@@ -49,9 +43,7 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // Look up the real race entry from race_entries table using race_id and horse_name
-    console.log('Looking up race entry with race_id:', race_id, 'and horse_name:', horse_name);
     let realHorseId = null;
     let realRaceId = null;
     if (race_id) {
@@ -66,18 +58,12 @@ Deno.serve(async (req)=>{
       });
       if (raceEntryResponse.ok) {
         const raceEntries = await raceEntryResponse.json();
-        console.log('Race entries found:', raceEntries.length, raceEntries);
         if (raceEntries.length > 0) {
           const raceEntry = raceEntries[0];
-          console.log('Found race entry:', raceEntry);
           // Use the real IDs from race_entries
           realHorseId = raceEntry.horse_id;
           realRaceId = raceEntry.race_id;
-        } else {
-          console.log('No race entry found with race_id and horse_name, trying fallback lookup');
         }
-      } else {
-        console.log('Race entry lookup failed, trying fallback');
       }
     }
     // Fallback: try to find race entry by horse_name only if we don't have real IDs
@@ -96,7 +82,6 @@ Deno.serve(async (req)=>{
           const fallbackEntry = fallbackEntries[0];
           realHorseId = fallbackEntry.horse_id;
           realRaceId = fallbackEntry.race_id;
-          console.log('Found fallback race entry:', fallbackEntry);
         }
       }
     }
@@ -114,7 +99,6 @@ Deno.serve(async (req)=>{
       existingSelections = await existingResponse.json();
     }
     if (existingSelections.length > 0) {
-      console.log('Selection already exists, updating...');
       // Update existing selection
       const updateResponse = await fetch(`${supabaseUrl}/rest/v1/selections?id=eq.${existingSelections[0].id}`, {
         method: 'PATCH',
@@ -132,11 +116,9 @@ Deno.serve(async (req)=>{
       });
       if (!updateResponse.ok) {
         const errorText = await updateResponse.text();
-        console.error('Failed to update selection:', errorText);
         throw new Error(`Failed to update selection: ${errorText}`);
       }
       const updatedSelection = await updateResponse.json();
-      console.log('Selection updated successfully:', updatedSelection[0]?.id);
       return new Response(JSON.stringify({
         success: true,
         message: 'Selection updated successfully',
@@ -163,7 +145,6 @@ Deno.serve(async (req)=>{
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    console.log('Creating new selection:', selectionData);
     const insertResponse = await fetch(`${supabaseUrl}/rest/v1/selections`, {
       method: 'POST',
       headers: {
@@ -176,11 +157,9 @@ Deno.serve(async (req)=>{
     });
     if (!insertResponse.ok) {
       const errorText = await insertResponse.text();
-      console.error('Failed to insert selection:', errorText);
       throw new Error(`Failed to add horse to selections: ${errorText}`);
     }
     const insertedSelection = await insertResponse.json();
-    console.log('Added horse to selections successfully:', insertedSelection[0]?.id);
     return new Response(JSON.stringify({
       success: true,
       message: 'Horse added to selections successfully',
@@ -192,7 +171,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Add to selections error:', error);
+    console.error('Add to selections failed');
     const errorResponse = {
       success: false,
       error: {

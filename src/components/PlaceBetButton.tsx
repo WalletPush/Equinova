@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { callSupabaseFunction } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { PoundSterling, CheckCircle, Loader2, AlertCircle, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 
@@ -58,8 +59,6 @@ export function PlaceBetButton({
   // Place bet mutation
   const placeBetMutation = useMutation({
     mutationFn: async ({ amount }: { amount: number }) => {
-      console.log('Placing bet:', { horseName, raceContext, amount })
-      
       const raceTime = raceContext.race_time || raceContext.off_time
       
       // Convert odds string to number (e.g., "5/2" to 2.5, "7/1" to 7)
@@ -92,12 +91,10 @@ export function PlaceBetButton({
       if (edgePct != null) payload.edge_pct = edgePct
       if (ensembleProba != null) payload.ensemble_proba = ensembleProba
       if (signalComboKey) payload.signal_combo_key = signalComboKey
-      
-      console.log('Bet payload:', payload)
+
       return await callSupabaseFunction('place-bet', payload)
     },
     onSuccess: () => {
-      console.log(`Bet placed on ${horseName} successfully`)
       queryClient.invalidateQueries({ queryKey: ['user-bankroll'] })
       setIsBetPlaced(true)
       setIsLoading(false)
@@ -107,7 +104,7 @@ export function PlaceBetButton({
       onSuccess?.()
     },
     onError: (error: Error) => {
-      console.error('Error placing bet:', error)
+      logger.error('Error placing bet:', error)
       const msg = String(error.message || '')
       // Map common edge-function messages to friendly UI messages
       if (msg.includes('No bankroll found') || msg.includes('Failed to get bankroll')) {
@@ -148,7 +145,7 @@ export function PlaceBetButton({
     try {
       await placeBetMutation.mutateAsync({ amount: parseFloat(betAmount) })
     } catch (error: any) {
-      console.error('Place bet operation failed:', error)
+      logger.error('Place bet operation failed:', error)
       setError(error?.message || 'Operation failed')
       setIsLoading(false)
     }

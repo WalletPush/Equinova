@@ -12,6 +12,7 @@ import {
   CheckCircle,
   ExternalLink
 } from 'lucide-react'
+import { logger } from '@/lib/logger'
 
 export function SettingsPage() {
   const { profile, updateProfile } = useAuth()
@@ -31,24 +32,21 @@ export function SettingsPage() {
     setSuccess('')
 
     try {
-      console.log('Updating profile with:', formData)
-      
       const { error } = await updateProfile({
         full_name: formData.full_name,
         openai_api_key: formData.openai_api_key
       })
       
       if (error) {
-        console.error('Profile update error:', error)
+        logger.error('Profile update error:', error)
         setError(error.message)
       } else {
-        console.log('Profile updated successfully!')
         setSuccess('Settings updated successfully!')
         // Form data will be updated automatically through profile update
         setTimeout(() => setSuccess(''), 3000)
       }
     } catch (err: any) {
-      console.error('Unexpected error:', err)
+      logger.error('Unexpected error:', err)
       setError(err.message || 'An error occurred')
     } finally {
       setLoading(false)

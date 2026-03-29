@@ -84,8 +84,8 @@ Deno.serve(async (req) => {
 
         // Test 3: External API connectivity (simplified)
         console.log('Testing external API connectivity...');
-        const API_USERNAME = 'B06mvaMg9rdqfPBMJLe6wU0m';
-        const API_PASSWORD = 'WC4kl7E2GvweCA9uxFAywbOY';
+        const API_USERNAME = Deno.env.get('RACING_API_USERNAME') ?? '';
+        const API_PASSWORD = Deno.env.get('RACING_API_PASSWORD') ?? '';
         const credentials = btoa(`${API_USERNAME}:${API_PASSWORD}`);
         
         try {

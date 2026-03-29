@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from '@/components/AppLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { callSupabaseFunction } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { formatOdds } from '@/lib/odds'
 import {
   Wallet,
@@ -131,7 +132,7 @@ export function BankrollPage() {
       setIsAddingFunds(false)
     },
     onError: (error) => {
-      console.error('Error adding bankroll amount:', error)
+      logger.error('Error adding bankroll amount:', error)
     }
   })
 
@@ -151,7 +152,7 @@ export function BankrollPage() {
       queryClient.invalidateQueries({ queryKey: ['user-bets'] })
     },
     onError: (error) => {
-      console.error('Error cancelling bet:', error)
+      logger.error('Error cancelling bet:', error)
     }
   })
 
@@ -164,7 +165,7 @@ export function BankrollPage() {
     try {
       await addBankrollMutation.mutateAsync(amount)
     } catch (error) {
-      console.error('Failed to add funds:', error)
+      logger.error('Failed to add funds:', error)
     }
   }
 
@@ -176,7 +177,7 @@ export function BankrollPage() {
     try {
       await cancelBetMutation.mutateAsync(betId)
     } catch (error) {
-      console.error('Failed to cancel bet:', error)
+      logger.error('Failed to cancel bet:', error)
     }
   }
 

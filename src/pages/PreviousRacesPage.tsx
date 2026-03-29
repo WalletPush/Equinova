@@ -5,6 +5,7 @@ import { AppLayout } from '@/components/AppLayout'
 import { ModelBadge, MODEL_DEFS } from '@/components/ModelBadge'
 import { ProfitableSignalBadges } from '@/components/ProfitableSignalBadges'
 import { supabase, Race, type RaceEntry } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { detectProfitableSignals, type ProfitableSignal } from '@/lib/confluenceScore'
 import { useLifetimeSignalStats } from '@/hooks/useLifetimeSignalStats'
 import { useMastermind, type MastermindMatch } from '@/hooks/useMastermind'
@@ -206,7 +207,7 @@ export function PreviousRacesPage() {
       // Invalidate to refetch stored analysis
       queryClient.invalidateQueries({ queryKey: ['daily-analysis', selectedDate] })
     } catch (err) {
-      console.error('Analysis failed:', err)
+      logger.error('Analysis failed:', err)
     } finally {
       setIsAnalyzing(false)
     }

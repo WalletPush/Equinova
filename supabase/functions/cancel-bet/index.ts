@@ -15,9 +15,6 @@ Deno.serve(async (req)=>{
   try {
     // Get request data
     const { bet_id } = await req.json();
-    console.log('Cancel bet request:', {
-      bet_id
-    });
     // Validate required parameters
     if (!bet_id) {
       throw new Error('Missing required parameter: bet_id');
@@ -46,7 +43,6 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // First, get the bet details to check if it's pending and get the bet amount
     const getBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet_id}&user_id=eq.${userId}&select=*`, {
       method: 'GET',
@@ -58,7 +54,6 @@ Deno.serve(async (req)=>{
     });
     if (!getBetResponse.ok) {
       const errorText = await getBetResponse.text();
-      console.error('Failed to get bet:', errorText);
       throw new Error(`Failed to get bet: ${errorText}`);
     }
     const betData = await getBetResponse.json();
@@ -66,29 +61,11 @@ Deno.serve(async (req)=>{
       throw new Error('Bet not found');
     }
     const bet = betData[0];
-    console.log('Found bet:', bet);
-    // Check if bet is pending
     if (bet.status !== 'pending') {
       throw new Error('Can only cancel pending bets');
     }
-    // Delete the bet
-    const deleteBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet_id}&user_id=eq.${userId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${serviceRoleKey}`,
-        'apikey': serviceRoleKey,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      }
-    });
-    if (!deleteBetResponse.ok) {
-      const errorText = await deleteBetResponse.text();
-      console.error('Failed to delete bet:', errorText);
-      throw new Error(`Failed to delete bet: ${errorText}`);
-    }
-    const deletedBet = await deleteBetResponse.json();
-    console.log('Successfully deleted bet:', deletedBet);
-    // Refund the bet amount to user's bankroll
+
+    // Refund bankroll FIRST (safe: if delete fails, user still has money and bet exists)
     const getBankrollResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}&select=current_amount`, {
       method: 'GET',
       headers: {
@@ -98,9 +75,7 @@ Deno.serve(async (req)=>{
       }
     });
     if (!getBankrollResponse.ok) {
-      const errorText = await getBankrollResponse.text();
-      console.error('Failed to get bankroll:', errorText);
-      throw new Error(`Failed to get bankroll: ${errorText}`);
+      throw new Error('Failed to get bankroll for refund');
     }
     const bankrollData = await getBankrollResponse.json();
     if (!bankrollData || bankrollData.length === 0) {
@@ -108,7 +83,7 @@ Deno.serve(async (req)=>{
     }
     const currentAmount = parseFloat(bankrollData[0].current_amount);
     const newAmount = currentAmount + bet.bet_amount;
-    console.log(`Bankroll refund: ${currentAmount} + ${bet.bet_amount} = ${newAmount}`);
+
     const updateBankrollResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}`, {
       method: 'PATCH',
       headers: {
@@ -123,10 +98,36 @@ Deno.serve(async (req)=>{
       })
     });
     if (!updateBankrollResponse.ok) {
-      const errorText = await updateBankrollResponse.text();
-      console.error('Failed to update bankroll:', errorText);
-      // Don't throw error here, just log it
-      console.warn('Bankroll update failed, but bet was cancelled');
+      throw new Error('Failed to refund bankroll — bet not cancelled');
+    }
+
+    // Delete the bet (bankroll already refunded)
+    const deleteBetResponse = await fetch(`${supabaseUrl}/rest/v1/bets?id=eq.${bet_id}&user_id=eq.${userId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'apikey': serviceRoleKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      }
+    });
+    if (!deleteBetResponse.ok) {
+      // Rollback: undo the refund since delete failed
+      await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({
+          current_amount: currentAmount,
+          updated_at: new Date().toISOString()
+        })
+      }).catch(() => {});
+      const errorText = await deleteBetResponse.text();
+      throw new Error(`Failed to delete bet: ${errorText}`);
     }
     return new Response(JSON.stringify({
       success: true,
@@ -139,7 +140,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Cancel bet error:', error);
+    console.error('cancel-bet failed');
     const errorResponse = {
       success: false,
       error: {

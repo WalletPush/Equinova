@@ -19,7 +19,6 @@ Deno.serve(async (req)=>{
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     if (!supabaseUrl || !supabaseKey) {
-      console.error('Missing Supabase environment variables');
       throw new Error('Server configuration error');
     }
     // Get and validate authorization header
@@ -32,8 +31,6 @@ Deno.serve(async (req)=>{
     if (!token) {
       throw new Error('Invalid authorization token format');
     }
-    // Verify user authentication
-    console.log('Verifying user authentication...');
     const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
       method: 'GET',
       headers: {
@@ -43,27 +40,21 @@ Deno.serve(async (req)=>{
       }
     });
     if (!userResponse.ok) {
-      const errorText = await userResponse.text();
-      console.error('Auth verification failed:', errorText);
+      await userResponse.text();
       throw new Error('Authentication failed - invalid token');
     }
     const userData = await userResponse.json();
     if (!userData?.id) {
-      console.error('No user ID in auth response:', userData);
       throw new Error('Invalid user data');
     }
-    console.log('User authenticated successfully:', userData.id);
     // Parse and validate request body
     let requestData;
     try {
       requestData = await req.json();
-    } catch (parseError) {
-      console.error('JSON parsing error:', parseError);
+    } catch {
       throw new Error('Invalid JSON in request body');
     }
-    console.log('🔥 Raw request data:', requestData);
     const { horse_name, race_time, course, current_odds, source = 'today_races', jockey_name, trainer_name, ml_info } = requestData;
-    console.log('🔥 Extracted fields:', { horse_name, race_time, course, current_odds, source, jockey_name, trainer_name, ml_info });
     // Validate required fields
     if (!horse_name?.trim()) {
       throw new Error('horse_name is required');
@@ -88,12 +79,6 @@ Deno.serve(async (req)=>{
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    console.log('Adding to shortlist:', {
-      user_id: insertData.user_id,
-      horse_name: insertData.horse_name,
-      course: insertData.course,
-      source: insertData.source
-    });
     // Insert into shortlist table (FIXED: using correct table name)
     const insertResponse = await fetch(`${supabaseUrl}/rest/v1/shortlist`, {
       method: 'POST',
@@ -107,7 +92,6 @@ Deno.serve(async (req)=>{
     });
     if (!insertResponse.ok) {
       const errorText = await insertResponse.text();
-      console.error('Database insert failed:', errorText);
       // Handle duplicate entry error
       if (insertResponse.status === 409) {
         // Try to update existing entry instead
@@ -129,11 +113,9 @@ Deno.serve(async (req)=>{
         });
         if (!updateResponse.ok) {
           const updateError = await updateResponse.text();
-          console.error('Update failed:', updateError);
           throw new Error(`Failed to update existing shortlist entry: ${updateError}`);
         }
         const updatedData = await updateResponse.json();
-        console.log('Shortlist entry updated successfully');
         return new Response(JSON.stringify({
           success: true,
           data: updatedData[0] || updatedData,
@@ -149,7 +131,6 @@ Deno.serve(async (req)=>{
       throw new Error(`Database operation failed: ${errorText}`);
     }
     const insertedData = await insertResponse.json();
-    console.log('Horse added to shortlist successfully');
     return new Response(JSON.stringify({
       success: true,
       data: insertedData[0] || insertedData,
@@ -162,7 +143,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('Add to shortlist error:', error.message);
+    console.error('Add to shortlist failed');
     // Determine appropriate status code
     let statusCode = 500;
     if (error.message.includes('authorization') || error.message.includes('Authentication')) {

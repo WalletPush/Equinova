@@ -1,4 +1,5 @@
-// API client utilities
+import { supabase } from './supabase'
+
 const getSupabaseConfig = () => {
   const url = import.meta.env.VITE_SUPABASE_URL
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -10,24 +11,18 @@ const getSupabaseConfig = () => {
   return { url, anonKey }
 }
 
-export const createSupabaseClient = () => {
-  const { url, anonKey } = getSupabaseConfig()
-  return {
-    url,
-    headers: {
-      'Authorization': `Bearer ${anonKey}`,
-      'apikey': anonKey,
-      'Content-Type': 'application/json',
-    }
-  }
-}
-
 export const fetchFromSupabaseFunction = async (functionName: string, options: RequestInit = {}) => {
-  const { url, headers } = createSupabaseClient()
+  const { url, anonKey } = getSupabaseConfig()
+
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token ?? anonKey
+
   const response = await fetch(`${url}/functions/v1/${functionName}`, {
     ...options,
     headers: {
-      ...headers,
+      'Authorization': `Bearer ${token}`,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
       ...options.headers
     }
   })

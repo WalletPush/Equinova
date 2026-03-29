@@ -22,6 +22,17 @@ Deno.serve(async (req) => {
             throw new Error('Supabase configuration missing');
         }
 
+        const cronSecret = Deno.env.get('CRON_SECRET');
+        if (cronSecret) {
+            const provided = req.headers.get('x-cron-secret') || '';
+            if (provided !== cronSecret) {
+                return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+                    status: 401,
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+        }
+
         // Fetch the CSV data from the deployed application
         const csvResponse = await fetch('https://ozv3vm3kiz8k.space.minimax.io/data/model_training_data.csv');
         if (!csvResponse.ok) {

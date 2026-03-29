@@ -29,8 +29,8 @@ Deno.serve(async (req) => {
     // ── Env ──
     const SUPABASE_URL = mustEnv("SUPABASE_URL");
     const SUPABASE_KEY = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    const API_USER = "B06mvaMg9rdqfPBMJLe6wU0m";
-    const API_PASS = "WC4kl7E2GvweCA9uxFAywbOY";
+    const API_USER = mustEnv("RACING_API_USERNAME");
+    const API_PASS = mustEnv("RACING_API_PASSWORD");
     const apiAuth = btoa(`${API_USER}:${API_PASS}`);
 
     const restHeaders = {
@@ -78,8 +78,7 @@ Deno.serve(async (req) => {
         });
 
         if (!apiRes.ok) {
-          const errText = await safeText(apiRes);
-          console.error(`[enrich] ${race_id}/${horse_id} API ${apiRes.status}: ${errText}`);
+          console.error("[enrich] external odds API HTTP error", apiRes.status);
           results.push({ race_id, horse_id, status: "error" });
           continue;
         }
@@ -165,7 +164,7 @@ Deno.serve(async (req) => {
             body: JSON.stringify(historyRows),
           });
           if (!histRes.ok) {
-            console.error(`[enrich] history insert failed ${histRes.status}: ${await safeText(histRes)}`);
+            console.error("[enrich] history insert failed", histRes.status);
           }
         }
 
@@ -225,7 +224,7 @@ Deno.serve(async (req) => {
             body: JSON.stringify([upsertRow]),
           });
           if (!upRes.ok) {
-            console.error(`[enrich] market movement upsert failed ${upRes.status}: ${await safeText(upRes)}`);
+            console.error("[enrich] market movement upsert failed", upRes.status);
           }
 
           // ── 3. Update race_entries.current_odds so ALL UI displays refresh ──
@@ -238,7 +237,7 @@ Deno.serve(async (req) => {
             body: JSON.stringify({ current_odds: latestDec }),
           });
           if (!reRes.ok) {
-            console.error(`[enrich] race_entries update failed ${reRes.status}: ${await safeText(reRes)}`);
+            console.error("[enrich] race_entries update failed", reRes.status);
           }
         }
 
@@ -251,8 +250,8 @@ Deno.serve(async (req) => {
           bookmakers: oddsEntries.length,
           historyPoints: historyRows.length,
         });
-      } catch (err) {
-        console.error(`[enrich] ${race_id}/${horse_id} error:`, err?.message ?? String(err));
+      } catch {
+        console.error("[enrich] horse processing failed");
         results.push({ race_id, horse_id, status: "error" });
       }
     }
@@ -269,7 +268,7 @@ Deno.serve(async (req) => {
       results,
     });
   } catch (e) {
-    console.error("enrich-horse-odds error:", e?.message ?? String(e));
+    console.error("enrich-horse-odds: unhandled error");
     return json({ success: false, error: e?.message ?? String(e) }, 500);
   }
 });
@@ -309,10 +308,3 @@ function fmt2(n: number): string {
   return v.toFixed(2);
 }
 
-async function safeText(res: Response): Promise<string> {
-  try {
-    return await res.text();
-  } catch {
-    return "";
-  }
-}

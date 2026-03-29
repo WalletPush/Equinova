@@ -12,6 +12,7 @@ import {
 } from '@/lib/normalize'
 import { formatTime } from '@/lib/dateUtils'
 import { formatOdds } from '@/lib/odds'
+import { logger } from '@/lib/logger'
 
 const getPerformanceIndicator = (value: number | null | undefined, threshold: number = 50) => {
   if (!value) return <Minus className="w-4 h-4 text-gray-500" />
@@ -117,7 +118,7 @@ export function PredictionsTab({ entry, raceId, patternAlerts, smartSignals }: T
         .select('horse_name,horse_id,ensemble_proba,benter_proba,mlp_proba,rf_proba,xgboost_proba,current_odds,predicted_winner,jockey_name,trainer_name,silk_url,number')
         .eq('race_id', raceId!)
       if (error) {
-        console.error('Error fetching race entries for analysis:', error)
+        logger.error('Error fetching race entries for analysis:', error)
         return []
       }
       return data ?? []

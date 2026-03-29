@@ -22,6 +22,14 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = mustEnv('SUPABASE_URL');
     const SUPABASE_KEY = mustEnv('SUPABASE_SERVICE_ROLE_KEY');
 
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    if (cronSecret) {
+      const provided = req.headers.get('x-cron-secret') || '';
+      if (provided !== cronSecret) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+    }
+
     const body = await req.json().catch(() => ({}));
     const event: string = body.event ?? 'smart_money';
     const payload = body.payload ?? {};

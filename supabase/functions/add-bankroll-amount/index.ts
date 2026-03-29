@@ -15,12 +15,10 @@ Deno.serve(async (req)=>{
   try {
     // Get request data
     const { amount } = await req.json();
-    console.log('Add bankroll amount request:', {
-      amount
-    });
     // Validate required parameters
-    if (!amount || amount <= 0) {
-      throw new Error('Missing required parameter: amount must be greater than 0');
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || parsedAmount > 50000) {
+      throw new Error('Amount must be between £0.01 and £50,000');
     }
     // Get Supabase credentials
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -46,7 +44,6 @@ Deno.serve(async (req)=>{
     }
     const userData = await userResponse.json();
     const userId = userData.id;
-    console.log('User authenticated:', userId);
     // Check if user has a bankroll record
     const bankrollResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}`, {
       method: 'GET',
@@ -58,7 +55,6 @@ Deno.serve(async (req)=>{
     });
     if (!bankrollResponse.ok) {
       const errorText = await bankrollResponse.text();
-      console.error('Failed to fetch bankroll:', errorText);
       throw new Error(`Failed to fetch bankroll: ${errorText}`);
     }
     const bankrollData = await bankrollResponse.json();
@@ -74,16 +70,14 @@ Deno.serve(async (req)=>{
         },
         body: JSON.stringify({
           user_id: userId,
-          current_amount: amount
+          current_amount: parsedAmount
         })
       });
       if (!createBankrollResponse.ok) {
         const errorText = await createBankrollResponse.text();
-        console.error('Failed to create bankroll:', errorText);
         throw new Error(`Failed to create bankroll: ${errorText}`);
       }
       const newBankroll = await createBankrollResponse.json();
-      console.log('Created new bankroll with amount:', newBankroll);
       return new Response(JSON.stringify({
         success: true,
         message: 'Bankroll created successfully',
@@ -97,7 +91,7 @@ Deno.serve(async (req)=>{
     } else {
       // Update existing bankroll
       const currentAmount = parseFloat(bankrollData[0].current_amount);
-      const newAmount = currentAmount + amount;
+      const newAmount = currentAmount + parsedAmount;
       const updateBankrollResponse = await fetch(`${supabaseUrl}/rest/v1/user_bankroll?user_id=eq.${userId}`, {
         method: 'PATCH',
         headers: {
@@ -113,11 +107,9 @@ Deno.serve(async (req)=>{
       });
       if (!updateBankrollResponse.ok) {
         const errorText = await updateBankrollResponse.text();
-        console.error('Failed to update bankroll:', errorText);
         throw new Error(`Failed to update bankroll: ${errorText}`);
       }
       const updatedBankroll = await updateBankrollResponse.json();
-      console.log('Updated bankroll:', updatedBankroll);
       return new Response(JSON.stringify({
         success: true,
         message: 'Bankroll updated successfully',
@@ -130,7 +122,7 @@ Deno.serve(async (req)=>{
       });
     }
   } catch (error) {
-    console.error('Add bankroll amount error:', error);
+    console.error('add-bankroll failed');
     const errorResponse = {
       success: false,
       error: {

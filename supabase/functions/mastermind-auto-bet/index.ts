@@ -115,8 +115,6 @@ Deno.serve(async (req) => {
       bandExposure[getOddsBand(o)] += amt / bankroll;
     }
 
-    console.log(`Auto-bet: ${matches.length} candidates, bankroll=GBP${bankroll.toFixed(2)}, existing=${alreadyBet.size}, dailyExposure=${(dailyExposure * 100).toFixed(1)}%`);
-
     // -- Place bets --
     const betsPlaced: PlacedBet[] = [];
     let remainingBankroll = bankroll;
@@ -129,7 +127,6 @@ Deno.serve(async (req) => {
       // Skip if already bet on this horse in this race
       const betKey = `${match.race_id}:${match.horse_id}`;
       if (alreadyBet.has(betKey)) {
-        console.log(`Skip duplicate: ${match.horse_name} (${betKey})`);
         continue;
       }
 
@@ -162,11 +159,9 @@ Deno.serve(async (req) => {
       const proposedFrac = stake / bankroll;
       const band = getOddsBand(odds);
       if (dailyExposure + proposedFrac > MAX_DAILY_EXPOSURE) {
-        console.log(`Skip ${match.horse_name}: daily exposure would exceed ${MAX_DAILY_EXPOSURE * 100}%`);
         continue;
       }
       if (bandExposure[band] + proposedFrac > MAX_ODDS_BAND_EXPOSURE) {
-        console.log(`Skip ${match.horse_name}: ${band} band exposure would exceed ${MAX_ODDS_BAND_EXPOSURE * 100}%`);
         continue;
       }
 
@@ -212,13 +207,6 @@ Deno.serve(async (req) => {
           trust_score: trustScore,
           kelly_multiplier: kellyMultiplier,
         });
-
-        console.log(
-          `Auto-bet placed: ${match.horse_name} @ ${odds} - GBP${stake} (trust=${trustScore}, mult=${kellyMultiplier}x)`
-        );
-      } else {
-        const errText = await betRes.text().catch(() => "unknown");
-        console.error(`Failed to place bet for ${match.horse_name}: ${betRes.status} ${errText}`);
       }
     }
 
@@ -233,7 +221,7 @@ Deno.serve(async (req) => {
       },
     });
   } catch (err) {
-    console.error("mastermind-auto-bet error:", err);
+    console.error("mastermind-auto-bet failed");
     return json({ error: String(err) }, 500);
   }
 });

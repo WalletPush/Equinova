@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { callSupabaseFunction } from '@/lib/supabase'
+import { logger } from '@/lib/logger'
 import { Heart, Check, Loader2, AlertCircle } from 'lucide-react'
 
 interface RaceContext {
@@ -47,19 +48,17 @@ export function ShortlistButton({
         jockey_name: jockeyName || null,
         trainer_name: trainerName || null
       }
-      
-      console.log('Adding to shortlist:', payload)
+
       return await callSupabaseFunction('add-to-shortlist', payload)
     },
     onSuccess: () => {
-      console.log(`Added ${horseName} to shortlist`)
       queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
       onToggle?.(true)
       setIsLoading(false)
       setError(null)
     },
     onError: (error: Error) => {
-      console.error('Error adding to shortlist:', error)
+      logger.error('Error adding to shortlist:', error)
       setError(error.message)
       setIsLoading(false)
     }
@@ -68,21 +67,19 @@ export function ShortlistButton({
   // Remove from shortlist mutation
   const removeFromShortlistMutation = useMutation({
     mutationFn: async () => {
-      console.log('Removing from shortlist:', { horseName, course: raceContext.course_name })
       return await callSupabaseFunction('remove-from-shortlist', {
         horse_name: horseName,
         course: raceContext.course_name
       })
     },
     onSuccess: () => {
-      console.log(`Removed ${horseName} from shortlist`)
       queryClient.invalidateQueries({ queryKey: ['userShortlist'] })
       onToggle?.(false)
       setIsLoading(false)
       setError(null)
     },
     onError: (error: Error) => {
-      console.error('Error removing from shortlist:', error)
+      logger.error('Error removing from shortlist:', error)
       setError(error.message)
       setIsLoading(false)
     }
@@ -99,7 +96,7 @@ export function ShortlistButton({
         await addToShortlistMutation.mutateAsync()
       }
     } catch (error: any) {
-      console.error('Shortlist operation failed:', error)
+      logger.error('Shortlist operation failed:', error)
       setError(error?.message || 'Operation failed')
       setIsLoading(false)
     }

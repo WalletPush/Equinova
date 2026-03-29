@@ -6,7 +6,6 @@
 // Query params:
 //   ?force=1              bypass 08:00–21:00 UK window
 //   ?batch_size=300       rows per bulk upsert (100..1000)
-//   ?log=1                light per-batch logging
 Deno.serve(async (req)=>{
   const CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -31,7 +30,6 @@ Deno.serve(async (req)=>{
     const url = new URL(req.url);
     const force = url.searchParams.get("force") === "1";
     const batchSize = clampInt(url.searchParams.get("batch_size"), 100, 1000, 300);
-    const doLog = url.searchParams.get("log") === "1";
     const now = new Date();
     const hhmm = now.toLocaleString("en-GB", {
       timeZone: "Europe/London",
@@ -53,8 +51,8 @@ Deno.serve(async (req)=>{
     const SUPABASE_URL = mustGetEnv("SUPABASE_URL");
     const SUPABASE_KEY = mustGetEnv("SUPABASE_SERVICE_ROLE_KEY");
     const BOOKMAKER_DB = "Betfair"; // EXACT case stored in DB
-    const API_USER = "B06mvaMg9rdqfPBMJLe6wU0m";
-    const API_PASS = "WC4kl7E2GvweCA9uxFAywbOY";
+    const API_USER = mustGetEnv("RACING_API_USERNAME");
+    const API_PASS = mustGetEnv("RACING_API_PASSWORD");
     const apiAuth = btoa(`${API_USER}:${API_PASS}`);
     const restHeaders = {
       Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -194,7 +192,6 @@ Deno.serve(async (req)=>{
         throw new Error(`UPSERT ${upRes.status}: ${await safeText(upRes)}`);
       }
       upserted += chunk.length;
-      if (doLog) console.log(`[MM] upserted batch ${i + 1}-${i + chunk.length}`);
     }
     // ---- 6) Sync latest prices back to race_entries.current_odds ----
     // This ensures ALL UI displays (which read from race_entries) show fresh prices.
@@ -230,7 +227,7 @@ Deno.serve(async (req)=>{
       race_entries_synced: reSynced
     });
   } catch (e) {
-    console.error("racing-market-monitor-cron error:", e?.message ?? String(e));
+    console.error("racing-market-monitor-cron: request failed");
     return json({
       success: false,
       error: {

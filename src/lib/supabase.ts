@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { logger } from '@/lib/logger'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -39,7 +40,7 @@ export async function callSupabaseFunction(functionName: string, payload: any) {
   })
   
   if (error) {
-    console.error(`Supabase function ${functionName} error:`, error)
+    logger.error(`Supabase function ${functionName} error:`, error)
     throw new Error(error.message || `Failed to call ${functionName}`)
   }
   
@@ -50,7 +51,7 @@ export async function callSupabaseFunction(functionName: string, payload: any) {
   const innerFailed = data && data.data && data.data.success === false
   if (topLevelFailed || innerFailed) {
     const errInfo = data?.error || data?.data?.error || data
-    console.error(`API response error for ${functionName}:`, errInfo)
+    logger.error(`API response error for ${functionName}:`, errInfo)
     throw new Error(typeof errInfo === 'string' ? errInfo : JSON.stringify(errInfo))
   }
 

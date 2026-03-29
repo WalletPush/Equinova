@@ -13,7 +13,6 @@ Deno.serve(async (req)=>{
     });
   }
   try {
-    console.log('AI Insider analysis started at:', new Date().toISOString());
     // Get Supabase credentials
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -22,7 +21,6 @@ Deno.serve(async (req)=>{
     }
     // 1. COURSE/DISTANCE SPECIALISTS
     // Find horses with high win percentages at specific course/distance combinations
-    console.log('Analyzing course/distance specialists...');
     const specialistsQuery = `
             SELECT 
                 re.horse_id,
@@ -62,10 +60,8 @@ Deno.serve(async (req)=>{
       const specialistsData = await specialistsResponse.json();
       specialists = Array.isArray(specialistsData) ? specialistsData : [];
     }
-    console.log(`Found ${specialists.length} course/distance specialists`);
     // 2. TRAINER INTENT ANALYSIS (Single Runners)
     // Find trainers who have only one runner at today's meetings
-    console.log('Analyzing trainer intent (single runners)...');
     const trainerIntentQuery = `
             WITH trainer_runner_counts AS (
                 SELECT 
@@ -115,10 +111,8 @@ Deno.serve(async (req)=>{
       const trainerData = await trainerIntentResponse.json();
       trainerIntents = Array.isArray(trainerData) ? trainerData : [];
     }
-    console.log(`Found ${trainerIntents.length} single runner situations`);
     // 3. MARKET MOVEMENTS
     // Get real market movement data from race_entries with horse_id and race_id
-    console.log('Generating market movement alerts...');
     const marketMovementsQuery = `
             SELECT 
                 re.horse_id,
@@ -174,7 +168,6 @@ Deno.serve(async (req)=>{
       const marketData = await marketMovementsResponse.json();
       marketMovements = Array.isArray(marketData) ? marketData : [];
     }
-    console.log(`Found ${marketMovements.length} market movements`);
     // Compile results
     const result = {
       data: {
@@ -226,11 +219,6 @@ Deno.serve(async (req)=>{
         }
       }
     };
-    console.log('AI Insider analysis completed:', {
-      specialists: specialists.length,
-      intents: trainerIntents.length,
-      alerts: marketMovements.length
-    });
     return new Response(JSON.stringify(result), {
       headers: {
         ...corsHeaders,
@@ -238,7 +226,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (error) {
-    console.error('AI Insider analysis error:', error);
+    console.error('AI Insider analysis failed');
     return new Response(JSON.stringify({
       error: {
         code: 'AI_INSIDER_ANALYSIS_FAILED',
