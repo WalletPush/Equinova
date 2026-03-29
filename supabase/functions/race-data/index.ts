@@ -8,6 +8,8 @@
  * current_odds is updated throughout the day by update_live_odds.py.
  */
 
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
+
 const API_USER = Deno.env.get('RACING_API_USERNAME')!;
 const API_PASS = Deno.env.get('RACING_API_PASSWORD')!;
 
@@ -72,13 +74,9 @@ async function getApiAbandonedRaceIds(
 }
 
 Deno.serve(async (req) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Max-Age': '86400'
-  };
-  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+  const corsHeaders = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
 
   try {
     const u = Deno.env.get('SUPABASE_URL')!;

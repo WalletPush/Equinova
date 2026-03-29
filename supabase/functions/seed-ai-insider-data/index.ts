@@ -1,15 +1,10 @@
-Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE, PATCH',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
 
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+Deno.serve(async (req) => {
+    const corsHeaders = getCorsHeaders(req)
+
+    const preflight = handleCorsPreFlight(req)
+    if (preflight) return preflight
 
     try {
         console.log('AI Insider data seeding started at:', new Date().toISOString());

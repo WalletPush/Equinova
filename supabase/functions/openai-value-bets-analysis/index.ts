@@ -2,6 +2,7 @@
 // Analyzes whether horses represent genuine value — supports multiple value bet candidates per race
 // API key is resolved server-side: env var -> user profile via JWT -> never from frontend
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
 
 const MODEL_CANDIDATES = ['gpt-4.1-mini','gpt-4.1-nano','gpt-4.1','gpt-4o-mini','gpt-4o','gpt-4-turbo','gpt-4','gpt-3.5-turbo'];
 
@@ -21,17 +22,9 @@ async function callOpenAI(apiKey: string, messages: any[], maxTokens: number) {
 }
 
 Deno.serve(async (req) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE, PATCH',
-    'Access-Control-Max-Age': '86400',
-    'Access-Control-Allow-Credentials': 'false'
-  };
-
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
-  }
+  const corsHeaders = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;

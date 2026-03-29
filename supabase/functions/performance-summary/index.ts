@@ -1,13 +1,9 @@
-Deno.serve(async (req) => {
-  const cors = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  };
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
 
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { status: 200, headers: cors });
-  }
+Deno.serve(async (req) => {
+  const cors = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
 
   const json = (body: any, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });

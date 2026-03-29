@@ -6,15 +6,12 @@
 //   ?min_agree=3            default: 3 (clamped to [1..5])
 //   ?min_prob=0             default: 0 (ignore model tops below this)
 
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
+
 Deno.serve(async (req) => {
-  const cors = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
-    "Access-Control-Max-Age": "86400",
-    "Access-Control-Allow-Credentials": "false",
-  };
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: cors });
+  const cors = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

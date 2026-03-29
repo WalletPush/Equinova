@@ -2,6 +2,7 @@
 // Calculates trainer travel distance using Haversine formula and provides AI analysis of trainer intent
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
 // Haversine formula to calculate distance between two latitude/longitude points
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371; // Earth's radius in kilometers
@@ -165,20 +166,9 @@ function estimateUKTravelDistance(trainerLocation, courseName) {
   };
 }
 serve(async (req)=>{
-  // CORS headers
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE, PATCH',
-    'Access-Control-Max-Age': '86400',
-    'Access-Control-Allow-Credentials': 'false'
-  };
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders
-    });
-  }
+  const corsHeaders = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
   try {
     // Get API keys from environment
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');

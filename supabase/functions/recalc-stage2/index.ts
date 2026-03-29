@@ -22,6 +22,8 @@
 // Called by the market-monitor cron after it updates current_odds,
 // or on-demand via POST { date?: "YYYY-MM-DD" }.
 
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
+
 interface EntryRow {
   race_id: string;
   horse_id: string;
@@ -44,17 +46,9 @@ interface RaceRow {
 }
 
 Deno.serve(async (req) => {
-  const CORS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Max-Age": "86400",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: CORS });
-  }
+  const CORS = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {

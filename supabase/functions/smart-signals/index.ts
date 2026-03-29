@@ -4,17 +4,12 @@
 //
 // Called by the frontend every 30s. Lightweight: 3 REST queries, no RPC.
 
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
+
 Deno.serve(async (req) => {
-  const CORS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
-    "Access-Control-Max-Age": "86400",
-    "Access-Control-Allow-Credentials": "false",
-  };
-  if (req.method === "OPTIONS")
-    return new Response(null, { status: 200, headers: CORS });
+  const CORS = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
 
   const json = (body: any, status = 200) =>
     new Response(JSON.stringify(body), {

@@ -6,18 +6,13 @@
 // Query params:
 //   ?force=1              bypass 08:00–21:00 UK window
 //   ?batch_size=300       rows per bulk upsert (100..1000)
+
+import { getCorsHeaders, handleCorsPreFlight } from '../_shared/cors.ts'
+
 Deno.serve(async (req)=>{
-  const CORS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
-    "Access-Control-Max-Age": "86400",
-    "Access-Control-Allow-Credentials": "false"
-  };
-  if (req.method === "OPTIONS") return new Response(null, {
-    status: 200,
-    headers: CORS
-  });
+  const CORS = getCorsHeaders(req)
+  const preflight = handleCorsPreFlight(req)
+  if (preflight) return preflight
   const json = (body, status = 200)=>new Response(JSON.stringify(body), {
       status,
       headers: {
